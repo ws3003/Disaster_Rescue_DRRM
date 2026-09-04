@@ -93,7 +93,7 @@ def run(config_path: str | Path, input_path: str | Path):
         pose_idx += 1
         state = clf.classify(pose) if pose and pose.is_ok else None
         risk = rk.assess(det_obj, pose, state) if (pose and state) else None
-        task[id(det_obj)] = {"pose": pose, "state": state, "risk": risk, "rank": None}
+        task[id(det_obj)] = {"pose": pose, "state": state, "risk": risk}
 
     evidences = [
         PersonEvidence(detection=d, state=task[id(d)]["state"], risk=task[id(d)]["risk"],
@@ -101,7 +101,6 @@ def run(config_path: str | Path, input_path: str | Path):
         for d in persons_all if d.is_person and task[id(d)]["risk"] is not None
     ]
     ranked = rank(evidences)
-    _fill_ranks(task, persons_all, ranked)
 
     # 6) 可视化
     vcfg = cfg["visualize"]
@@ -146,16 +145,6 @@ def run(config_path: str | Path, input_path: str | Path):
     _console_summary(persons_all, task, ranked)
     print(f"[saved] {out_path}")
     return out_path
-
-
-def _fill_ranks(task, persons_all, ranked):
-    """把排序回填到 task (按类别名近似, 后续可增强为按检测对象精配)。"""
-    for i, rr in enumerate(ranked):
-        for d in persons_all:
-            if d.is_person and d.class_name == rr.class_name and task[id(d)]["risk"] is not None \
-                    and task[id(d)]["rank"] is None:
-                task[id(d)]["rank"] = rr.rank
-                break
 
 
 def _build_rank_lookup(persons_all, ranked):
