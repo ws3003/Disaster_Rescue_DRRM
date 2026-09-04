@@ -1,51 +1,63 @@
 """
-Disaster_Rescue_DRRM V0.1 — 单帧端到端演示入口
-=============================================
-流程: config → 读图 → YOLO检测 → MediaPipe姿态 → 状态识别 → DRRM风险 → 救援排序 → 可视化输出
-只做编排与可视化, 不重新实现任何算法逻辑, 复用已有模块:
+Disaster_Rescue_DRRM V0.1.5 — 展示增强入口 (单帧/目录批量 + JSON 结果 + 排序面板)
+================================================================================
+流程 (保持 V0.1 pipeline, 不改变算法逻辑):
+  config → 读图 → YOLO检测 → MediaPipe姿态 → 状态识别 → DRRM风险 → 救援排序 → 可视化输出
+只做编排 / 可视化 / 结果落盘, 复用已有算法模块:
   detector.Detector / pose.PoseEstimator / state.StateClassifier /
-  risk.Riskevaluator / ranking.rank
+  risk.Riskevaluator / ranking.rank / resolve_device
+以及新增 writer (JSON 结果写出)。
 
-用法:
-  venv\\Scripts\\python.exe src/main.py --config config/config.yaml --input data/test.jpg
-输出:
-  outputs/v0.1_result.jpg   (可视化: bbox + 类别 + 33关键点骨架 + 状态 + risk + rank)
+输入支持 (V0.1.5 Task1):
+  1) 单图片:  --input data/test.jpg            (兼容 V0.1, 输出 v0.1_result.jpg)
+  2) 图片目录: --input data/demo/              (自动批量处理目录下所有图片)
+JSON 输出 (V0.1.5 Task2):
+  每张图 -> outputs/json/<图片主名>.json
+可视化增强 (V0.1.5 Task3):
+  保留 bbox + 33 关键点骨架 + 状态 + risk 叠加, 新增左上角救援排序榜 (Top-K)
 """
 
 import argparse
-import os
+from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 import cv2
-import numpy as np
 from mediapipe.python.solutions.pose import POSE_CONNECTIONS
 
-from detector import Detection, Detector, load_config
+import writer
+from detector import Detection, Detector, load_config, resolve_device
 from pose import PoseEstimator, PoseResult
 from ranking import PersonEvidence, rank
 from risk import Riskevaluator
 from state import StateClassifier
 
+# 可处理的图片扩展名
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
+
 # 显示配色 (BGR)
-COLOR_PERSON = (0, 200, 0)        # 人员 bbox 绿
+COLOR_PERSON = (0, 200, 0)        # civilian bbox 绿 (救援对象)
+COLOR_RESCUER = (255, 0, 0)       # rescuer bbox 蓝 (仅标注, 不参与排序)
 COLOR_NONPERSON = (160, 160, 160)  # 非人员(动物) bbox 灰
 COLOR_SKELETON = (220, 220, 0)     # 骨架 青
 COLOR_LOW = (0, 200, 0)            # LOW 风险 绿
 COLOR_MED = (0, 165, 255)          # MEDIUM 风险 橙
 COLOR_HIGH = (0, 0, 255)           # HIGH 风险 红
 COLOR_TEXT_BG = (40, 40, 40)
+COLOR_TEXT_WHITE = (240, 240, 240)
 
 
 def _risk_color(score: float):
-    if score >= 0.75:
+    # 与 ranking.py _priority 分级阈值保持一致 (V0.1.5 Step5: 0.75/0.50 -> 0.60/0.45)
+    if score >= 0.60:
         return COLOR_HIGH
-    if score >= 0.5:
+    if score >= 0.45:
         return COLOR_MED
     return COLOR_LOW
 
 
 def _draw_label(img, text: str, org, color, font_scale: float, thickness: int, bg: bool = True):
-    """在 bbox 上方绘带底色的文字标签。"""
+    """在指定位置绘带底色(或不带)的文字标签。"""
     if bg:
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
         x, y = int(org[0]), int(org[1])
@@ -62,130 +74,217 @@ def _draw_skeleton(img, pose: PoseResult, thickness: int):
     for a, b in POSE_CONNECTIONS:
         if a >= len(pts) or b >= len(pts):
             continue
-        cv2.line(img, pts[a], pts[b], COLOR_SKELETON, tuple([thickness])[0] if isinstance(thickness, tuple) else thickness)
+        cv2.line(img, pts[a], pts[b], COLOR_SKELETON,
+                 thickness if isinstance(thickness, int) else thickness[0])
 
 
-def run(config_path: str | Path, input_path: str | Path):
-    cfg = load_config(config_path)
-    img = cv2.imread(str(input_path))
-    if img is None:
-        raise SystemExit(f"无法读取输入图片: {input_path}")
+def _draw_ranking_panel(img, ranked, top_k: int, fs, thickness: int, pid_of: dict | None = None):
+    """在左上角绘制半透明救援排序榜 (保留 Top-K 名, 仅 civilian)。"""
+    if not ranked:
+        return
+    top = ranked[:max(0, top_k)]
+    header = f"Rescue Ranking Top-{len(top)}"
+    lines = [header]
+    for rr in top:
+        pid = pid_of[id(rr.detection)] if (pid_of and rr.detection is not None) else "-"
+        lines.append(f"#{rr.rank} id{pid} {rr.state} risk={rr.risk_score:.2f} {rr.priority}")
 
+    (tw, th), _ = cv2.getTextSize(header, cv2.FONT_HERSHEY_SIMPLEX, fs, max(1, thickness))
+    line_h = th + 12
+    panel_w = max(tw, 300) + 24
+    panel_h = line_h * len(lines) + 16
+
+    h, w = img.shape[:2]
+    x0, y0 = 12, 12
+    x1, y1 = min(w, x0 + panel_w), min(h, y0 + panel_h)
+    panel_w, panel_h = x1 - x0, y1 - y0
+
+    # 半透明深色底
+    overlay = img.copy()
+    cv2.rectangle(overlay, (x0, y0), (x1, y1), COLOR_TEXT_BG, -1)
+    img[y0:y1, x0:x1] = cv2.addWeighted(overlay[y0:y1, x0:x1], 0.6, img[y0:y1, x0:x1], 0.4, 0)
+    # 标题
+    _draw_label(img, header, (x0 + 10, y0 + line_h - 4), COLOR_TEXT_WHITE, fs, thickness, bg=False)
+    # 各排位
+    for i, rr in enumerate(top, start=1):
+        color = _risk_color(rr.risk_score)
+        _draw_label(img, lines[i], (x0 + 18, y0 + line_h * (i + 1) - 4), color, fs, thickness, bg=False)
+
+
+def collect_inputs(src: Path) -> list:
+    """根据输入路径整理待处理图片列表 (单文件 || 目录批量)。"""
+    if src.is_file():
+        return [src]
+    if src.is_dir():
+        return sorted(p for p in src.iterdir() if p.suffix.lower() in IMAGE_EXTS)
+    return []
+
+
+def process_one(cfg, img, det, pe, clf, rk, img_path, device):
+    """
+    对单张图片执行完整 pipeline, 返回 (标注图, JSON payload)。
+    适用 V0.1 原有逻辑: 检测 -> 姿态 -> 状态 -> 风险 -> 排序 -> 可视化。
+
+    V0.1.5 稳定化约束:
+      - 每名人员拥有图内唯一 id (pid, 按检测顺序), 可视化标签与 JSON 共用;
+      - rescuer 仅显示 bbox+类名, 不做姿态/状态/风险, 不进排序;
+      - rank 回填通过 RankingResult.detection 对象身份精确匹配, 不按 class_name。
+    """
     # 1) 检测 (含全部类别)
-    det = Detector(config_path)
     persons_all = det.detect_frame(img)
 
-    # 2) 姿态 (仅人员)
-    pe = PoseEstimator(config_path)
-    person_poses = pe.estimate_persons(img, persons_all)
+    # 人员唯一 id (civilian+rescuer 统一按检测顺序编号); civilian/rescuer 分流
+    person_dets = [d for d in persons_all if d.is_person]
+    pid_of = {id(d): i for i, d in enumerate(person_dets, start=1)}
+    civilians = [d for d in person_dets if d.class_name == "civilian"]
+    rescuers = [d for d in person_dets if d.class_name == "rescuer"]
 
-    # 3) 状态 + 4) 风险 + 5) 排序
-    clf = StateClassifier()
-    rk = Riskevaluator(config_path)
+    # 2) 姿态 (仅 civilian; rescuer 不进分析管线)
+    civilian_poses = pe.estimate_persons(img, civilians)
 
-    # <det_id> -> 该人员的结果 (含 pose / state / risk / rank)
+    # 3) 状态 + 4) 风险 (仅 civilian)
     task: dict = {}
-    pose_idx = 0
-    for det_obj in persons_all:
-        if not det_obj.is_person:
-            continue
-        pose = person_poses[pose_idx] if pose_idx < len(person_poses) else None
-        pose_idx += 1
+    for det_obj, pose in zip(civilians, civilian_poses):
         state = clf.classify(pose) if pose and pose.is_ok else None
         risk = rk.assess(det_obj, pose, state) if (pose and state) else None
         task[id(det_obj)] = {"pose": pose, "state": state, "risk": risk}
 
+    # 5) 排序 (仅 civilian; PersonEvidence.detection 持有源 Detection 引用)
     evidences = [
         PersonEvidence(detection=d, state=task[id(d)]["state"], risk=task[id(d)]["risk"],
                        pose_vis=task[id(d)]["pose"].visibility_mean if task[id(d)]["pose"] else 0.0)
-        for d in persons_all if d.is_person and task[id(d)]["risk"] is not None
+        for d in civilians if task[id(d)]["risk"] is not None
     ]
     ranked = rank(evidences)
+    # 身份映射: 用 Detection 对象身份精确回填, 禁止按 class_name 匹配 (同类多人会错位)
+    rank_lookup = {id(rr.detection): rr for rr in ranked}
 
-    # 6) 可视化
+    # 6) 可视化: bbox + 类别 + 骨架 + 状态 + risk, 叠加排序面板
     vcfg = cfg["visualize"]
     fs = float(vcfg["panel_font_scale"])
     thk = int(vcfg["box_thickness"])
     annot = img.copy()
-
-    rank_lookup = _build_rank_lookup(persons_all, ranked)
-
     for det_obj in persons_all:
         x1, y1, x2, y2 = [int(v) for v in det_obj.bbox]
-        color = COLOR_PERSON if det_obj.is_person else COLOR_NONPERSON
-        cv2.rectangle(annot, (x1, y1), (x2, y2), color, thk)
-
-        if det_obj.is_person:
-            t = task[id(det_obj)]
-            pose = t["pose"]
-            info = rank_lookup.get(id(det_obj))
-            label = f"{det_obj.class_name}"
-            if info is not None:
-                label += f" R#{info.rank} {info.state} {info.risk_score:.2f}"
-            else:
-                st = t["state"]
-                label += f" {st.state if st else 'n/a'}"
-            rc = _risk_color(info.risk_score) if info else COLOR_PERSON
-            # bbox + 类别
-            _draw_label(annot, f"{det_obj.class_name}", (x1, y1 - 4), color, fs, thk)
-            # 骨架
-            if vcfg["draw_skeleton"] and pose and pose.is_ok:
-                _draw_skeleton(annot, pose, thk)
-            # 状态 + risk + rank
-            if vcfg.get("draw_states", True):
-                _draw_label(annot, label.replace(f"{det_obj.class_name} ", ""), (x1, y2 + 2), rc, fs, thk - 1)
+        if not det_obj.is_person:
+            # 非人员 (动物): 灰框 + 类名, 不分析
+            cv2.rectangle(annot, (x1, y1), (x2, y2), COLOR_NONPERSON, thk)
+            _draw_label(annot, det_obj.class_name, (x1, y1 - 4), COLOR_NONPERSON, fs, thk)
+            continue
+        pid = pid_of[id(det_obj)]
+        if det_obj.class_name == "rescuer":
+            # rescuer: 蓝框 + id+类名, 无骨架/状态/risk/排名
+            cv2.rectangle(annot, (x1, y1), (x2, y2), COLOR_RESCUER, thk)
+            _draw_label(annot, f"#{pid} rescuer", (x1, y1 - 4), COLOR_RESCUER, fs, thk)
+            continue
+        # civilian (救援对象): 绿框 + id, 框下方标注 rank/状态/风险
+        cv2.rectangle(annot, (x1, y1), (x2, y2), COLOR_PERSON, thk)
+        _draw_label(annot, f"#{pid} civilian", (x1, y1 - 4), COLOR_PERSON, fs, thk)
+        t = task[id(det_obj)]
+        pose = t["pose"]
+        info = rank_lookup.get(id(det_obj))
+        if info is not None:
+            sub = f"R#{info.rank} {info.state} {info.risk_score:.2f}"
+            rc = _risk_color(info.risk_score)
         else:
-            _draw_label(annot, f"{det_obj.class_name}", (x1, y1 - 4), color, fs, thk)
+            st = t["state"]
+            sub = st.state if st else "n/a"
+            rc = COLOR_PERSON
+        if vcfg["draw_skeleton"] and pose and pose.is_ok:
+            _draw_skeleton(annot, pose, thk)
+        if vcfg.get("draw_states", True):
+            _draw_label(annot, sub, (x1, y2 + 2), rc, fs, thk - 1)
 
-    out_path = Path(cfg["output"]["dir"]) / cfg["output"]["annotated_image"]
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(out_path), annot)
+    # 排序面板 (Top-K, 仅 civilian)
+    if vcfg.get("draw_ranking_panel", True):
+        top_k = int(vcfg.get("top_k", len(ranked)))
+        _draw_ranking_panel(annot, ranked, top_k, fs, thk, pid_of)
+
+    # 7) JSON payload (仅进入排序的 civilian; id 为图内唯一 pid, 与框标签一致)
+    persons_json = []
+    for rr in ranked:
+        st = task[id(rr.detection)]["state"]
+        persons_json.append({
+            "id": pid_of[id(rr.detection)],
+            "class_name": rr.class_name,
+            "state": rr.state,
+            "confidence": round(st.confidence, 4) if st else None,
+            "risk_score": rr.risk_score,
+            "priority": rr.priority,
+            "rank": rr.rank,
+            "f1": rr.details["f1"],
+            "f6": rr.details["f6"],
+        })
+    payload = writer.make_payload(img_path, device, persons_json)
 
     # 控制台汇总
-    _console_summary(persons_all, task, ranked)
-    print(f"[saved] {out_path}")
-    return out_path
+    _console_summary(pid_of, civilians, rescuers, persons_all, task, ranked)
+    return annot, payload
 
 
-def _build_rank_lookup(persons_all, ranked):
-    """按类别名排队回填, 生成 id -> RankingResult 映射 (同类多目标时顺序稳定)。"""
-    rk_list = list(ranked)
-    lookup = {}
-    for d in persons_all:
-        if not d.is_person:
+def run(config_path: str | Path, input_path: str | Path | None = None):
+    cfg = load_config(config_path)
+
+    # 模型/推理器只构建一次 (批量时复用)
+    det = Detector(config_path)
+    pe = PoseEstimator(config_path)
+    clf = StateClassifier()
+    rk = Riskevaluator(config_path)
+    device = resolve_device(cfg)
+
+    src = Path(input_path) if input_path else Path(cfg["input"]["path"])
+    image_paths = collect_inputs(src)
+    if not image_paths:
+        raise SystemExit(f"未找到可处理的图片: {src} (单文件需为图片, 目录需含 {IMAGE_EXTS})")
+    is_single = len(image_paths) == 1
+
+    out_dir = Path(cfg["output"]["dir"])
+    json_dir = out_dir / cfg["output"]["json_dir"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = []
+    for img_path in image_paths:
+        img = cv2.imread(str(img_path))
+        if img is None:
+            print(f"[skip] 无法读取: {img_path}")
             continue
-        for rr in rk_list:
-            if rr.class_name == d.class_name:
-                lookup[id(d)] = rr
-                rk_list.remove(rr)
-                break
-    return lookup
+        print(f"\n[input] {img_path}")
+        annot, payload = process_one(cfg, img, det, pe, clf, rk, img_path, device)
+        annotated_name = cfg["output"]["annotated_image"] if is_single else f"{img_path.stem}.jpg"
+        annotated_path = out_dir / annotated_name
+        cv2.imwrite(str(annotated_path), annot)
+        json_path = writer.save_json(payload, json_dir)
+        print(f"[saved] {annotated_path}")
+        print(f"[json ] {json_path}")
+        saved.append(annotated_path)
+    return saved
 
 
-def _console_summary(persons_all, task, ranked):
-    print("=== Disaster Rescue DRRM V0.1 ===")
-    n_person = sum(1 for d in persons_all if d.is_person)
+def _console_summary(pid_of, civilians, rescuers, persons_all, task, ranked):
+    print("=== Disaster Rescue DRRM ===")
     n_non = sum(1 for d in persons_all if not d.is_person)
-    print(f"检测人数: {n_person} 人 (另有非人员目标 {n_non} 个)")
-    print("状态统计:")
-    from collections import Counter
+    print(f"检测目标: civilian {len(civilians)} 人, rescuer {len(rescuers)} 人 (不参与排序), "
+          f"非人员 {n_non} 个")
+    print("civilian 状态统计:")
     cnt = Counter(t["state"].state for t in task.values() if t["state"])
     if not cnt:
         print("  (无有效状态)")
     for k, v in cnt.most_common():
         print(f"  {k}: {v}")
-    print("救援排序:")
+    print("救援排序 (仅 civilian):")
     for rr in ranked:
-        print(f"  rank={rr.rank}  class={rr.class_name}  state={rr.state}  "
+        print(f"  id={pid_of[id(rr.detection)]}  rank={rr.rank}  state={rr.state}  "
               f"risk={rr.risk_score:.3f}  priority={rr.priority}")
+    if not ranked:
+        print("  (无有效 civilian 参与排序)")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Disaster_Rescue_DRRM V0.1 单帧端到端演示")
+    parser = argparse.ArgumentParser(description="Disaster_Rescue_DRRM V0.1.5 展示增强版")
     parser.add_argument("--config", default="config/config.yaml", help="配置文件路径")
-    parser.add_argument("--input", default="data/test.jpg", help="输入图片路径")
+    parser.add_argument("--input", default=None, help="输入图片路径 或 目录路径(批量); 默认取 config input.path")
     args = parser.parse_args()
-    run(Path(args.config), Path(args.input))
+    run(Path(args.config), Path(args.input) if args.input else None)
 
 
 if __name__ == "__main__":

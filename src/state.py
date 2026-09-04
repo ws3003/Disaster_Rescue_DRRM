@@ -16,7 +16,7 @@ State layer — instantaneous human state classification from 33 keypoints
 判定优先级 (可解释, 单帧):
   1) 躯干近水平 (body_angle 大) -> Fall/Lying 族 (异常水平姿态优先, 呼应 PRD 对 Fall 的定义)
   2) 躯干竖直且手腕明显抬高于肩膀 -> Help-Waving (挥手求救, 依据 raised-arm)
-  3) 躯干竖直: 膝角弯曲明显 -> Sitting; 否则 -> Standing
+  3) 躯干竖直: 膝角弯曲明显, 或髋-踝垂直跨距压缩(遮挡兜底) -> Sitting; 否则 -> Standing
 """
 
 import math
@@ -31,9 +31,15 @@ from pose import Landmark, PoseResult
 LYING_ANGLE = 55.0        # 躯干与竖直夹角 >= 此值 -> 水平姿态族 (Lying/Fall) [deg]
 FALL_KNEE = 150.0         # 水平 + 膝角 >= 此值 -> 肢体伸展(Fall倾向) [deg]
 FALL_BODYLEN = 2.2        # (肩-踝跨距)/(躯干长) >= 此值 -> 身体舒展拉长(Fall倾向)
-WAVE_RATIO = 0.45         # 手腕抬高于同侧肩 >= 0.45x躯干长 -> 强挥手信号
+# V0.1.5 Step3 标定 (2026-09-04, tests/calibrate_states.py):
+#   挥手样本实测 wrist_ratio=0.27, 原 0.45 无法触发; 非挥手样本该值均为 0, 无回归
+WAVE_RATIO = 0.25         # 手腕抬高于同侧肩 >= 0.25x躯干长 -> 挥手信号
 SIT_KNEE = 125.0          # 竖直 + 膝角 <= 此值 -> 坐姿 [deg]
 STAND_KNEE = 150.0        # 竖直 + 膝角 >= 此值 -> 站立 [deg], 与SIT之间为过渡带
+# 坐姿垂直压缩: 髋中点-踝中点垂直跨距 / 躯干垂直长。
+# 实测: 站立 1.30~1.39, 坐姿(轮椅) 0.91, 跌坐撑地 1.65 -> 取 1.1 分隔;
+# 用途: 膝/踝被遮挡时膝角失真 (坐姿样本膝角实测 158° 看似站立), 压缩特征仍可判坐。
+SIT_LEG_RATIO = 1.1       # 竖直 + 髋踝垂直跨距比 <= 此值 -> 坐姿 (垂直压缩)
 
 # MediaPipe 33 关键点标准索引 (已用 PoseLandmark 枚举实证)
 _NOSE = 0
@@ -56,6 +62,7 @@ class StateFeatures:
     torso_len_px: float         # 躯干视觉长度 (肩中点-髋中点)
     keypoint_visibility: float  # 决策所用关键点平均可见度 [0,1]
     leg_extended: bool          # 水平姿态下肢体是否伸展拉长 (辅助 Fall/Lying 区分)
+    vert_leg_ratio: float       # 髋-踝垂直跨距/躯干垂直长; <=SIT_LEG_RATIO 提示坐姿(身体垂直压缩)
 
 
 @dataclass
@@ -99,6 +106,11 @@ class StateClassifier:
         bodylen = _dist(sh, an_mid) / torso if (torso > 1 and sh and an_mid) else 0.0
         leg_extended = knee_avg >= FALL_KNEE and bodylen >= FALL_BODYLEN
 
+        # 坐姿垂直压缩: 髋-踝垂直跨距 / 躯干垂直长 (站立~1.3+, 坐姿大腿水平 < SIT_LEG_RATIO)。
+        # 踝点缺失时给大值(9.9) -> 不触发坐姿压缩, 保守判站立
+        torso_v = abs(sh[1] - hp[1]) if (sh and hp) else 0.0
+        vert_leg_ratio = (abs(hp[1] - an_mid[1]) / torso_v) if (torso_v > 1 and an_mid) else 9.9
+
         feats = StateFeatures(
             body_angle_deg=body_angle,
             shoulder_hip_distance_px=torso,
@@ -107,6 +119,7 @@ class StateClassifier:
             torso_len_px=torso,
             keypoint_visibility=0.0,  # 按分支覆盖
             leg_extended=leg_extended,
+            vert_leg_ratio=vert_leg_ratio,
         )
 
         # -- 分支判定 ---------------------------------------------------
@@ -123,10 +136,14 @@ class StateClassifier:
             # 2) 竖直 + 挥手
             state, margin = "Help-Waving", self._marg(wrist_ratio, WAVE_RATIO, 0.3)
             vis = self._vis(L, [_LSH, _RSH, _LWS, _RWS, _LHP, _RHP])
-        elif knee_avg <= SIT_KNEE:
-            # 3) 竖直 + 膝弯曲
-            state, margin = "Sitting", self._marg(SIT_KNEE - knee_avg, 0.0, 35.0)
-            vis = self._vis(L, [_LSH, _RSH, _LHP, _RHP, _LKN, _RKN])
+        elif knee_avg <= SIT_KNEE or vert_leg_ratio <= SIT_LEG_RATIO:
+            # 3) 竖直 + 坐姿: 膝角弯曲, 或身体垂直压缩(膝/踝遮挡致膝角失真时兜底)
+            margin = max(
+                self._marg(SIT_KNEE - knee_avg, 0.0, 35.0),
+                self._marg(SIT_LEG_RATIO - vert_leg_ratio, 0.0, 0.3),
+            )
+            state = "Sitting"
+            vis = self._vis(L, [_LSH, _RSH, _LHP, _RHP, _LKN, _RKN, _LAN, _RAN])
         else:
             # 4) 竖直 + 直立
             state, margin = "Standing", self._marg(knee_avg, STAND_KNEE, 35.0)

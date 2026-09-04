@@ -10,8 +10,14 @@ Risk layer — DRRM single-frame risk scoring (DDRRM V0.1, Step 5)
 评分框架 (PRD 6.4 R = Σ αᵢ·wᵢ·fᵢ, 单帧仅 F1 激活, F6 为统一证据调制):
   f1      = state_risk[state] 按状态置信度向中性值 0.5 回归
             -> f1 = 0.5 + (base - 0.5) * confidence    (置信度越高越贴近先验, 越低越保守收敛)
-  f6      = clip(检测置信度 × pose可见度均值, w_min, 1.0)
+  f6      = 0.5 + 0.5 × clip(检测置信度 × pose可见度均值, 0, 1)   (V0.1.5 Step5 标定软化)
   risk_score = f1 × f6       (证据越充分, 风险越可信; 遮挡/模糊帧整体降权)
+
+V0.1.5 Step5 标定 (tests/calibrate_risk.py):
+  原 f6 = clip(det_conf×pose_vis, w_min, 1) 为纯乘性腰斩, 典型证据 0.5~0.7 使
+  risk_score 全塌缩在 0.15~0.37 (全员 LOW, HIGH/MEDIUM 不可达)。
+  软化后 f6 ∈ [0.5, 1.0]: 证据差仍降权但不腰斩, 风险动态范围与 priority 分级
+  (HIGH>=0.60 / MEDIUM>=0.45, 见 ranking.py) 重新对齐。R = f1 × f6 设计不变。
 """
 
 from dataclasses import dataclass
@@ -67,10 +73,14 @@ class Riskevaluator:
         f1 = NEUTRAL_RISK + (base - NEUTRAL_RISK) * conf
         f1 = max(0.0, min(1.0, f1))
 
-        # ---- F6: 证据权重 = 检测置信度 × 姿态可见度, 下限 w_min, 上限 1 ----
+        # ---- F6: 证据权重 (V0.1.5 Step5 软化) ----
+        # 原始证据 = 检测置信度 × 姿态可见度 ∈ [0,1]; 线性软化到 [0.5, 1.0]:
+        # 证据充分时 f6→1, 证据差时最低 0.5 (而非乘性腰斩到 0.25~0.5)。
+        # w_min 作为硬下限保留 (软化后自然下界 0.5 已高于 w_min, 通常不触发)。
         det_conf = float(detection.confidence)
         pose_vis = float(getattr(pose, "visibility_mean", 0.0) or 0.0)
-        f6 = max(self.w_min, min(1.0, det_conf * pose_vis))
+        raw_ev = max(0.0, min(1.0, det_conf * pose_vis))
+        f6 = max(self.w_min, min(1.0, 0.5 + 0.5 * raw_ev))
 
         # ---- 聚合: risk_score = f1 × f6 ----
         risk_score = max(0.0, min(1.0, f1 * f6))

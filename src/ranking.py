@@ -11,7 +11,9 @@ Ranking layer — rescue priority ranking (DDRRM V0.1, Step 6)
   主键   : risk_score 降序
   次键   : 状态危险等级 Fall > Lying > Help-Waving > Sitting > Standing
   末键   : 检测confidence 降序, 再 pose visibility 降序
-priority 分级: >=0.75 HIGH | 0.5..0.75 MEDIUM | else LOW
+priority 分级: >=0.60 HIGH | 0.45..0.60 MEDIUM | else LOW
+  (V0.1.5 Step5 标定: 原 0.75/0.50 在 F6 软化后分数分布下 HIGH 不可达、
+   MEDIUM 过严; 新阈值与 risk.py 软化后的实际分布对齐, 见 tests/calibrate_risk.py)
 """
 
 from dataclasses import dataclass, field
@@ -52,12 +54,14 @@ class RankingResult:
     risk_score: float
     priority: str             # HIGH | MEDIUM | LOW
     details: dict             # 分项明细与 tie-break 依据 (可解释)
+    detection: Optional[Detection] = None  # 源 Detection 引用, 仅用于结果精确回填; 不参与排序计算
 
 
 def _priority(risk_score: float) -> str:
-    if risk_score >= 0.75:
+    # V0.1.5 Step5 标定: 0.75/0.50 -> 0.60/0.45 (仅分级阈值, 排序键不变)
+    if risk_score >= 0.60:
         return "HIGH"
-    if risk_score >= 0.5:
+    if risk_score >= 0.45:
         return "MEDIUM"
     return "LOW"
 
@@ -106,6 +110,7 @@ def rank(evidences: List[PersonEvidence]) -> List[RankingResult]:
                 risk_score=round(r.risk_score, 4),
                 priority=_priority(r.risk_score),
                 details=details,
+                detection=ev.detection,
             )
         )
     return results

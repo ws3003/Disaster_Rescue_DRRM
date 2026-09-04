@@ -18,7 +18,8 @@ input:
 
 output:
   dir: "outputs"                        # 可视化结果输出目录
-  annotated_image: "v0.1_result.jpg"    # 叠加 bbox+骨架+状态+风险+排序榜 的结果图
+  annotated_image: "v0.1_result.jpg"    # 单张输出时叠加 bbox+骨架+状态+风险+排序榜 的结果图
+  json_dir: "json"                      # JSON 结果子目录 (相对 output.dir) -> outputs/json
 
 # ---------- 设备 (CPU/GPU 可切换, 不写死 GPU) ----------
 device:
@@ -85,7 +86,8 @@ visualize:
   draw_skeleton: true       # 画 33 关键点骨架
   draw_states: true         # 画状态标签
   draw_risk: true           # 画风险分
-  draw_ranking_panel: true  # 画排序榜
+  draw_ranking_panel: true  # 画排序榜 (Top-K)
+  top_k: 5                  # 排序榜展示的人数上限
   panel_font_scale: 0.7
   box_thickness: 2
 

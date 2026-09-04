@@ -1,0 +1,31 @@
+{
+  "description": "Disaster_Rescue_DRRM V0.1.5 Step2 人工标签 — 状态识别评估基线 (2026-09-04 逐张目检建立)",
+  "states": ["Standing", "Sitting", "Lying", "Fall", "Help-Waving"],
+  "images": [
+    {
+      "file": "001_standing.jpg",
+      "gt_state": "Standing",
+      "note": "单人直立面向镜头; YOLO 对同一人重复检出两个高度重叠框 (重复检测)"
+    },
+    {
+      "file": "002_fall.jpg",
+      "gt_state": "Fall",
+      "note": "人员跌坐在地面、双手向后撑地、双腿前伸, 跌倒后撑坐姿态"
+    },
+    {
+      "file": "003_lying.jpg",
+      "gt_state": "Lying",
+      "note": "仰卧平躺于地面、四肢伸展; 高角度俯拍导致人体横向占比小"
+    },
+    {
+      "file": "004_help.jpg",
+      "gt_state": "Help-Waving",
+      "note": "单人站立、右手掌张开举至头部高度挥手求救"
+    },
+    {
+      "file": "005_multi_person.jpg",
+      "gt_state": "Sitting",
+      "note": "1 名老人坐于轮椅中被 4 名橙色制服 rescuer 抬行; rescuer 不参与状态评估"
+    }
+  ]
+}
