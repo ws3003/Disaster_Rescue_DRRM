@@ -11,10 +11,17 @@ Disaster_Rescue_DRRM V0.1.5 — 展示增强入口 (单帧/目录批量 + JSON �
 输入支持 (V0.1.5 Task1):
   1) 单图片:  --input data/test.jpg            (兼容 V0.1, 输出 v0.1_result.jpg)
   2) 图片目录: --input data/demo/              (自动批量处理目录下所有图片)
+  3) 视频文件 (V0.2-M0): --input data/xxx.mp4  (逐帧回放, 输出标注 mp4 + JSONL 特征流)
 JSON 输出 (V0.1.5 Task2):
   每张图 -> outputs/json/<图片主名>.json
+视频特征流 (V0.2-M0, PRD 4.2 三层解耦接口):
+  每个视频 -> outputs/stream/<视频主名>.jsonl (header + 逐帧感知记录)
+  标注视频 -> outputs/videos/<视频主名>_annotated.mp4
 可视化增强 (V0.1.5 Task3):
   保留 bbox + 33 关键点骨架 + 状态 + risk 叠加, 新增左上角救援排序榜 (Top-K)
+
+V0.2-M0 约束: 视频模式逐帧复用 process_one, 算法模块零改动;
+  不含 tracking / TSF / 动态 DRRM (pid 为帧内编号, 每帧重置)。
 """
 
 import argparse
@@ -31,9 +38,12 @@ from pose import PoseEstimator, PoseResult
 from ranking import PersonEvidence, rank
 from risk import Riskevaluator
 from state import StateClassifier
+from video import VideoFrameReader, VideoFrameWriter
 
 # 可处理的图片扩展名
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
+# 视频扩展名兜底 (config video.extensions 优先)
+FALLBACK_VIDEO_EXTS = (".mp4", ".avi", ".mov", ".mkv")
 
 # 显示配色 (BGR)
 COLOR_PERSON = (0, 200, 0)        # civilian bbox 绿 (救援对象)
@@ -120,15 +130,74 @@ def collect_inputs(src: Path) -> list:
     return []
 
 
-def process_one(cfg, img, det, pe, clf, rk, img_path, device):
+def _build_frame_records(cfg, img, person_dets, pid_of, task, rank_lookup):
     """
-    对单张图片执行完整 pipeline, 返回 (标注图, JSON payload)。
+    V0.2-M0: 组装逐帧感知记录 (JSONL persons 字段), 供视频特征流落盘。
+    纯读取 process_one 已有中间结果, 不参与算法/可视化。
+      - pid: 帧内编号 (M0 无跟踪器, 每帧重置; M2 追加 track_id);
+      - landmarks: 归一化坐标 [x/W, y/H, visibility], 配合流头 W/H 还原像素;
+      - rescuer / 姿态失败: pose_ok=false, 无状态/风险字段;
+      - 未进入排序的 civilian: f1/f6/risk_score/priority/rank 为 null。
+    """
+    h, w = img.shape[:2]
+    stream_lm = bool(cfg.get("video", {}).get("stream_landmarks", True))
+    records = []
+    for d in person_dets:
+        rec = {
+            "pid": pid_of[id(d)],
+            "class_name": d.class_name,
+            "bbox": [round(float(v), 2) for v in d.bbox],
+            "det_conf": round(float(d.confidence), 4),
+        }
+        t = task.get(id(d))
+        if d.class_name == "rescuer" or t is None:
+            # rescuer 不进分析管线 (与图片模式一致); 无 task 记录同理
+            rec["pose_ok"] = False
+            records.append(rec)
+            continue
+        pose, st = t["pose"], t["state"]
+        ok = bool(pose and pose.is_ok)
+        rec["pose_ok"] = ok
+        rec["pose_vis"] = round(float(pose.visibility_mean), 4) if pose else 0.0
+        if ok and stream_lm and pose.landmarks:
+            rec["landmarks"] = [
+                [round(lm.x / w, 4), round(lm.y / h, 4), round(float(lm.visibility), 2)]
+                for lm in pose.landmarks
+            ]
+        if st is not None:
+            rec["state"] = st.state
+            rec["state_conf"] = round(float(st.confidence), 4)
+        else:
+            rec["state"] = None
+            rec["state_conf"] = None
+        rr = rank_lookup.get(id(d))
+        if rr is not None:
+            rec.update({
+                "f1": rr.details["f1"],
+                "f6": rr.details["f6"],
+                "risk_score": rr.risk_score,
+                "priority": rr.priority,
+                "rank": rr.rank,
+            })
+        else:
+            rec.update({"f1": None, "f6": None, "risk_score": None,
+                        "priority": None, "rank": None})
+        records.append(rec)
+    return records
+
+
+def process_one(cfg, img, det, pe, clf, rk, img_path, device, verbose: bool = True):
+    """
+    对单张图片/单帧执行完整 pipeline, 返回 (标注图, JSON payload, frame_records)。
     适用 V0.1 原有逻辑: 检测 -> 姿态 -> 状态 -> 风险 -> 排序 -> 可视化。
 
     V0.1.5 稳定化约束:
       - 每名人员拥有图内唯一 id (pid, 按检测顺序), 可视化标签与 JSON 共用;
       - rescuer 仅显示 bbox+类名, 不做姿态/状态/风险, 不进排序;
       - rank 回填通过 RankingResult.detection 对象身份精确匹配, 不按 class_name。
+    V0.2-M0:
+      - 算法逻辑零改动, 仅追加第三个返回值 frame_records (逐帧感知记录, 见 _build_frame_records);
+      - verbose=False 时静默控制台汇总 (视频逐帧调用避免刷屏); 图片模式默认 True 不变。
     """
     # 1) 检测 (含全部类别)
     persons_all = det.detect_frame(img)
@@ -217,9 +286,13 @@ def process_one(cfg, img, det, pe, clf, rk, img_path, device):
         })
     payload = writer.make_payload(img_path, device, persons_json)
 
+    # V0.2-M0: 逐帧感知记录 (视频特征流用; 图片模式不消费)
+    frame_records = _build_frame_records(cfg, img, person_dets, pid_of, task, rank_lookup)
+
     # 控制台汇总
-    _console_summary(pid_of, civilians, rescuers, persons_all, task, ranked)
-    return annot, payload
+    if verbose:
+        _console_summary(pid_of, civilians, rescuers, persons_all, task, ranked)
+    return annot, payload, frame_records
 
 
 def run(config_path: str | Path, input_path: str | Path | None = None):
@@ -233,9 +306,17 @@ def run(config_path: str | Path, input_path: str | Path | None = None):
     device = resolve_device(cfg)
 
     src = Path(input_path) if input_path else Path(cfg["input"]["path"])
+
+    # V0.2-M0: 视频文件 -> 视频回放链路 (逐帧复用 process_one)
+    video_exts = tuple(str(e).lower()
+                       for e in cfg.get("video", {}).get("extensions", FALLBACK_VIDEO_EXTS))
+    if src.is_file() and src.suffix.lower() in video_exts:
+        return run_video(cfg, src, det, pe, clf, rk, device)
+
     image_paths = collect_inputs(src)
     if not image_paths:
-        raise SystemExit(f"未找到可处理的图片: {src} (单文件需为图片, 目录需含 {IMAGE_EXTS})")
+        raise SystemExit(f"未找到可处理的输入: {src} "
+                         f"(图片需 {IMAGE_EXTS}, 视频需 {video_exts}, 或含图片的目录)")
     is_single = len(image_paths) == 1
 
     out_dir = Path(cfg["output"]["dir"])
@@ -249,7 +330,7 @@ def run(config_path: str | Path, input_path: str | Path | None = None):
             print(f"[skip] 无法读取: {img_path}")
             continue
         print(f"\n[input] {img_path}")
-        annot, payload = process_one(cfg, img, det, pe, clf, rk, img_path, device)
+        annot, payload, _frame_records = process_one(cfg, img, det, pe, clf, rk, img_path, device)
         annotated_name = cfg["output"]["annotated_image"] if is_single else f"{img_path.stem}.jpg"
         annotated_path = out_dir / annotated_name
         cv2.imwrite(str(annotated_path), annot)
@@ -258,6 +339,51 @@ def run(config_path: str | Path, input_path: str | Path | None = None):
         print(f"[json ] {json_path}")
         saved.append(annotated_path)
     return saved
+
+
+def run_video(cfg, video_path: Path, det, pe, clf, rk, device):
+    """
+    V0.2-M0 视频回放: 逐帧复用 process_one (算法零改动), 产出:
+      1) 标注视频 <output.dir>/<video.out_video_dir>/<stem>_annotated.mp4
+      2) JSONL 特征流 <output.dir>/<video.stream_dir>/<stem>.jsonl
+    输出 fps = 源 fps / frame_stride, 保证回放时长与源视频一致。
+    """
+    vcfg = cfg.get("video", {})
+    stride = max(1, int(vcfg.get("frame_stride", 1)))
+    codec = str(vcfg.get("out_codec", "mp4v"))
+    out_dir = Path(cfg["output"]["dir"])
+    video_dir = out_dir / str(vcfg.get("out_video_dir", "videos"))
+    stream_dir = out_dir / str(vcfg.get("stream_dir", "stream"))
+
+    print(f"[video] 输入: {video_path} (frame_stride={stride})")
+    with VideoFrameReader(video_path) as reader:
+        fps, w, h = reader.fps, reader.width, reader.height
+        total = reader.total_frames
+        out_video = video_dir / f"{video_path.stem}_annotated.mp4"
+        out_stream = stream_dir / f"{video_path.stem}.jsonl"
+        writer.write_stream_header(
+            out_stream, video_path=video_path, fps=fps, width=w, height=h,
+            total_frames=total, frame_stride=stride, device=device)
+
+        n_frames = 0
+        n_person_frames = 0
+        with VideoFrameWriter(out_video, fps=fps / stride, size=(w, h), codec=codec) as vw:
+            for frame_idx, t_sec, frame in reader.iter_frames(stride):
+                # 逐帧复用图片模式同一感知链路; verbose=False 避免逐帧刷屏
+                annot, _payload, records = process_one(
+                    cfg, frame, det, pe, clf, rk, video_path, device, verbose=False)
+                vw.write(annot)
+                writer.append_frame_record(out_stream, frame_idx, t_sec, records)
+                n_frames += 1
+                if records:
+                    n_person_frames += 1
+                if n_frames % 30 == 0:
+                    print(f"[video] 已处理 {n_frames} 帧 (源帧 idx={frame_idx}/{total})")
+
+    print(f"[video] 完成: 处理 {n_frames} 帧, 含人员帧 {n_person_frames}")
+    print(f"[saved] {out_video}")
+    print(f"[stream] {out_stream}")
+    return out_video, out_stream
 
 
 def _console_summary(pid_of, civilians, rescuers, persons_all, task, ranked):
@@ -280,9 +406,10 @@ def _console_summary(pid_of, civilians, rescuers, persons_all, task, ranked):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Disaster_Rescue_DRRM V0.1.5 展示增强版")
+    parser = argparse.ArgumentParser(description="Disaster_Rescue_DRRM V0.2-M0 (图片/目录/视频回放)")
     parser.add_argument("--config", default="config/config.yaml", help="配置文件路径")
-    parser.add_argument("--input", default=None, help="输入图片路径 或 目录路径(批量); 默认取 config input.path")
+    parser.add_argument("--input", default=None,
+                        help="输入: 图片路径 / 图片目录(批量) / 视频文件(mp4/avi/mov/mkv); 默认取 config input.path")
     args = parser.parse_args()
     run(Path(args.config), Path(args.input) if args.input else None)
 

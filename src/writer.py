@@ -15,6 +15,13 @@ JSON 结构 (每张图一个文件):
     ]
   }
 输出: <output.json_dir>/<图片主名>.json  (默认 outputs/json/*.json)
+
+V0.2-M0 新增: 视频逐帧感知特征流 (JSONL, PRD 4.2 三层解耦接口)
+  - write_stream_header: 写流头 (视频元数据)
+  - append_frame_record: 追加单帧感知记录
+  输出: outputs/stream/<视频主名>.jsonl
+  JSONL 每行一个 JSON 对象: 首行 type=header, 其后每行 type=frame。
+  供 M2 跟踪器 / M3 TSF / 动态 DRRM 离线重放, 不必反复跑视频。
 """
 
 import json
@@ -48,3 +55,52 @@ def save_json(payload: dict, out_dir: str | Path) -> Path:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     return path
+
+
+# ---------------------------------------------------------------------------
+# V0.2-M0 视频逐帧感知特征流 (JSONL)
+# ---------------------------------------------------------------------------
+STREAM_VERSION = "0.2-m0"
+
+
+def write_stream_header(jsonl_path: str | Path, *, video_path, fps: float, width: int,
+                        height: int, total_frames: int, frame_stride: int,
+                        device: str, version: str = STREAM_VERSION) -> Path:
+    """
+    新建 JSONL 特征流并写入首行 header (UTF-8 无 BOM)。
+    header 存视频元数据; landmarks 归一化坐标需配合 width/height 还原像素。
+    """
+    path = Path(jsonl_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = {
+        "type": "header",
+        "version": version,
+        "video_path": str(video_path),
+        "fps": round(float(fps), 3),
+        "width": int(width),
+        "height": int(height),
+        "total_frames": int(total_frames),
+        "frame_stride": int(frame_stride),
+        "device": str(device),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(header, ensure_ascii=False) + "\n")
+    return path
+
+
+def append_frame_record(jsonl_path: str | Path, frame_idx: int, t_sec: float,
+                        persons: list) -> None:
+    """
+    向 JSONL 追加一行帧记录:
+      {"type":"frame","frame_idx":N,"t_sec":x.xxx,"persons":[...]}
+    persons 为调用方 (main.py) 按 M0 schema 组装好的 dict 列表;
+    无人帧传空列表, 保证帧索引连续。
+    """
+    record = {
+        "type": "frame",
+        "frame_idx": int(frame_idx),
+        "t_sec": round(float(t_sec), 3),
+        "persons": persons,
+    }
+    with open(jsonl_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
