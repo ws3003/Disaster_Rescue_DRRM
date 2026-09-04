@@ -1,0 +1,92 @@
+# ============================================================
+# Disaster_Rescue_DRRM — V0.1 第一阶段配置
+# 平台: Windows + RTX 4060 GPU (当前开发)；保留 CPU/GPU 切换
+# 用途: test.jpg 单帧端到端闭环 (检测→姿态→状态→风险评估→救援排序→可视化)
+# 说明: 时序因子(F2-F5)当前为单帧中性占位，接入视频源/TSF 后启用
+# ============================================================
+
+project:
+  name: "Disaster_Rescue_DRRM"
+  version: "0.1"
+
+# ---------- 输入/输出 ----------
+input:
+  # 当前仅支持单帧图片。后续扩展: 图片目录 / 视频文件 / 摄像头(0,1,...)
+  # 视频/摄像头模块留待下一阶段，此处不实现复杂逻辑
+  type: "image"          # image（V0.1 仅此模式）
+  path: "data/test.jpg"  # 单帧输入路径
+
+output:
+  dir: "outputs"                        # 可视化结果输出目录
+  annotated_image: "v0.1_result.jpg"    # 叠加 bbox+骨架+状态+风险+排序榜 的结果图
+
+# ---------- 设备 (CPU/GPU 可切换, 不写死 GPU) ----------
+device:
+  mode: "auto"    # auto=cuda if available else cpu; 也可显式指定 "cuda"/"cpu"
+  force: null     # 手动覆盖设备, 例如 "cpu" / "0"; null 表示用 auto
+
+# ---------- 检测 (YOLO) ----------
+model:
+  path: "models/disaster_best.pt"
+  conf_thres: 0.35      # 检测置信度阈值
+  iou_thres: 0.45       # NMS IoU 阈值
+  imgsz: 640            # 推理尺寸
+
+# ---------- 类别处理 ----------
+classes:
+  # 参与救援排序的人员类别 (V0.1 仅对人员推理/排序)
+  persons: [1, 5]             # civilian=1, rescuer=5
+  # 非人员类别 (检测到但只叠加标注, 不进排序榜)
+  non_persons: [0, 2, 3, 4]   # cat, cow, dog, horse
+  names: {0: "cat", 1: "civilian", 2: "cow", 3: "dog", 4: "horse", 5: "rescuer"}
+
+# ---------- 姿态 (MediaPipe) ----------
+pose:
+  # V0.1 为单帧图片推理, 必须 static_image_mode=True (默认 False 是视频跟踪模式)
+  # smooth_landmarks 是时域平滑, 对静态单帧无意义, 置 False
+  static_image_mode: true
+  smooth_landmarks: false
+  model_complexity: 1     # 0/1/2, 1=balanced
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+  # ROI 单人推理: 按检测框向外扩边比例(相对框高), 避免裁剪切断关键点
+  roi_pad_ratio: 0.2
+  # 肢体过小(框太小)时跳过姿态估计, 避免无效推理
+  min_person_box_h: 40
+
+# ---------- DRRM 动态风险推理 (V0.1 单帧版) ----------
+# 第 3 周将按 PRD 9.5 三阶段标定回填权重(“标定阶段一”: 急救先验手工初值)
+drrm:
+  # F1 状态先验危险度基线 (排序: 躺/倒 > 挥手求救 > 坐 > 立)
+  # 注: Static Lying 依赖持续时长, 单帧不判定, 视频阶段由 TSF 产出后并入
+  state_risk:
+    Lying: 0.90
+    Fall: 0.95
+    Help-Waving: 0.78
+    Sitting: 0.55
+    Standing: 0.35
+  # 因子权重 (PRD 6.4: R = Σ αᵢ·wᵢ·fᵢ)
+  alpha:
+    f1_state: 1.0        # 状态风险(单帧主因子)
+    f2_transition: 0.0   # 转移风险(时序, 单帧中性)
+    f3_duration: 0.0     # 时长风险(时序, 单帧中性)
+    f4_activity: 0.0     # 活跃度(时序, 单帧中性)
+    f5_history: 0.0      # 历史记忆(时序, 单帧中性)
+    # F6 为证据调制因子(乘性), F7 为聚合, 无需独立权重
+  # F3 时长非线性累积参数 (PRD 6.4 D(t)=1-exp(-t/τ), 视频阶段启用)
+  tau: 60.0
+  # F5 历史记忆衰减系数 (视频阶段启用)
+  lambda_history: 0.7
+  # F6 证据权重: 下标为检测置信度×关键点可见度, 下限 w_min
+  w_min: 0.25
+
+# ---------- 可视化 ----------
+visualize:
+  draw_skeleton: true       # 画 33 关键点骨架
+  draw_states: true         # 画状态标签
+  draw_risk: true           # 画风险分
+  draw_ranking_panel: true  # 画排序榜
+  panel_font_scale: 0.7
+  box_thickness: 2
+
+seed: 0
