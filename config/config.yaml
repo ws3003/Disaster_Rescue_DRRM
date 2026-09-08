@@ -11,10 +11,10 @@ project:
 
 # ---------- 输入/输出 ----------
 input:
-  # 当前仅支持单帧图片。后续扩展: 图片目录 / 视频文件 / 摄像头(0,1,...)
-  # 视频/摄像头模块留待下一阶段，此处不实现复杂逻辑
-  type: "image"          # image（V0.1 仅此模式）
-  path: "data/test.jpg"  # 单帧输入路径
+  # 输入模式: "image" (图片/目录/视频文件走 --input 路径分流) | "camera" (实时摄像头)
+  # 摄像头也可用 CLI 显式启动: python src/main.py --camera
+  type: "image"          # image=文件输入(默认); camera=Pi 5 Picamera2 实时流
+  path: "data/test.jpg"  # 文件输入路径 (单图/目录/视频)
 
 output:
   dir: "outputs"                        # 可视化结果输出目录
@@ -30,6 +30,19 @@ video:
   stream_dir: "stream"     # JSONL 特征流子目录 (相对 output.dir) -> outputs/stream
   out_codec: "mp4v"        # 输出视频编码
   stream_landmarks: true   # 特征流是否写入 33 关键点 (归一化坐标; M2/M3 离线重放需要)
+
+# ---------- 实时摄像头 (Demo V0.1, Raspberry Pi 5 + Picamera2) ----------
+# 启动: python src/main.py --camera (或置 input.type: "camera")
+# 仅 Pi 5 + CSI 摄像头(Picamera2)支持; 每帧独立推理, 不含 tracking/TSF/动态DRRM
+camera:
+  width: 1280           # 采集分辨率 (720p 为 Pi Camera 全系列兼容安全值)
+  height: 720
+  fps: 15               # 采集帧率上限; 实际吞吐以推理速度为准 (背压取帧, 不积压)
+  frame_stride: 1       # 每 N 个采集帧处理 1 帧 (1=每帧都处理)
+  show_window: true     # cv2 实时标注窗口 (需桌面环境; headless 部署置 false)
+  quit_key: "q"         # 窗口模式下按此键优雅退出
+  record_video: false   # 同时录制标注 mp4 到 outputs/videos/ (默认关, 省 Pi 编码开销)
+  write_stream: true    # 逐帧 JSONL 特征流落盘 outputs/stream/camera_<时间戳>.jsonl
 
 # ---------- 设备 (CPU/GPU 可切换, 不写死 GPU) ----------
 device:

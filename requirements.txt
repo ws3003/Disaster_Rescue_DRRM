@@ -1,3 +1,11 @@
+# ---------------------------------------------------------------------------
+# Windows 开发机依赖 (当前 venv 锁定版本; torch 为 CUDA 版)。
+# Raspberry Pi 5 (ARM64, Python 3.11) 部署说明:
+#   - picamera2 走系统包, 不列入 pip 依赖: sudo apt install python3-picamera2
+#   - torch/torchvision 装 CPU 版 (无 CUDA): pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   - 其余依赖 (ultralytics/mediapipe/opencv-python/numpy/PyYAML) pip 装即可
+# ---------------------------------------------------------------------------
+
 absl-py==2.5.0
 attrs==26.1.0
 certifi==2026.7.22

@@ -12,6 +12,8 @@ Disaster_Rescue_DRRM V0.1.5 — 展示增强入口 (单帧/目录批量 + JSON �
   1) 单图片:  --input data/test.jpg            (兼容 V0.1, 输出 v0.1_result.jpg)
   2) 图片目录: --input data/demo/              (自动批量处理目录下所有图片)
   3) 视频文件 (V0.2-M0): --input data/xxx.mp4  (逐帧回放, 输出标注 mp4 + JSONL 特征流)
+  4) 实时摄像头 (Demo V0.1): --camera          (Pi 5 + Picamera2, 实时窗口 + JSONL 特征流;
+                                               或 config input.type: "camera")
 JSON 输出 (V0.1.5 Task2):
   每张图 -> outputs/json/<图片主名>.json
 视频特征流 (V0.2-M0, PRD 4.2 三层解耦接口):
@@ -25,6 +27,7 @@ V0.2-M0 约束: 视频模式逐帧复用 process_one, 算法模块零改动;
 """
 
 import argparse
+import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +36,7 @@ import cv2
 from mediapipe.python.solutions.pose import POSE_CONNECTIONS
 
 import writer
+from camera import CameraFrameReader
 from detector import Detection, Detector, load_config, resolve_device
 from pose import PoseEstimator, PoseResult
 from ranking import PersonEvidence, rank
@@ -295,7 +299,8 @@ def process_one(cfg, img, det, pe, clf, rk, img_path, device, verbose: bool = Tr
     return annot, payload, frame_records
 
 
-def run(config_path: str | Path, input_path: str | Path | None = None):
+def run(config_path: str | Path, input_path: str | Path | None = None,
+        use_camera: bool = False):
     cfg = load_config(config_path)
 
     # 模型/推理器只构建一次 (批量时复用)
@@ -304,6 +309,10 @@ def run(config_path: str | Path, input_path: str | Path | None = None):
     clf = StateClassifier()
     rk = Riskevaluator(config_path)
     device = resolve_device(cfg)
+
+    # Demo V0.1: 实时摄像头模式 (Raspberry Pi 5 + Picamera2), 优先于文件输入
+    if use_camera or str(cfg.get("input", {}).get("type", "")).lower() == "camera":
+        return run_camera(cfg, det, pe, clf, rk, device)
 
     src = Path(input_path) if input_path else Path(cfg["input"]["path"])
 
@@ -386,6 +395,106 @@ def run_video(cfg, video_path: Path, det, pe, clf, rk, device):
     return out_video, out_stream
 
 
+def run_camera(cfg, det, pe, clf, rk, device, reader=None):
+    """
+    Demo V0.1 实时摄像头模式 (Raspberry Pi 5 + Picamera2):
+    逐帧复用 process_one (算法零改动), 与 run_video 同构, 区别仅在帧源:
+      - reader=None: 构造 CameraFrameReader (Picamera2, 仅 Pi 可用);
+      - reader 可注入: 任何满足 VideoFrameReader 鸭子接口的对象
+        (fps/width/height + iter_frames), 供 Windows 侧测试用视频文件冒充。
+    产物:
+      1) 实时标注窗口 (camera.show_window, q 键退出; headless 置 false)
+      2) JSONL 特征流 outputs/stream/camera_<时间戳>.jsonl (camera.write_stream)
+      3) 可选标注视频 outputs/videos/camera_<时间戳>_annotated.mp4 (camera.record_video)
+    退出: q 键 / Ctrl+C 均优雅释放资源; 结束打印实测 FPS。
+    """
+    ccfg = cfg.get("camera", {}) or {}
+    stride = max(1, int(ccfg.get("frame_stride", 1)))
+    show_window = bool(ccfg.get("show_window", True))
+    quit_key = ord(str(ccfg.get("quit_key", "q")).lower().strip()[:1])
+    record_video = bool(ccfg.get("record_video", False))
+    write_stream = bool(ccfg.get("write_stream", True))
+    codec = str(cfg.get("video", {}).get("out_codec", "mp4v"))
+
+    out_dir = Path(cfg["output"]["dir"])
+    video_dir = out_dir / str(cfg.get("video", {}).get("out_video_dir", "videos"))
+    stream_dir = out_dir / str(cfg.get("video", {}).get("stream_dir", "stream"))
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_stream = stream_dir / f"camera_{stamp}.jsonl" if write_stream else None
+    out_video = video_dir / f"camera_{stamp}_annotated.mp4" if record_video else None
+
+    own_reader = reader is None
+    if own_reader:
+        try:
+            reader = CameraFrameReader(cfg)
+        except RuntimeError as e:
+            # picamera2 缺失 / 摄像头硬件不可用: 友好退出, 不打 traceback
+            raise SystemExit(f"[camera] 启动失败: {e}") from e
+    fps, w, h = reader.fps, reader.width, reader.height
+
+    print(f"[camera] 实时摄像头模式启动 ({w}x{h} @ {fps:.0f}fps 上限, stride={stride}, "
+          f"device={device})")
+    print(f"[camera] 窗口={show_window}, 录制={record_video}, 特征流={write_stream}")
+    if show_window:
+        print("[camera] 按 q 键退出; 无窗口环境用 Ctrl+C 退出")
+    if out_stream is not None:
+        # 实时流总帧数未知, total_frames=0; video_path 标记帧源
+        writer.write_stream_header(
+            out_stream, video_path="picamera2", fps=fps, width=w, height=h,
+            total_frames=0, frame_stride=stride, device=device)
+
+    n_frames = 0
+    n_person_frames = 0
+    vw = None
+    t_start = time.monotonic()
+    interrupted = False
+    try:
+        if out_video is not None:
+            vw = VideoFrameWriter(out_video, fps=max(1.0, fps / stride),
+                                  size=(w, h), codec=codec)
+        for frame_idx, t_sec, frame in reader.iter_frames(stride):
+            # 逐帧复用图片/视频模式同一感知链路; img_path 仅为 payload 文本标记
+            annot, _payload, records = process_one(
+                cfg, frame, det, pe, clf, rk, "picamera2", device, verbose=False)
+            if vw is not None:
+                vw.write(annot)
+            if out_stream is not None:
+                writer.append_frame_record(out_stream, frame_idx, t_sec, records)
+            n_frames += 1
+            if records:
+                n_person_frames += 1
+            if show_window:
+                cv2.imshow("Disaster Rescue DRRM", annot)
+                if (cv2.waitKey(1) & 0xFF) == quit_key:
+                    print("\n[camera] 收到退出键 q, 停止...")
+                    break
+            if n_frames % 30 == 0:
+                el = time.monotonic() - t_start
+                print(f"[camera] 已处理 {n_frames} 帧, 实测 {n_frames / el:.1f} FPS")
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\n[camera] 收到 Ctrl+C, 停止...")
+    finally:
+        if vw is not None:
+            vw.release()
+        if own_reader:
+            reader.release()
+        if show_window:
+            cv2.destroyAllWindows()
+
+    elapsed = time.monotonic() - t_start
+    meas_fps = n_frames / elapsed if elapsed > 0 else 0.0
+    print(f"[camera] 结束: 处理 {n_frames} 帧, 含人员帧 {n_person_frames}, "
+          f"实测 {meas_fps:.2f} FPS ({elapsed:.1f}s)"
+          + (" [Ctrl+C]" if interrupted else ""))
+    if out_stream is not None:
+        print(f"[stream] {out_stream}")
+    if out_video is not None:
+        print(f"[saved] {out_video}")
+    return out_stream, out_video
+
+
 def _console_summary(pid_of, civilians, rescuers, persons_all, task, ranked):
     print("=== Disaster Rescue DRRM ===")
     n_non = sum(1 for d in persons_all if not d.is_person)
@@ -406,12 +515,17 @@ def _console_summary(pid_of, civilians, rescuers, persons_all, task, ranked):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Disaster_Rescue_DRRM V0.2-M0 (图片/目录/视频回放)")
+    parser = argparse.ArgumentParser(
+        description="Disaster_Rescue_DRRM Demo V0.1 (图片/目录/视频回放/实时摄像头)")
     parser.add_argument("--config", default="config/config.yaml", help="配置文件路径")
     parser.add_argument("--input", default=None,
                         help="输入: 图片路径 / 图片目录(批量) / 视频文件(mp4/avi/mov/mkv); 默认取 config input.path")
+    parser.add_argument("--camera", action="store_true",
+                        help="实时摄像头模式 (Raspberry Pi 5 + Picamera2; 开发机不可用)")
     args = parser.parse_args()
-    run(Path(args.config), Path(args.input) if args.input else None)
+    run(Path(args.config),
+        Path(args.input) if args.input else None,
+        use_camera=args.camera)
 
 
 if __name__ == "__main__":
