@@ -8,6 +8,14 @@ venv/
 # model weights
 *.pt
 *.pth
+*.task
+
+# model & test directories
+models/
+test-Mediapipe/
+
+# temp / archive
+archive/
 
 # outputs
 outputs/
