@@ -1,0 +1,63 @@
+{
+  "event_summary": "三层教学楼因地震发生结构塌陷, 被困 5 名人员中 1 人 HIGH 风险昏迷倒地, 另有西北角火情与二次垮塌隐患, 需优先救出倒地人员并同步扑灭火源、疏散危险区域人员。",
+  "risk_explanations": [
+    {
+      "pid": 3,
+      "reason": "长时间 Lying 状态且高度昏迷, 被瓦砾部分掩埋, 有窒息与内脏损伤风险, 判定 HIGH"
+    },
+    {
+      "pid": 1,
+      "reason": "Help-Waving 状态呼救且位于火源 3m 内, 受烟熏威胁, 判定 HIGH"
+    },
+    {
+      "pid": 2,
+      "reason": "教师被困于垮塌区域但姿态稳定, 属于 MEDIUM 风险, 可稍缓处置"
+    },
+    {
+      "pid": 4,
+      "reason": "Sitting 状态且距离危险点较远, 风险可控, 判定 LOW"
+    },
+    {
+      "pid": 5,
+      "reason": "Standing 状态已自行撤离至安全区, 无需紧急救援, 判定 LOW"
+    }
+  ],
+  "rescue_suggestions": [
+    "优先对 id=3 的昏迷人员实施破拆与医疗急救, 防止二次塌陷伤及被困人员",
+    "立即通知消防部门扑灭西北角火情, 避免烟熏和火势蔓延",
+    "组织疏散 id=1 高危呼救人员, 并堵漏地下水管、断电防触电",
+    "加强对三楼裂缝的监测, 二次垮塌风险高, 救援队员需佩戴安全装备"
+  ],
+  "task_proposals": [
+    {
+      "action": "alert",
+      "target": 3,
+      "payload": {
+        "severity": "critical",
+        "state": "Lying",
+        "priority": "HIGH",
+        "message": "检测到昏迷倒地人员, 需立即破拆救援"
+      }
+    },
+    {
+      "action": "notify",
+      "target": 1,
+      "payload": {
+        "severity": "high",
+        "state": "Help-Waving",
+        "priority": "HIGH",
+        "message": "呼救人员位于火源附近, 优先疏散"
+      }
+    },
+    {
+      "action": "log",
+      "target": null,
+      "payload": {
+        "scene": "structural_collapse",
+        "severity": "critical",
+        "n_buried": 5,
+        "fire_risk": true
+      }
+    }
+  ]
+}

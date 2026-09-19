@@ -1,0 +1,23 @@
+{
+  "scene_type": "structural_collapse",
+  "overall_severity": "critical",
+  "hazards": [
+    {
+      "type": "debris",
+      "brief": "一楼承重墙垮塌, 大量混凝土碎块与钢筋暴露, 覆盖中庭通道"
+    },
+    {
+      "type": "smoke",
+      "brief": "西北角配电房可见浓烟, 疑似电气短路引发火情"
+    },
+    {
+      "type": "structure_damage",
+      "brief": "三楼楼板裂缝延伸至外立面, 二次垮塌风险高"
+    },
+    {
+      "type": "water",
+      "brief": "地下管道破裂, 地面积水约 30cm, 存在触电与滑倒风险"
+    }
+  ],
+  "environment_note": "三层的旧教学楼受地震影响发生局部塌陷, 中庭被瓦砾掩埋, 救援通道受阻。西北角有火情与浓烟, 地下积水。现场至少 5 名人员被困, 其中 1 人疑似昏迷倒地, 需要优先搜救并尽快疏散火源附近人员。"
+}

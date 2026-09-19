@@ -1,0 +1,16 @@
+{
+  "person_event": {
+    "person_id": 3,
+    "class_name": "civilian",
+    "state": "Lying",
+    "confidence": 0.91,
+    "risk_score": 0.82,
+    "priority": "HIGH",
+    "rank": 1,
+    "bbox": [142, 386, 388, 205],
+    "det_conf": 0.94,
+    "pose_vis": 0.78,
+    "ts": "2026-09-19T09:12:03+08:00"
+  },
+  "note": "模拟边缘端感知层(writer.py JSONL 帧记录/JSON payload)对建筑坍塌现场单个人员的输出, 用于测试 Agent 触发与决策链路。"
+}

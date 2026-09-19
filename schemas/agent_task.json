@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "schemas/agent_task.json",
+  "title": "Agent 执行任务",
+  "description": "Agent 规划器产出的可执行任务, 交给执行器与工具层执行。由 src/agent 模块产出与消费。禁止模块间直接依赖, 通过该类 JSON 数据通信。",
+  "type": "object",
+  "required": ["task_id", "trigger", "actions", "status"],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "任务唯一标识, 如 'task_20260919_001'"
+    },
+    "trigger": {
+      "type": "object",
+      "description": "触发本任务的事件源信息",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "触发来源, 如 'detector' / 'vlm' / 'llm' / 'manual' 等"
+        },
+        "reason": {
+          "type": "string",
+          "description": "触发原因说明"
+        },
+        "ts": {
+          "type": "string",
+          "description": "触发时刻/ISO 时间戳"
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "description": "按序执行的工具动作列表",
+      "items": {
+        "type": "object",
+        "description": "单个工具动作",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "目标工具名, 如 'vision_tool' / 'rescue_tool' / 'communication_tool' / 'database_tool' 等"
+          },
+          "args": {
+            "type": "object",
+            "description": "该工具动作的入参"
+          }
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "running", "done", "failed"],
+      "description": "任务当前执行状态"
+    }
+  }
+}

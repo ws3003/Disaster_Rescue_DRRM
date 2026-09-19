@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "schemas/llm_output.json",
+  "title": "LLM 风险推理输出",
+  "description": "大模型对人员风险与救援决策的综合推理输出。由 src/llm 模块产出; 消费 vlm_output 与救援排序结果。禁止模块间直接依赖, 通过该类 JSON 数据通信。",
+  "type": "object",
+  "required": ["event_summary", "risk_explanations", "rescue_suggestions", "task_proposals"],
+  "properties": {
+    "event_summary": {
+      "type": "string",
+      "description": "对本次灾害事件的整体总结"
+    },
+    "risk_explanations": {
+      "type": "array",
+      "description": "对每名人员风险等级的解释列表",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pid": {
+            "type": "integer",
+            "description": "人员编号, 对应感知层人员唯一 id"
+          },
+          "reason": {
+            "type": "string",
+            "description": "该人员风险分级的原因说明"
+          }
+        }
+      }
+    },
+    "rescue_suggestions": {
+      "type": "array",
+      "description": "救援建议列表, 供现场指挥参考",
+      "items": {
+        "type": "string",
+        "description": "一条救援建议"
+      }
+    },
+    "task_proposals": {
+      "type": "array",
+      "description": "建议 Agent 执行的任务提议集合",
+      "items": {
+        "type": "object",
+        "description": "一个任务提议, 结构与 agent_task 的 actions 对齐",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "建议执行的动作, 如 'alert' / 'notify' 等"
+          },
+          "target": {
+            "type": ["integer", "null"],
+            "description": "目标人员编号; 无特定对象时为 null"
+          },
+          "payload": {
+            "type": "object",
+            "description": "动作附带的数据负载"
+          }
+        }
+      }
+    }
+  }
+}

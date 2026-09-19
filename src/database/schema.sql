@@ -1,0 +1,3 @@
+-- Database schema — MVP 四表 DDL(P0)
+-- 职责: 定义事件落库所需表的建表语句。
+-- 待实现业务逻辑(MVP 四表 DDL)。
