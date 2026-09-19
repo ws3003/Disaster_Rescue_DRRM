@@ -17,6 +17,9 @@ test-Mediapipe/
 # temp / archive
 archive/
 
+# temporary test script
+test_mediapipe.py
+
 # outputs
 outputs/
 
