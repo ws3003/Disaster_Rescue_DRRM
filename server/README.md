@@ -1,28 +1,27 @@
 # Disaster_Rescue_DRRM — Inference API Gateway (Member A)
 
-使 **Raspberry Pi Edge Layer** 通过 HTTP 调用 Member A 的 **VLM + LLM** 推理链路。
+使 **Raspberry Pi Edge Layer** 通过 HTTP 上传图片并调用 Member A 的 **VLM + LLM** 推理链路。
 
-> 本目录是**增量**：不修改 `src/vlm`、`src/llm`、`schemas`、parser、prompts 的任何内容。
+> 本目录是**增量**：不修改 `src/vlm`、`src/llm`、`schemas`、parser、prompts。
 > API Key 复用环境变量 `VLM_API_KEY` / `LLM_API_KEY`（不创建 `.env`，不回写密钥）。
 
 ## 接口
 
-### `POST /api/v1/analyze`
+### `POST /api/v1/analyze`（multipart/form-data）
 
-**请求体（JSON）**
+树莓派与服务器不在同一文件系统，因此用 **multipart 上传图片**（而非 `image_path` 本机路径）。
 
-```json
-{
-  "image_path": "/path/to/disaster.jpg",
-  "person_events": [
-    {
-      "person_id": 1,
-      "state": "Fall",
-      "risk_score": 0.92,
-      "priority": "HIGH"
-    }
-  ]
-}
+**请求（multipart/form-data）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `image` | file (jpg/jpeg/png) | 灾害现场图片（必填） |
+| `person_events` | JSON 字符串 | 人员事件数组（可选，默认空） |
+
+```bash
+curl -X POST http://<host>:8000/api/v1/analyze \
+  -F "image=@camera_frame.jpg" \
+  -F 'person_events=[{"person_id":1,"state":"Fall","risk_score":0.92,"priority":"HIGH"}]'
 ```
 
 **成功响应**
@@ -47,16 +46,17 @@
 | 码 | 含义 |
 |---|---|
 | `200` | 成功 |
-| `404` | 图片不存在 / 不可读 |
-| `422` | 请求体不符合 schema（FastAPI 自动） |
+| `400` | 图片错误：空文件 / 非图片 / 无法读取 |
+| `422` | 请求参数错误：person_events 非法 JSON 或字段不符 |
 | `500` | 服务端配置错误（缺 API Key） |
 | `502` | VLM / LLM / parser 失败 |
 
-## 内部调用链
+## 处理流程
 
 ```
-POST /api/v1/analyze
-  → VLMClient(provider="qwen").analyze(image_path)
+multipart 请求
+  → 校验图片 → 存临时文件 server/uploads/tmp_*.ext (自动创建, 请求结束删除)
+  → VLMClient(provider="qwen").analyze(tmp_path)
   → src.vlm.parser.parse() → vlm_output
   → LLMClient(provider="qwen").infer(vlm_output, person_events)
   → src.llm.parser.parse() → llm_output
@@ -66,10 +66,10 @@ POST /api/v1/analyze
 ## 运行
 
 ```bash
-# 安装依赖（Server 侧）
-venv/Scripts/python.exe -m pip install fastapi uvicorn
+# 安装依赖 (Server 侧)
+venv/Scripts/python.exe -m pip install fastapi uvicorn python-multipart
 
-# 设置 API Key（不写 .env，直接注入环境）
+# 设置 API Key (不写 .env, 直接注入环境)
 export VLM_API_KEY=xxx
 export LLM_API_KEY=xxx
 
@@ -85,8 +85,5 @@ venv/Scripts/python.exe -m uvicorn server.api:app --host 0.0.0.0 --port 8000
 venv/Scripts/python.exe -m unittest discover -s tests -t tests
 ```
 
-`tests/p1/test_api_gateway.py` 使用 **FakeTransport + FastAPI dependency_overrides** 注入假客户端，
-**不调用真实 Qwen API、不需要真实 Key**。
-
-> 说明：`fastapi` / `uvicorn` / `httpx` 为项目新增 Server 侧依赖，未写入
-> `requirements.txt`（保持与历史阶段一致）；如需复现，按上文手动安装即可。
+`tests/p1/` 使用 **FakeTransport + FastAPI dependency_overrides** 注入假客户端，
+**不调用真实 Qwen API、不需要真实 Key**；同样验证 multipart 上传、图片校验、临时文件清理。

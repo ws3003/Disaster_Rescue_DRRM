@@ -1,12 +1,15 @@
 """
 server/schemas.py — API Gateway Pydantic 请求/响应模型
 ======================================================
-定义 REST 接口 /api/v1/analyze 的请求与响应契约。
+Stage 7-A: 接口从 "JSON + image_path" 升级为 multipart/form-data。
+  - 图片: 通过 multipart 字段 `image` (UploadFile) 上传;
+  - 人员事件: 通过 multipart 字段 `person_events` (JSON 字符串) 传入,
+    由 api.py 用 PersonEvent 校验。
 
-注意: 这里是 API 层的 DTO (Pydantic), 不改变
-schemas/vlm_output.json 与 schemas/llm_output.json 两个契约;
-vlm_output / llm_output 字段仍由 src/vlm/parser 与 src/llm/parser
-产出, 与契约层保持一致。
+响应统一结构 AnalyzeResponse; 成功/失败共用, 保持 Stage 6 兼容。
+
+注意: 本文件是 API 层 DTO, 不改变 schemas/vlm_output.json
+与 schemas/llm_output.json 两个契约 (仍由 src/vlm|llm/parser 产出)。
 """
 
 from __future__ import annotations
@@ -23,15 +26,6 @@ class PersonEvent(BaseModel):
     state: str = Field(..., description="人员状态, 如 Fall / Lying / Standing 等")
     risk_score: float = Field(..., description="DRRM 风险评分 [0,1]")
     priority: str = Field(..., description="优先级, 如 HIGH / MEDIUM / LOW")
-
-
-class AnalyzeRequest(BaseModel):
-    """POST /api/v1/analyze 请求体。"""
-
-    image_path: str = Field(..., description="灾害现场图片路径 (Edge Layer 可访问)")
-    person_events: List[PersonEvent] = Field(
-        default_factory=list, description="人员事件列表, 可为空"
-    )
 
 
 class AnalyzeResponse(BaseModel):
@@ -60,7 +54,7 @@ def fail(message: str, status_code: Optional[int] = None) -> AnalyzeResponse:
 
 # 成功/失败的 HTTP 状态码约定 (供文档与测试引用)
 HTTP_OK = 200
-HTTP_NOT_FOUND = 404        # 图片不存在/不可读
-HTTP_UNPROCESSABLE = 422    # 请求体不符合 schema (FastAPI 自动)
-HTTP_CONFIG_ERROR = 500     # 服务端缺 API Key 等配置
-HTTP_UPSTREAM_ERROR = 502   # VLM/LLM 或 parser 失败
+HTTP_IMAGE_ERROR = 400     # 图片错误: 空文件/非图片/无法读取
+HTTP_UNPROCESSABLE = 422   # 请求参数错误: person_events 非法 JSON / 字段不符
+HTTP_CONFIG_ERROR = 500    # 服务端缺 API Key 等配置
+HTTP_UPSTREAM_ERROR = 502  # VLM/LLM 或 parser 失败

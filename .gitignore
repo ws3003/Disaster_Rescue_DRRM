@@ -29,5 +29,8 @@ outputs/
 # secrets
 .env
 
+# server runtime temp uploads
+server/uploads/
+
 # system
 .DS_Store
