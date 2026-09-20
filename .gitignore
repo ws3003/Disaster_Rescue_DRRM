@@ -26,5 +26,8 @@ outputs/
 # IDE
 .vscode/
 
+# secrets
+.env
+
 # system
 .DS_Store
