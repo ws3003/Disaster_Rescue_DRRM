@@ -1,0 +1,17 @@
+# Raspberry Pi Edge Client 配置 (Stage 7-B)
+# 本文件为默认配置; 命令行参数 --server/--interval/--quality 可覆盖。
+
+# Windows FastAPI Gateway 地址 (树莓派 → 服务器)
+server:
+  api_url: "http://192.168.43.206:8000/api/v1/analyze"
+
+camera:
+  width: 1280
+  height: 720
+
+# 上传策略
+upload:
+  # 每多少秒上传一帧 (VLM 非视频流, 无需每帧上传)
+  interval: 10
+  # JPEG 压缩质量 (0-100)
+  jpeg_quality: 90

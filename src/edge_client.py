@@ -1,0 +1,277 @@
+"""
+src/edge_client.py — Raspberry Pi Edge Client (Stage 7-B)
+==========================================================
+独立负责: 摄像头采集关键帧 → JPEG 编码 → HTTP multipart 上传到
+Windows FastAPI Gateway → 接收 VLM + LLM 分析结果并打印。
+
+设计要点:
+  - 与 src/main.py 及感知算法链**解耦**, 不 import 任何感知模块;
+  - 不打开 cv2 窗口 (支持 headless);
+  - 模块级纯函数/类便于用 FakeCamera + FakeTransport 离线测试。
+    (运行不需要真实摄像头与服务器; 测试中注入替身)
+
+硬件依赖: Python 3.11, picamera2(系统包) / opencv-python / requests。
+配置: config/edge.yaml; 命令行 --server 可覆盖 API 地址。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import time
+from typing import Any, Callable, Dict, Optional, Tuple
+
+import cv2
+import requests
+import yaml
+
+# 默认配置文件 (repo 根/config/edge.yaml)
+CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "edge.yaml"
+)
+
+
+class EdgeEncodeError(Exception):
+    """JPEG 编码失败。"""
+
+
+# ----------------------------------------------------------------------
+# 配置
+# ----------------------------------------------------------------------
+def load_config(path: str = CONFIG_PATH) -> Dict[str, Any]:
+    """读取 edge.yaml 为 dict; 缺失返回空 dict (由 main/调用方兜底)。"""
+    with open(path, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh) or {}
+    return cfg
+
+
+# ----------------------------------------------------------------------
+# 摄像头 (Picamera2)
+# ----------------------------------------------------------------------
+class EdgeCam:
+    """Picamera2 封装: capture() 返回 OpenCV BGR 帧。
+
+    picamera2 仅在 __init__ 中懒加载 —— 非 Pi 环境导入本模块不会失败;
+    真机实例化时才需 picamera2 可用。
+    """
+
+    def __init__(self, width: int = 1280, height: int = 720):
+        try:
+            from picamera2 import Picamera2
+        except ImportError as exc:
+            raise RuntimeError("picamera2 不可用: 仅 Raspberry Pi 环境支持") from exc
+        self.picam2 = Picamera2()
+        self.picam2.configure(
+            self.picam2.create_still_configuration(
+                main={"size": (int(width), int(height)), "format": "RGB888"}
+            )
+        )
+        self.picam2.start()
+
+    def capture(self):
+        """采集一帧, 返回 BGR 顺序的 uint8 ndarray (供 cv2/JPEG 编码)。"""
+        rgb = self.picam2.capture_array()
+        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+    def close(self) -> None:
+        try:
+            self.picam2.stop()
+        except Exception:
+            pass
+
+
+# ----------------------------------------------------------------------
+# 图片编码
+# ----------------------------------------------------------------------
+def encode_jpeg(frame, quality: int = 90) -> bytes:
+    """BGR 帧 → JPEG bytes; 非法帧或编码失败抛 EdgeEncodeError。"""
+    # 先校验帧类型, 避免 cv2.imencode 对非数组抛非预期异常
+    if not hasattr(frame, "shape") or getattr(frame, "ndim", 0) not in (2, 3):
+        raise EdgeEncodeError("JPEG encode failed: 非法帧类型")
+    ok, buf = cv2.imencode(
+        ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
+    )
+    if not ok or buf is None:
+        raise EdgeEncodeError("JPEG encode failed")
+    return buf.tobytes()
+
+
+# ----------------------------------------------------------------------
+# HTTP 上传
+# ----------------------------------------------------------------------
+class EdgeUploader:
+    """单次把 JPEG + person_events 以 multipart 上传到 Gateway。
+
+    transport 缺省 requests.post; 测试注入 FakeTransport。
+    """
+
+    def __init__(
+        self,
+        api_url: str,
+        transport: Optional[Callable[..., Any]] = None,
+        timeout: float = 30.0,
+    ):
+        self.api_url = api_url
+        self._post = transport if transport is not None else requests.post
+        self.timeout = timeout
+
+    def upload(
+        self, image_bytes: bytes, person_events: Optional[list] = None
+    ) -> Tuple[int, Any]:
+        """上传一帧, 返回 (HTTP status, 响应 JSON)。"""
+        files = {"image": ("frame.jpg", image_bytes, "image/jpeg")}
+        data = {"person_events": json.dumps(person_events or [], ensure_ascii=False)}
+        resp = self._post(self.api_url, files=files, data=data, timeout=self.timeout)
+        try:
+            body = resp.json()
+        except Exception:
+            body = {}
+        return int(resp.status_code), body
+
+
+# ----------------------------------------------------------------------
+# 结果解析/打印
+# ----------------------------------------------------------------------
+def extract_summary(body: Dict[str, Any]) -> Dict[str, Any]:
+    """从 Gateway 成功响应提取摘要 (Scene / Severity / Tasks)。"""
+    vlm = body.get("vlm_output") or {}
+    llm = body.get("llm_output") or {}
+    tasks = [p.get("action") for p in (llm.get("task_proposals") or [])]
+    return {
+        "scene": vlm.get("scene_type", "unknown"),
+        "severity": vlm.get("overall_severity", "unknown"),
+        "tasks": tasks or [],
+    }
+
+
+def _print_summary(body: Dict[str, Any]) -> None:
+    s = extract_summary(body)
+    print("================================")
+    print("Edge AI Response")
+    print("Scene:")
+    print(s["scene"])
+    print("Severity:")
+    print(s["severity"])
+    print("Tasks:")
+    print(", ".join(s["tasks"]) if s["tasks"] else "none")
+    print("================================")
+
+
+def _print_log(ts: str, w: int, h: int, status: int) -> None:
+    print("[EdgeClient]")
+    print(ts)
+    print(f"uploaded: {w}x{h}")
+    print(f"response: {status}")
+
+
+# ----------------------------------------------------------------------
+# 主循环
+# ----------------------------------------------------------------------
+def run_loop(
+    uploader: EdgeUploader,
+    cam,
+    interval: float = 10,
+    quality: int = 90,
+    max_uploads: Optional[int] = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    """周期性 采集→编码→上传→打印。
+
+    任意单步失败(采集/编码/网络/API错误)均打印并**继续**, 不退出。
+    max_uploads 限制迭代次数(供测试/--once); sleep 可注入(测试用 no-op)。
+    """
+    iterations = 0
+    while True:
+        if max_uploads is not None and iterations >= max_uploads:
+            break
+        iterations += 1
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            frame = cam.capture()
+            # 非图像帧(缺 shape)视作采集失败
+            if not hasattr(frame, "shape"):
+                raise TypeError("非法帧: 缺少 shape")
+            w, h = frame.shape[1], frame.shape[0]
+        except Exception:
+            print("[EdgeClient]")
+            print(ts)
+            print("camera capture failed")
+            sleep(interval)
+            continue
+
+        try:
+            jpeg = encode_jpeg(frame, quality)
+        except EdgeEncodeError as exc:
+            print("[EdgeClient]")
+            print(ts)
+            print(f"{exc}")
+            sleep(interval)
+            continue
+
+        try:
+            status, body = uploader.upload(jpeg)
+        except requests.RequestException:
+            print("[EdgeClient]")
+            print(ts)
+            print("API connection failed")
+            sleep(interval)
+            continue
+
+        _print_log(ts, w, h, status)
+        if status == 200:
+            _print_summary(body if isinstance(body, dict) else {})
+        else:
+            err = body.get("error") if isinstance(body, dict) else ""
+            print(f"server error: {status} {err}")
+
+        sleep(interval)
+    return iterations
+
+
+# ----------------------------------------------------------------------
+# CLI
+# ----------------------------------------------------------------------
+def main(argv: Optional[list] = None) -> int:
+    parser = argparse.ArgumentParser(description="Disaster_Rescue_DRRM Edge Client")
+    parser.add_argument(
+        "--server", help="覆盖 Gateway API URL (默认读 config/edge.yaml)"
+    )
+    parser.add_argument("--interval", type=int, help="上传间隔秒数")
+    parser.add_argument("--quality", type=int, help="JPEG 质量 0-100")
+    parser.add_argument("--config", default=CONFIG_PATH, help="配置文件路径")
+    parser.add_argument(
+        "--once", action="store_true", help="只上传一帧后退出 (调试/测试)"
+    )
+    args = parser.parse_args(argv)
+
+    cfg = load_config(args.config)
+    server_cfg = cfg.get("server", {}) or {}
+    cam_cfg = cfg.get("camera", {}) or {}
+    up_cfg = cfg.get("upload", {}) or {}
+
+    api_url = args.server or server_cfg.get("api_url")
+    if not api_url:
+        print("缺少 server.api_url 配置 (config/edge.yaml 或 --server)")
+        return 1
+
+    uploader = EdgeUploader(api_url)
+    cam = EdgeCam(
+        width=cam_cfg.get("width", 1280), height=cam_cfg.get("height", 720)
+    )
+    interval = args.interval if args.interval is not None else up_cfg.get("interval", 10)
+    quality = args.quality if args.quality is not None else up_cfg.get("jpeg_quality", 90)
+
+    try:
+        run_loop(
+            uploader, cam, interval=interval, quality=quality,
+            max_uploads=1 if args.once else None,
+        )
+    finally:
+        cam.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
