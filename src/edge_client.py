@@ -166,6 +166,38 @@ def _print_log(ts: str, w: int, h: int, status: int) -> None:
 
 
 # ----------------------------------------------------------------------
+# 预览模式 (开发/调试用; opt-in, 默认关闭)
+# ----------------------------------------------------------------------
+def render_overlay(frame, person_events):
+    """在帧上叠加 person_events 文字信息 (仅文本, 不画 bbox)。
+
+    供 --preview 调试; 不改变 perception 输出 schema。
+    """
+    out = frame.copy()
+    y = 24
+    for i, ev in enumerate(person_events, start=1):
+        _ = i  # person_id 优先取自事件
+        lines = [
+            f"Person {ev.get('person_id', '-')}",
+            f"State: {ev.get('state', '-')}",
+            f"Risk: {ev.get('risk_score', 0):.2f}",
+            f"Priority: {ev.get('priority', '-')}",
+        ]
+        for line in lines:
+            cv2.putText(out, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 0), 2, cv2.LINE_AA)
+            y += 24
+        y += 10
+    return out
+
+
+def _show_preview(frame, person_events) -> bool:
+    """显示预览窗口; 返回 False 表示用户按 q 退出。"""
+    cv2.imshow("DRRM Edge Preview", render_overlay(frame, person_events))
+    return (cv2.waitKey(1) & 0xFF) != ord("q")
+
+
+# ----------------------------------------------------------------------
 # 主循环
 # ----------------------------------------------------------------------
 def run_loop(
@@ -176,8 +208,9 @@ def run_loop(
     max_uploads: Optional[int] = None,
     sleep: Callable[[float], None] = time.sleep,
     perception: Optional[Any] = None,
+    preview: bool = False,
 ) -> int:
-    """周期性 采集→(感知)→编码→上传→打印。
+    """周期性 采集→(感知)→编码→上传→打印; preview 时叠加显示相机帧。
 
     任意单步失败(采集/编码/感知/网络/API错误)均打印并**继续**, 不退出。
     max_uploads 限制迭代次数(供测试/--once); sleep 可注入(测试用 no-op)。
@@ -228,6 +261,15 @@ def run_loop(
             print("person_events:")
             print(json.dumps(person_events, indent=2, ensure_ascii=False))
 
+        # 预览模式: 叠加 person_events 文字显示相机帧; 按 q 退出
+        # (headless/无显示环境抛错时自动关闭预览, 不影响后续上传)
+        if preview:
+            try:
+                if not _show_preview(frame, person_events):
+                    break
+            except Exception:
+                preview = False
+
         try:
             status, body = uploader.upload(jpeg, person_events=person_events)
         except requests.RequestException:
@@ -261,6 +303,9 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--config", default=CONFIG_PATH, help="配置文件路径")
     parser.add_argument(
         "--once", action="store_true", help="只上传一帧后退出 (调试/测试)"
+    )
+    parser.add_argument(
+        "--preview", action="store_true", help="显示相机实时预览窗口 (仅叠加文字, 按 q 退出)"
     )
     args = parser.parse_args(argv)
 
@@ -296,6 +341,7 @@ def main(argv: Optional[list] = None) -> int:
             uploader, cam, interval=interval, quality=quality,
             max_uploads=1 if args.once else None,
             perception=perception,
+            preview=args.preview,
         )
     finally:
         cam.close()

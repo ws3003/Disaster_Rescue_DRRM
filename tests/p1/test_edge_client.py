@@ -22,6 +22,7 @@ from src.edge_client import (
     encode_jpeg,
     extract_summary,
     load_config,
+    render_overlay,
     run_loop,
 )
 
@@ -221,6 +222,28 @@ class LoopTest(unittest.TestCase):
         run_loop(up, FakeCamera(), interval=0, quality=90,
                  max_uploads=1, sleep=no_sleep, perception=BrokenPerception())
         self.assertEqual(json.loads(transport.calls[0]["data"]["person_events"]), [])
+
+
+class RenderOverlayTest(unittest.TestCase):
+    """叠加函数纯逻辑测试 (不触 cv2.imshow / waitKey, 无显示依赖)。"""
+
+    def test_overlay_with_events_same_shape(self):
+        frame = FakeCamera(width=320, height=240).capture()
+        events = [{"person_id": 1, "state": "Fall",
+                   "risk_score": 0.63, "priority": "HIGH"}]
+        out = render_overlay(frame, events)
+        self.assertEqual(out.shape, frame.shape)
+        self.assertEqual(out.dtype, frame.dtype)
+
+    def test_overlay_empty_events_ok(self):
+        frame = FakeCamera(width=320, height=240).capture()
+        out = render_overlay(frame, [])
+        self.assertEqual(out.shape, frame.shape)
+
+    def test_overlay_no_key_error_on_missing_fields(self):
+        frame = FakeCamera(width=320, height=240).capture()
+        out = render_overlay(frame, [{"person_id": 3}])  # 缺 state/risk/priority
+        self.assertEqual(out.shape, frame.shape)
 
 
 if __name__ == "__main__":
