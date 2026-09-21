@@ -205,6 +205,44 @@ def _show_preview(frame, person_events) -> bool:
     return (cv2.waitKey(1) & 0xFF) != ord("q")
 
 
+def run_preview_only(
+    cam,
+    max_frames: Optional[int] = None,
+    sleep: Callable[[float], None] = time.sleep,
+    show: Optional[Callable[[Any, list], bool]] = None,
+) -> int:
+    """纯预览调试 (--preview-only): 连续采集并显示实时画面。
+
+    - 不执行 YOLO/MediaPipe, 不 JPEG 编码, 不 HTTP 上传, 不依赖 Windows Gateway;
+    - 复用 EdgeCam(内部 CameraFrameReader, 含 ov5647 颜色/旋转修复);
+    - 窗口标题 "DRRM Edge Preview", 按 q 正常退出;
+    - headless(无显示) 抛错时打印并结束, 不卡死。
+
+    show 可注入(Fake 测试); max_frames 限制显示帧数(测试); sleep 每帧极短空转
+    以便 waitKey 及时处理事件。返回实际显示帧数。
+    """
+    show = show if show is not None else _show_preview
+    frames = 0
+    while True:
+        if max_frames is not None and frames >= max_frames:
+            break
+        try:
+            frame = cam.capture()
+        except Exception as exc:
+            print(f"[PreviewOnly] capture failed: {exc}")
+            sleep(0.5)
+            continue
+        try:
+            if not show(frame, []):  # 按 q 退出
+                break
+        except Exception as exc:
+            print(f"[PreviewOnly] display failed (headless?): {exc}")
+            break
+        frames += 1
+        sleep(0.001)  # 让 waitKey(1) 获得事件处理机会
+    return frames
+
+
 # ----------------------------------------------------------------------
 # 主循环
 # ----------------------------------------------------------------------
@@ -315,12 +353,29 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument(
         "--preview", action="store_true", help="显示相机实时预览窗口 (仅叠加文字, 按 q 退出)"
     )
+    parser.add_argument(
+        "--preview-only",
+        action="store_true",
+        help="纯预览调试: 连续显示摄像头实时画面, 不感知/不编码/不上传, 不需 Gateway (按 q 退出)",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
     server_cfg = cfg.get("server", {}) or {}
     cam_cfg = cfg.get("camera", {}) or {}
     up_cfg = cfg.get("upload", {}) or {}
+
+    # 纯预览调试: 不需要 api_url / uploader / perception, 独立于上传链路提前返回
+    if args.preview_only:
+        cam = EdgeCam(
+            width=cam_cfg.get("width", 1280), height=cam_cfg.get("height", 720)
+        )
+        try:
+            frames = run_preview_only(cam)
+        finally:
+            cam.close()
+        print(f"[PreviewOnly] preview ended, shown {frames} frames")
+        return 0
 
     api_url = args.server or server_cfg.get("api_url")
     if not api_url:

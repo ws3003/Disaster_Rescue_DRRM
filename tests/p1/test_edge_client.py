@@ -25,6 +25,7 @@ from src.edge_client import (
     load_config,
     render_overlay,
     run_loop,
+    run_preview_only,
 )
 
 SUCCESS_BODY = {
@@ -296,6 +297,56 @@ class EdgeCamReadertest(unittest.TestCase):
         self.assertEqual(f1.shape, (240, 320, 3))
         self.assertEqual(f2.shape, (240, 320, 3))
         cam.close()
+
+
+class CountingCam(FakeCamera):
+    """计数 capture 调用, 供 preview-only 测试。"""
+
+    def __init__(self):
+        super().__init__(width=320, height=240)
+        self.captures = 0
+
+    def capture(self):
+        self.captures += 1
+        return super().capture()
+
+
+class PreviewOnlyTest(unittest.TestCase):
+    """--preview-only: 连续显示实时画面, 不感知/不编码/不上传, q 退出。"""
+
+    def test_runs_continuous_frames(self):
+        cam = CountingCam()
+        frames = run_preview_only(cam, max_frames=2, sleep=no_sleep,
+                                  show=lambda f, e: True)
+        self.assertEqual(frames, 2)
+        self.assertEqual(cam.captures, 2)
+
+    def test_exits_on_q(self):
+        cam = CountingCam()
+        frames = run_preview_only(cam, max_frames=10, sleep=no_sleep,
+                                  show=lambda f, e: False)
+        self.assertEqual(frames, 0)          # 首帧即按 q 退出
+        self.assertEqual(cam.captures, 1)
+
+    def test_main_preview_only_skips_uploader_and_perception(self):
+        """--preview-only 主流程只建摄像头+预览, 不构造 uploader/perception, 不需 Gateway。"""
+        import src.edge_client as ec
+        from unittest import mock
+
+        class _DummyCam:
+            def __init__(self, **kwargs):
+                pass
+
+            def close(self):
+                pass
+
+        with mock.patch.object(ec, "EdgeCam", _DummyCam), \
+             mock.patch.object(ec, "EdgeUploader") as uploader, \
+             mock.patch.object(ec, "run_preview_only", return_value=7) as preview:
+            code = ec.main(["--preview-only"])
+        self.assertEqual(code, 0)
+        uploader.assert_not_called()          # 不触发上传器
+        preview.assert_called_once()          # 只跑纯预览
 
 
 if __name__ == "__main__":
