@@ -196,6 +196,32 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(iters, 1)
         self.assertEqual(len(transport.calls), 0)  # 编码失败未上传
 
+    def test_perception_feeds_person_events_to_upload(self):
+        class FakePerception:
+            def analyze(self, frame):
+                return [{"person_id": 1, "state": "Fall",
+                         "risk_score": 0.92, "priority": "HIGH"}]
+
+        transport = FakeTransport(response=FakeResponse(200, SUCCESS_BODY))
+        up = EdgeUploader("http://fake", transport=transport)
+        run_loop(up, FakeCamera(), interval=0, quality=90,
+                 max_uploads=1, sleep=no_sleep, perception=FakePerception())
+        events = json.loads(transport.calls[0]["data"]["person_events"])
+        self.assertEqual(events,
+                         [{"person_id": 1, "state": "Fall",
+                           "risk_score": 0.92, "priority": "HIGH"}])
+
+    def test_perception_failure_uploads_empty_events(self):
+        class BrokenPerception:
+            def analyze(self, frame):
+                raise RuntimeError("perception down")
+
+        transport = FakeTransport(response=FakeResponse(200, SUCCESS_BODY))
+        up = EdgeUploader("http://fake", transport=transport)
+        run_loop(up, FakeCamera(), interval=0, quality=90,
+                 max_uploads=1, sleep=no_sleep, perception=BrokenPerception())
+        self.assertEqual(json.loads(transport.calls[0]["data"]["person_events"]), [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

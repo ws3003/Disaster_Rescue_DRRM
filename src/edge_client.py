@@ -175,11 +175,14 @@ def run_loop(
     quality: int = 90,
     max_uploads: Optional[int] = None,
     sleep: Callable[[float], None] = time.sleep,
+    perception: Optional[Any] = None,
 ) -> int:
-    """周期性 采集→编码→上传→打印。
+    """周期性 采集→(感知)→编码→上传→打印。
 
-    任意单步失败(采集/编码/网络/API错误)均打印并**继续**, 不退出。
+    任意单步失败(采集/编码/感知/网络/API错误)均打印并**继续**, 不退出。
     max_uploads 限制迭代次数(供测试/--once); sleep 可注入(测试用 no-op)。
+    perception: 本地感知桥接(EdgePerception), 提供 analyze(frame)->person_events;
+                为 None 时上传空 person_events。
     """
     iterations = 0
     while True:
@@ -210,8 +213,17 @@ def run_loop(
             sleep(interval)
             continue
 
+        # 本地感知桥接: 生成 person_events (失败不阻塞, 仅上传 image)
         try:
-            status, body = uploader.upload(jpeg)
+            person_events = perception.analyze(frame) if perception else []
+        except Exception:
+            print("[EdgeClient]")
+            print(ts)
+            print("perception analyze failed")
+            person_events = []
+
+        try:
+            status, body = uploader.upload(jpeg, person_events=person_events)
         except requests.RequestException:
             print("[EdgeClient]")
             print(ts)
@@ -263,10 +275,21 @@ def main(argv: Optional[list] = None) -> int:
     interval = args.interval if args.interval is not None else up_cfg.get("interval", 10)
     quality = args.quality if args.quality is not None else up_cfg.get("jpeg_quality", 90)
 
+    # 本地感知桥接: 默认开启; 初始化失败回退为仅上传图片, 不阻塞
+    perception = None
+    perception_cfg = cfg.get("perception", {}) or {}
+    if perception_cfg.get("enabled", True):
+        try:
+            import edge_perception
+            perception = edge_perception.EdgePerception()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[EdgeClient] perception init failed, upload image only: {exc}")
+
     try:
         run_loop(
             uploader, cam, interval=interval, quality=quality,
             max_uploads=1 if args.once else None,
+            perception=perception,
         )
     finally:
         cam.close()

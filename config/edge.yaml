@@ -15,3 +15,13 @@ upload:
   interval: 10
   # JPEG 压缩质量 (0-100)
   jpeg_quality: 90
+
+# 本地感知桥接 (Stage 7-C): 边缘 YOLO/MediaPipe 状态 → person_events 融合上传
+perception:
+  # 默认开启; 若模型缺失/推理器初始化失败自动回退为"仅上传图片"
+  enabled: true
+  # 说明: 实际 YOLO 模型路径/推理设备由 V0.1.5 的 config/config.yaml 的
+  #       model.path 与 resolve_device 决定; 本字段仅作展示/未来预留,
+  #       桥接层按约束"只调用不接管"不读取它们。
+  model_path: "models/disaster_best.pt"
+  device: "cpu"
