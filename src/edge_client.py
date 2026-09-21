@@ -222,6 +222,12 @@ def run_loop(
             print("perception analyze failed")
             person_events = []
 
+        # 调试可观测性: 发送前打印本地感知结果 (不改变上传协议/数据结构)
+        if perception is not None:
+            print("[Perception]")
+            print("person_events:")
+            print(json.dumps(person_events, indent=2, ensure_ascii=False))
+
         try:
             status, body = uploader.upload(jpeg, person_events=person_events)
         except requests.RequestException:
