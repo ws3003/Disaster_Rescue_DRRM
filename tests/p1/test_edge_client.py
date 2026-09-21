@@ -17,6 +17,7 @@ if ROOT not in sys.path:
 
 from src.edge_client import (
     CONFIG_PATH,
+    EdgeCam,
     EdgeEncodeError,
     EdgeUploader,
     encode_jpeg,
@@ -244,6 +245,57 @@ class RenderOverlayTest(unittest.TestCase):
         frame = FakeCamera(width=320, height=240).capture()
         out = render_overlay(frame, [{"person_id": 3}])  # 缺 state/risk/priority
         self.assertEqual(out.shape, frame.shape)
+
+
+class FakeCameraFrameReader:
+    """模拟 src/camera.py 的 CameraFrameReader 接口 (iter_frames/stop/width/height)。"""
+
+    def __init__(self, n=2):
+        self.width = 320
+        self.height = 240
+        self._frames = iter(
+            [np.zeros((self.height, self.width, 3), dtype=np.uint8) for _ in range(n)]
+        )
+        self.stopped = False
+
+    def iter_frames(self, frame_stride: int = 1):
+        def gen():
+            idx = 0
+            try:
+                while True:
+                    f = next(self._frames)
+                    yield idx, 0.0, f
+                    idx += 1
+            except StopIteration:
+                return
+        return gen()
+
+    def stop(self):
+        self.stopped = True
+
+
+class EdgeCamReadertest(unittest.TestCase):
+    """EdgeCam 兼容包装: 复用 CameraFrameReader, 不再自建 Picamera2。"""
+
+    def test_capture_returns_bgr_frame(self):
+        reader = FakeCameraFrameReader(n=2)
+        cam = EdgeCam(reader=reader)
+        frame = cam.capture()
+        self.assertEqual(frame.shape, (240, 320, 3))
+        self.assertEqual(frame.dtype, np.uint8)
+        self.assertEqual(cam.width, 320)
+        self.assertEqual(cam.height, 240)
+        cam.close()
+        self.assertTrue(reader.stopped)  # close 委托 reader.stop()
+
+    def test_capture_iterates_reader_frames(self):
+        reader = FakeCameraFrameReader(n=2)
+        cam = EdgeCam(reader=reader)
+        f1 = cam.capture()
+        f2 = cam.capture()
+        self.assertEqual(f1.shape, (240, 320, 3))
+        self.assertEqual(f2.shape, (240, 320, 3))
+        cam.close()
 
 
 if __name__ == "__main__":

@@ -50,33 +50,41 @@ def load_config(path: str = CONFIG_PATH) -> Dict[str, Any]:
 # 摄像头 (Picamera2)
 # ----------------------------------------------------------------------
 class EdgeCam:
-    """Picamera2 封装: capture() 返回 OpenCV BGR 帧。
+    """兼容包装: 复用 V0.1 已验证摄像头链路 src/camera.py 的 CameraFrameReader。
 
-    picamera2 仅在 __init__ 中懒加载 —— 非 Pi 环境导入本模块不会失败;
-    真机实例化时才需 picamera2 可用。
+    内部不再创建 Picamera2; 采集格式/背压/旋转等均由 CameraFrameReader 统一负责
+    (create_video_configuration, 与 V0.2 实时视频链路一致)。
+    capture() 返回单帧 BGR (供 cv2/JPEG 编码), 保持 edge_client 原有接口。
     """
 
-    def __init__(self, width: int = 1280, height: int = 720):
-        try:
-            from picamera2 import Picamera2
-        except ImportError as exc:
-            raise RuntimeError("picamera2 不可用: 仅 Raspberry Pi 环境支持") from exc
-        self.picam2 = Picamera2()
-        self.picam2.configure(
-            self.picam2.create_still_configuration(
-                main={"size": (int(width), int(height)), "format": "RGB888"}
+    def __init__(
+        self,
+        width: int = 1280,
+        height: int = 720,
+        fps: float = 15.0,
+        reader: Any = None,
+    ):
+        """入参 width/height/fps 供真实 reader 初始化; reader 可注入(Fake 测试)。"""
+        if reader is None:
+            # 懒加载: 仅真实实例化时引入 src/camera.py (脚本/测试可摆脱 Pi 依赖)
+            from camera import CameraFrameReader
+            reader = CameraFrameReader(
+                {"camera": {"width": int(width), "height": int(height), "fps": float(fps)}}
             )
-        )
-        self.picam2.start()
+        self._reader = reader
+        self._frames = iter(reader.iter_frames())
+
+        self.width = int(getattr(reader, "width", width))
+        self.height = int(getattr(reader, "height", height))
 
     def capture(self):
-        """采集一帧, 返回 BGR 顺序的 uint8 ndarray (供 cv2/JPEG 编码)。"""
-        rgb = self.picam2.capture_array()
-        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        """阻塞取最新一帧, 返回 BGR uint8 ndarray。"""
+        _, _, frame_bgr = next(self._frames)
+        return frame_bgr
 
     def close(self) -> None:
         try:
-            self.picam2.stop()
+            self._reader.stop()
         except Exception:
             pass
 
