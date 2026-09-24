@@ -25,6 +25,13 @@ outputs/
 
 # IDE
 .vscode/
+.idea/
+
+# runtime data (keep data/mock & data/test_images)
+data/drrm.db
+data/communication_log.jsonl
+data/latest_vision.json
+src/database/data/
 
 # system
 .DS_Store
