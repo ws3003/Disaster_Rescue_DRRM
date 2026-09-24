@@ -451,6 +451,190 @@ class Executor:
         }
 
     # ================================================================
+    # Contract execution (schemas/agent_task.json)
+    # ================================================================
+
+    def execute_agent_task(
+        self,
+        task: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Execute one contract-conformant agent task.
+
+        Contract format (docs/interface.md):
+
+            {
+                "task_id": ...,
+                "trigger": {"source", "reason", "ts"},
+                "actions": [{"tool": ..., "args": {...}}],
+                "status": "pending"
+            }
+
+        Rules:
+            1. The task is validated against
+               schemas/agent_task.json first (B9).
+            2. Empty actions are treated as a no-op:
+               status -> done, nothing is persisted
+               (interface.md fallback rule).
+            3. Each action's dispatch key is args["action"].
+
+        Returns:
+            Execution result with contract status values
+            (done / failed).
+        """
+
+        from src.agent.task_schema import (
+            validate_agent_task,
+        )
+
+        # ------------------------------------------------------------
+        # 1. Schema validation (B9)
+        # ------------------------------------------------------------
+
+        errors = validate_agent_task(task)
+
+        if errors:
+
+            return {
+                "ok": False,
+                "task_id": (
+                    task.get("task_id")
+                    if isinstance(task, dict)
+                    else None
+                ),
+                "status": "failed",
+                "stage": "schema_validation",
+                "errors": errors,
+            }
+
+        # ------------------------------------------------------------
+        # 2. Empty actions -> no-op
+        # ------------------------------------------------------------
+
+        actions = task["actions"]
+
+        if len(actions) == 0:
+
+            return {
+                "ok": True,
+                "task_id": task["task_id"],
+                "status": "done",
+                "actions_total": 0,
+                "actions_executed": 0,
+                "results": [],
+                "note": (
+                    "Empty actions: no-op, "
+                    "nothing persisted."
+                ),
+            }
+
+        # ------------------------------------------------------------
+        # 3. Contract -> internal plan format
+        # ------------------------------------------------------------
+
+        trigger = task.get("trigger") or {}
+
+        internal_actions: list[dict[str, Any]] = []
+
+        for index, contract_action in enumerate(actions):
+
+            tool_name = contract_action.get("tool")
+            args = dict(
+                contract_action.get("args") or {}
+            )
+
+            internal_actions.append(
+                {
+                    "step": index + 1,
+                    "action": args.get(
+                        "action",
+                        tool_name,
+                    ),
+                    "tool": tool_name,
+                    "input": args,
+                    "reason": trigger.get("reason"),
+                }
+            )
+
+        # ------------------------------------------------------------
+        # 4. Person / priority for bookkeeping
+        # ------------------------------------------------------------
+
+        person_id = None
+        priority = None
+
+        for contract_action in actions:
+
+            args = contract_action.get("args") or {}
+
+            if person_id is None:
+                person_id = args.get("person_id")
+
+            if priority is None:
+                priority = args.get(
+                    "priority"
+                ) or args.get("severity")
+
+        internal_plan = {
+            "task_id": task["task_id"],
+            "trigger_type": "LLM_PROPOSAL",
+            "trigger_event": trigger.get(
+                "reason"
+            ),
+            "person_id": person_id,
+            "priority": priority,
+            "created": task.get("created")
+            or trigger.get("ts")
+            or self._now(),
+            "actions": internal_actions,
+            "source": "llm",
+            "event_summary": task.get(
+                "event_summary"
+            ),
+        }
+
+        # ------------------------------------------------------------
+        # 5. Execute through the standard pipeline
+        # ------------------------------------------------------------
+
+        execution_result = self.execute(
+            internal_plan
+        )
+
+        # ------------------------------------------------------------
+        # 6. Map internal status -> contract status
+        # ------------------------------------------------------------
+
+        status = execution_result.get("status")
+
+        contract_status = (
+            "done"
+            if status == "completed"
+            else "failed"
+        )
+
+        return {
+            "ok": execution_result.get("ok", False),
+            "task_id": execution_result.get(
+                "task_id"
+            ),
+            "status": contract_status,
+            "actions_total": execution_result.get(
+                "actions_total"
+            ),
+            "actions_executed": execution_result.get(
+                "actions_executed"
+            ),
+            "results": execution_result.get(
+                "results"
+            ),
+            "plan_trace": execution_result.get(
+                "plan_trace"
+            ),
+            "execution": execution_result,
+        }
+
+    # ================================================================
     # Tool input normalization
     # ================================================================
 

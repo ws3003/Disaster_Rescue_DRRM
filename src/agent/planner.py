@@ -308,6 +308,394 @@ class Planner:
         return task
 
     # ==========================================================
+    # LLM-assisted planning (interface contract)
+    # ==========================================================
+    #
+    # Contract (docs/interface.md, schemas/llm_output.json):
+    #
+    #     llm_output.task_proposals
+    #         |
+    #         v
+    #     Planner (translate + safety rules)
+    #         |
+    #         v
+    #     agent_task {task_id, trigger, actions[{tool, args}], status}
+    #
+    # Fallback rule: when task_proposals is missing/empty,
+    # planner stays rule-based and produces no LLM task.
+    # ==========================================================
+
+    # Contract action name -> whitelisted action name
+
+    PROPOSAL_ACTION_MAP = {
+        "alert": "send_alert",
+        "notify": "send_alert",
+        "log": "save_event",
+        "send_alert": "send_alert",
+        "save_event": "save_event",
+        "get_snapshot": "get_snapshot",
+        "get_recent_events": "get_recent_events",
+    }
+
+    # Whitelisted action -> executing tool
+
+    ACTION_TOOL_MAP = {
+        "get_snapshot": "vision_tool",
+        "send_alert": "communication_tool",
+        "save_event": "database_tool",
+        "get_recent_events": "database_tool",
+    }
+
+    def plan_from_llm_output(
+        self,
+        llm_output: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Translate one llm_output payload into a contract-conformant
+        agent_task (schemas/agent_task.json).
+
+        Safety rules still apply (PRD 4.4.1):
+            - action whitelist;
+            - maximum 3 tool steps;
+            - HIGH must alert is enforced by the rule-based path,
+              the LLM path only ADDS actions, never suppresses them.
+
+        Returns:
+            {
+                "ok": true,
+                "task_id": ...,
+                "trigger": {"source": "llm", "reason": ..., "ts": ...},
+                "actions": [{"tool": ..., "args": {...}}],
+                "status": "pending",
+                ...
+            }
+
+            When task_proposals is empty the returned task carries
+            "status": "suppressed" and no actions, per the interface
+            fallback rule (planner stays rule-based).
+        """
+
+        if not isinstance(llm_output, dict):
+
+            return {
+                "ok": False,
+                "status": "failed",
+                "error": (
+                    "llm_output must be a dictionary."
+                ),
+                "actions": [],
+            }
+
+        # ------------------------------------------------------
+        # Normalize + validate input
+        # ------------------------------------------------------
+
+        from src.agent.task_schema import (
+            normalize_llm_output,
+            validate_llm_output,
+        )
+
+        errors = validate_llm_output(llm_output)
+
+        if errors:
+
+            return {
+                "ok": False,
+                "status": "failed",
+                "error": "; ".join(errors),
+                "actions": [],
+            }
+
+        llm_data = normalize_llm_output(llm_output)
+
+        event_summary = llm_data["event_summary"]
+        proposals = llm_data["task_proposals"]
+
+        task_id = self._generate_task_id()
+
+        now = datetime.now().isoformat(
+            timespec="seconds"
+        )
+
+        # ------------------------------------------------------
+        # Fallback: no proposals -> rule-based path stays
+        # authoritative, no LLM task is created.
+        # ------------------------------------------------------
+
+        if len(proposals) == 0:
+
+            return {
+                "ok": True,
+                "task_id": task_id,
+                "trigger": {
+                    "source": "llm",
+                    "reason": (
+                        "No task proposals in llm_output; "
+                        "rule-based triggering remains "
+                        "authoritative."
+                    ),
+                    "ts": now,
+                },
+                "actions": [],
+                "status": "suppressed",
+                "event_summary": event_summary,
+                "actions_count": 0,
+                "created": now,
+            }
+
+        # ------------------------------------------------------
+        # Translate proposals into contract actions
+        # ------------------------------------------------------
+
+        actions: list[dict[str, Any]] = []
+
+        seen_alert_targets: set[Any] = set()
+
+        for proposal in proposals:
+
+            if not isinstance(proposal, dict):
+                continue
+
+            mapped = self._translate_proposal(
+                proposal=proposal,
+                event_summary=event_summary,
+                seen_alert_targets=seen_alert_targets,
+            )
+
+            if mapped is not None:
+                actions.append(mapped)
+
+        # ------------------------------------------------------
+        # Enforce whitelist + maximum steps
+        # ------------------------------------------------------
+
+        actions = [
+            action
+            for action in actions
+            if action.get("args", {}).get(
+                "action"
+            ) in self.ALLOWED_ACTIONS
+        ]
+
+        actions = actions[: self.max_steps]
+
+        # ------------------------------------------------------
+        # Empty after filtering -> suppressed no-op
+        # ------------------------------------------------------
+
+        if len(actions) == 0:
+
+            return {
+                "ok": True,
+                "task_id": task_id,
+                "trigger": {
+                    "source": "llm",
+                    "reason": (
+                        "All task proposals were rejected "
+                        "by the action whitelist."
+                    ),
+                    "ts": now,
+                },
+                "actions": [],
+                "status": "suppressed",
+                "event_summary": event_summary,
+                "actions_count": 0,
+                "created": now,
+            }
+
+        # ------------------------------------------------------
+        # Contract-conformant agent task
+        # ------------------------------------------------------
+
+        return {
+            "ok": True,
+            "task_id": task_id,
+            "trigger": {
+                "source": "llm",
+                "reason": (
+                    event_summary
+                    or "LLM task proposals."
+                ),
+                "ts": now,
+            },
+            "actions": actions,
+            "status": "pending",
+            "event_summary": event_summary,
+            "rescue_suggestions": llm_data[
+                "rescue_suggestions"
+            ],
+            "actions_count": len(actions),
+            "created": now,
+            "context": context or {},
+        }
+
+    # ==========================================================
+    # Proposal translation
+    # ==========================================================
+
+    def _translate_proposal(
+        self,
+        proposal: dict[str, Any],
+        event_summary: str,
+        seen_alert_targets: set[Any],
+    ) -> dict[str, Any] | None:
+        """
+        Translate one llm_output task proposal into a contract
+        action {tool, args}.
+
+        Returns None when the proposal is not translatable.
+        """
+
+        raw_action = str(
+            proposal.get("action", "")
+        ).lower()
+
+        action = self.PROPOSAL_ACTION_MAP.get(
+            raw_action
+        )
+
+        if action is None:
+            return None
+
+        target = proposal.get("target")
+        payload = proposal.get("payload")
+
+        if not isinstance(payload, dict):
+            payload = {}
+
+        # ------------------------------------------------------
+        # send_alert (alert / notify)
+        # ------------------------------------------------------
+
+        if action == "send_alert":
+
+            # Deduplicate repeated alerts for the same person.
+            if target in seen_alert_targets:
+                return None
+
+            seen_alert_targets.add(target)
+
+            priority = str(
+                payload.get(
+                    "priority",
+                    "HIGH",
+                )
+            ).upper()
+
+            message = (
+                payload.get("message")
+                or event_summary
+                or "High-risk personnel alert."
+            )
+
+            state = payload.get("state")
+
+            severity = payload.get(
+                "severity",
+                priority,
+            )
+
+            title = (
+                f"[{priority}] "
+                f"Person {target} "
+                f"{state or 'Alert'}"
+            )
+
+            return {
+                "tool": "communication_tool",
+                "args": {
+                    "action": "send_alert",
+                    "person_id": target,
+                    "severity": severity,
+                    "priority": priority,
+                    "state": state,
+                    "title": title,
+                    "message": message,
+                },
+            }
+
+        # ------------------------------------------------------
+        # save_event (log)
+        # ------------------------------------------------------
+
+        if action == "save_event":
+
+            return {
+                "tool": "database_tool",
+                "args": {
+                    "action": "save_event",
+                    "type": "llm_proposal",
+                    "severity": str(
+                        payload.get(
+                            "severity",
+                            "NORMAL",
+                        )
+                    ).upper(),
+                    "person_id": target,
+                    "payload": {
+                        "event_summary": event_summary,
+                        **payload,
+                    },
+                },
+            }
+
+        # ------------------------------------------------------
+        # Read-only actions pass through with target.
+        # ------------------------------------------------------
+
+        return {
+            "tool": self.ACTION_TOOL_MAP[action],
+            "args": {
+                "action": action,
+                "person_id": target,
+            },
+        }
+
+    # ==========================================================
+    # Persist agent task (contract artifact)
+    # ==========================================================
+
+    def save_agent_task(
+        self,
+        task: dict[str, Any],
+        output_path: str | Path = "data/agent_task.json",
+    ) -> bool:
+        """
+        Write one agent task to disk as the contract artifact
+        consumed by the executor / other modules.
+        """
+
+        try:
+
+            path = Path(output_path)
+            path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            path.write_text(
+                json.dumps(
+                    task,
+                    ensure_ascii=False,
+                    indent=2,
+                    default=str,
+                ),
+                encoding="utf-8",
+            )
+
+            return True
+
+        except Exception as exc:
+
+            print(
+                "[Planner] save_agent_task failed:",
+                exc,
+            )
+
+            return False
+
+    # ==========================================================
     # Trigger decision
     # ==========================================================
 
