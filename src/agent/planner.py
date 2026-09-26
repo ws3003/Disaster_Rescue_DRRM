@@ -337,6 +337,9 @@ class Planner:
         "save_event": "save_event",
         "get_snapshot": "get_snapshot",
         "get_recent_events": "get_recent_events",
+        # P0-收口: 允许 LLM 提案触发只读 rescue 分析(经 whitelist/≤3步约束)
+        "get_ranking": "get_ranking",
+        "assess_person": "assess_person",
     }
 
     # Whitelisted action -> executing tool

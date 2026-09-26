@@ -507,6 +507,92 @@ class Agent:
         }
 
     # ============================================================
+    # LLM ingestion (方案 A: 统一编排入口)
+    # ============================================================
+
+    def ingest_llm_output(
+        self,
+        llm_output: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """把 LLM 决策正式纳入统一编排。
+
+        llm_output → planner.plan_from_llm_output → agent_task
+        → Policy(Memory.should_alert 冷却门, 仅拦截 send_alert)
+        → Executor.execute_agent_task → Tools → SQLite
+        → 通信成功后 Memory.record_alert。
+
+        参数 cooldown/record 所需的 person_id/state/priority 取自 task_proposals 的
+        payload(plan_from_llm_output 已写入 send_alert args); 若缺 state, 冷却门跳过、
+        record 以 (person, None) 记录 —— 不做人为伪造。
+
+        返回: list[dict]（与 process_frame/process_trigger 风格一致）。
+        """
+        context = context or {}
+        task = self.planner.plan_from_llm_output(llm_output, context=context)
+
+        if not isinstance(task, dict) or not task.get("ok"):
+            err = task.get("error", "llm planning failed") if isinstance(task, dict) else "invalid task"
+            return [{"ok": False, "stage": "planner", "error": err, "task": task}]
+        if task.get("status") == "suppressed":
+            return [{"ok": True, "stage": "planner", "status": "suppressed", "task": task}]
+
+        actions = task.get("actions", []) or []
+        filtered: list[dict[str, Any]] = []
+        suppressed: list[dict[str, Any]] = []
+
+        # Policy: cooldown 门 —— 仅在真正发送前拦截 send_alert; 其他 action 照常执行
+        for a in actions:
+            if isinstance(a, dict) and a.get("tool") == "communication_tool" \
+                    and (a.get("args", {}) or {}).get("action") == "send_alert":
+                args = a.get("args", {}) or {}
+                pid = args.get("person_id")
+                st = args.get("state")
+                if pid is not None and st:
+                    if not self.memory.should_alert(
+                        person_id=pid, state=st,
+                        current_risk=args.get("risk_score"),
+                        minutes=self.memory.cooldown_minutes,
+                    ):
+                        suppressed.append({
+                            "ok": False, "tool": "communication_tool", "action": "send_alert",
+                            "person_id": pid, "state": st, "suppressed": True,
+                            "reason": "Memory cooldown",
+                        })
+                        continue
+            filtered.append(a)
+
+        execution_results: list[dict[str, Any]] = []
+        if filtered:
+            exec_task = dict(task)
+            exec_task["actions"] = filtered
+            res = self.executor.execute_agent_task(exec_task)
+            if isinstance(res, dict):
+                execution_results = res.get("results", []) or []
+
+            # 通信成功才 record_alert(与规则链一致); 失败不记、不入 cooldown
+            comm_ok = any(isinstance(r, dict) and r.get("tool") == "communication_tool"
+                          and r.get("ok") for r in execution_results)
+            if comm_ok:
+                for a in filtered:
+                    if isinstance(a, dict) and a.get("tool") == "communication_tool":
+                        args = a.get("args", {}) or {}
+                        self.memory.record_alert(
+                            person_id=args.get("person_id"),
+                            state=args.get("state"),
+                            risk_score=args.get("risk_score"),
+                            priority=args.get("priority"),
+                        )
+                        break
+
+        execution_results.extend(suppressed)
+        return [{
+            "ok": True, "stage": "completed",
+            "task": task, "execution": execution_results,
+            "suppressed": len(suppressed),
+        }]
+
+    # ============================================================
     # Frame processing
     # ============================================================
 
