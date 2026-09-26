@@ -299,8 +299,25 @@ def process_one(cfg, img, det, pe, clf, rk, img_path, device, verbose: bool = Tr
     return annot, payload, frame_records
 
 
+def _feed_agent(agent_runner, vision_tool, person_events: list) -> list:
+    """把感知 person_events 接入生产输入闭环(仅 --agent 时调用)。
+
+    只做: 视觉快照写入(vision_adapter->VisionTool) + frame_record 转换 +
+    调用 Agent 正式入口 process_frame()。不在此重实现任何 Agent 逻辑。
+    """
+    if not person_events:
+        return []
+    # 1) 视觉快照: person_events -> standard snapshot -> VisionTool.update_snapshot
+    from src.tools.vision_adapter import to_snapshot
+    vision_tool.run(action="update_snapshot", snapshot=to_snapshot(person_events))
+    # 2) frame_record -> Agent 正式入口 (Trigger/Memory/Planner/Executor/DB 均在 Agent 内部)
+    from src.agent.input_adapter import person_events_to_frame_record
+    frame_record = person_events_to_frame_record(person_events)
+    return agent_runner.process_frame(frame_record)
+
+
 def run(config_path: str | Path, input_path: str | Path | None = None,
-        use_camera: bool = False):
+        use_camera: bool = False, agent: bool = False):
     cfg = load_config(config_path)
 
     # 模型/推理器只构建一次 (批量时复用)
@@ -310,9 +327,23 @@ def run(config_path: str | Path, input_path: str | Path | None = None,
     rk = Riskevaluator(config_path)
     device = resolve_device(cfg)
 
+    # --agent: 生产输入闭环 (复用现有 Agent 全部能力; 仅在显式开启时激活)
+    agent_runner = None
+    vision_tool = None
+    if agent:
+        import sys as _sys
+        _repo_root = str(Path(__file__).resolve().parent.parent)
+        if _repo_root not in _sys.path:
+            _sys.path.insert(0, _repo_root)
+        from src.agent.agent import Agent
+        from src.tools.vision_tool import VisionTool
+        agent_runner = Agent()
+        vision_tool = VisionTool()
+
     # Demo V0.1: 实时摄像头模式 (Raspberry Pi 5 + Picamera2), 优先于文件输入
     if use_camera or str(cfg.get("input", {}).get("type", "")).lower() == "camera":
-        return run_camera(cfg, det, pe, clf, rk, device)
+        return run_camera(cfg, det, pe, clf, rk, device,
+                          agent_runner=agent_runner, vision_tool=vision_tool)
 
     src = Path(input_path) if input_path else Path(cfg["input"]["path"])
 
@@ -320,7 +351,8 @@ def run(config_path: str | Path, input_path: str | Path | None = None,
     video_exts = tuple(str(e).lower()
                        for e in cfg.get("video", {}).get("extensions", FALLBACK_VIDEO_EXTS))
     if src.is_file() and src.suffix.lower() in video_exts:
-        return run_video(cfg, src, det, pe, clf, rk, device)
+        return run_video(cfg, src, det, pe, clf, rk, device,
+                         agent_runner=agent_runner, vision_tool=vision_tool)
 
     image_paths = collect_inputs(src)
     if not image_paths:
@@ -340,6 +372,15 @@ def run(config_path: str | Path, input_path: str | Path | None = None,
             continue
         print(f"\n[input] {img_path}")
         annot, payload, _frame_records = process_one(cfg, img, det, pe, clf, rk, img_path, device)
+        if agent_runner is not None:
+            _person_events = [
+                {"person_id": p.get("id"), "state": p.get("state"),
+                 "risk_score": p.get("risk_score"), "priority": p.get("priority")}
+                for p in (payload.get("persons", []) or []) if p.get("id") is not None
+            ]
+            _r = _feed_agent(agent_runner, vision_tool, _person_events)
+            print(f"[agent] 已接入 {len(_person_events)} 人员 -> "
+                  f"{len(_r)} 结果, task={(len(_r[0].get('results')) if _r and isinstance(_r[0], dict) else 0)}")
         annotated_name = cfg["output"]["annotated_image"] if is_single else f"{img_path.stem}.jpg"
         annotated_path = out_dir / annotated_name
         cv2.imwrite(str(annotated_path), annot)
@@ -350,7 +391,8 @@ def run(config_path: str | Path, input_path: str | Path | None = None,
     return saved
 
 
-def run_video(cfg, video_path: Path, det, pe, clf, rk, device):
+def run_video(cfg, video_path: Path, det, pe, clf, rk, device,
+              agent_runner=None, vision_tool=None):
     """
     V0.2-M0 视频回放: 逐帧复用 process_one (算法零改动), 产出:
       1) 标注视频 <output.dir>/<video.out_video_dir>/<stem>_annotated.mp4
@@ -381,6 +423,13 @@ def run_video(cfg, video_path: Path, det, pe, clf, rk, device):
                 # 逐帧复用图片模式同一感知链路; verbose=False 避免逐帧刷屏
                 annot, _payload, records = process_one(
                     cfg, frame, det, pe, clf, rk, video_path, device, verbose=False)
+                if agent_runner is not None:
+                    _person_events = [
+                        {"person_id": p.get("id"), "state": p.get("state"),
+                         "risk_score": p.get("risk_score"), "priority": p.get("priority")}
+                        for p in (_payload.get("persons", []) or []) if p.get("id") is not None
+                    ]
+                    _feed_agent(agent_runner, vision_tool, _person_events)
                 vw.write(annot)
                 writer.append_frame_record(out_stream, frame_idx, t_sec, records)
                 n_frames += 1
@@ -395,7 +444,8 @@ def run_video(cfg, video_path: Path, det, pe, clf, rk, device):
     return out_video, out_stream
 
 
-def run_camera(cfg, det, pe, clf, rk, device, reader=None):
+def run_camera(cfg, det, pe, clf, rk, device, reader=None,
+               agent_runner=None, vision_tool=None):
     """
     Demo V0.1 实时摄像头模式 (Raspberry Pi 5 + Picamera2):
     逐帧复用 process_one (算法零改动), 与 run_video 同构, 区别仅在帧源:
@@ -457,6 +507,13 @@ def run_camera(cfg, det, pe, clf, rk, device, reader=None):
             # 逐帧复用图片/视频模式同一感知链路; img_path 仅为 payload 文本标记
             annot, _payload, records = process_one(
                 cfg, frame, det, pe, clf, rk, "picamera2", device, verbose=False)
+            if agent_runner is not None:
+                _person_events = [
+                    {"person_id": p.get("id"), "state": p.get("state"),
+                     "risk_score": p.get("risk_score"), "priority": p.get("priority")}
+                    for p in (_payload.get("persons", []) or []) if p.get("id") is not None
+                ]
+                _feed_agent(agent_runner, vision_tool, _person_events)
             if vw is not None:
                 vw.write(annot)
             if out_stream is not None:
@@ -522,10 +579,13 @@ def main():
                         help="输入: 图片路径 / 图片目录(批量) / 视频文件(mp4/avi/mov/mkv); 默认取 config input.path")
     parser.add_argument("--camera", action="store_true",
                         help="实时摄像头模式 (Raspberry Pi 5 + Picamera2; 开发机不可用)")
+    parser.add_argument("--agent", action="store_true",
+                        help="接入生产输入闭环: 感知 person_events → Agent(Trigger/Memory/Planner/Executor/Tools/Database)")
     args = parser.parse_args()
     run(Path(args.config),
         Path(args.input) if args.input else None,
-        use_camera=args.camera)
+        use_camera=args.camera,
+        agent=args.agent)
 
 
 if __name__ == "__main__":
