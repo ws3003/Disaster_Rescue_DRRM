@@ -101,8 +101,13 @@ class Agent:
         # --------------------------------------------------------
 
         memory_cfg = agent_cfg.get("memory", {}) or {}
+        memory_db = None
+        if config is not None:
+            from src.database.db import Database
+            memory_db = Database(db_path=db_path)  # 复用 config.db.path
         self.memory = Memory(
-            cooldown_minutes=memory_cfg.get("cooldown_minutes", 30)
+            cooldown_minutes=memory_cfg.get("cooldown_minutes", 30),
+            db=memory_db,
         )
 
         # --------------------------------------------------------
@@ -451,6 +456,20 @@ class Agent:
             self.stats[
                 "tasks_failed"
             ] += 1
+
+        # 决策3: 仅在报警真正成功(communication_tool 返回 ok)时记 cooldown;
+        # 通信失败不会调用 record_alert
+        if isinstance(execution_result, dict):
+            for _r in (execution_result.get("results", []) or []):
+                if isinstance(_r, dict) and _r.get("tool") == "communication_tool" \
+                        and _r.get("ok"):
+                    self.memory.record_alert(
+                        person_id=normalized_trigger.get("person_id"),
+                        state=normalized_trigger.get("state"),
+                        risk_score=normalized_trigger.get("risk_score"),
+                        priority=normalized_trigger.get("priority"),
+                    )
+                    break
 
         # --------------------------------------------------------
         # Final result

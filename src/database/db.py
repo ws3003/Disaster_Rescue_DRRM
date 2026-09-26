@@ -303,6 +303,42 @@ class Database:
     # Persons
     # ================================================================
 
+    def get_last_alert_for_state(
+        self,
+        person_id: int | str,
+        state: str,
+        event_type: str = "memory_alert",
+        limit: int = 20,
+    ) -> dict | None:
+        """查询某人员+state 最近一次 Memory alert 事件(供跨重启 cooldown 恢复)。
+
+        仅查 events、仅限类型、按 person_id 过滤、Bounded(limit) 扫描后在 Python
+        内比对 payload.state，避免全表扫描。返回不含 result 语义的事件字段。
+        """
+        rows = []
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT event_id, ts, type, person_id, payload "
+                "FROM events WHERE type = ? AND person_id = ? "
+                "ORDER BY ts DESC LIMIT ?",
+                (event_type, str(person_id), int(limit)),
+            )
+            for r in cur.fetchall():
+                rows.append({
+                    "event_id": r[0], "ts": r[1], "type": r[2],
+                    "person_id": r[3], "payload": r[4],
+                })
+        for row in rows:
+            try:
+                import json as _json
+                payload = _json.loads(row["payload"] or "{}")
+            except Exception:
+                continue
+            if payload.get("state") == str(state):
+                row["payload"] = payload
+                return row
+        return None
+
     def upsert_person(
         self,
         person_id: int,

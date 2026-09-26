@@ -50,6 +50,7 @@ class Memory:
         max_frames: int = 300,
         max_person_history: int = 100,
         cooldown_minutes: int = 30,
+        db=None,
     ):
         if max_frames <= 0:
             raise ValueError(
@@ -68,6 +69,9 @@ class Memory:
 
         # 防重报冷却默认(可经 Agent/config 配置; should_cooldown 未显式传分钟时使用)
         self.cooldown_minutes = cooldown_minutes
+
+        # SQLite 持久化(可选): db=None 保持纯内存(向后兼容)
+        self.db = db
 
         # ------------------------------------------------------
         # Recent complete frame records
@@ -482,6 +486,27 @@ class Memory:
             str(state),
         )
 
+        # 决策1: 跨重启恢复 —— 内存无缓存且已注入 SQLite 时, 回查最近一次 Memory alert
+        if key not in self.last_alerts and self.db is not None:
+            row = self.db.get_last_alert_for_state(
+                person_id=str(person_id),
+                state=str(state),
+            )
+            if row is not None:
+                payload = row.get("payload") or {}
+                try:
+                    ts = datetime.fromisoformat(
+                        payload.get("timestamp") or payload.get("ts")
+                    )
+                except (TypeError, ValueError):
+                    ts = None
+                if ts is not None:
+                    self.last_alerts[key] = {
+                        "ts": ts,
+                        "risk_score": payload.get("risk_score"),
+                        "priority": payload.get("priority"),
+                    }
+
         last_alert = self.last_alerts.get(
             key
         )
@@ -545,6 +570,24 @@ class Memory:
             "risk_score": risk_score,
             "priority": priority,
         }
+
+        # 决策1/2: 报警成功 → 写 events(type=memory_alert) 供跨重启 cooldown 恢复
+        if self.db is not None:
+            try:
+                import warnings
+                self.db.save_event(
+                    type="memory_alert",
+                    severity=str(priority or "HIGH"),
+                    person_id=person_id,
+                    payload={
+                        "state": str(state),
+                        "risk_score": risk_score,
+                        "priority": priority,
+                        "timestamp": timestamp.isoformat(),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(f"[Memory] record_alert 落库失败({exc}), 仅保留内存缓存")
 
         return {
             "ok": True,
