@@ -62,6 +62,7 @@ class CommunicationTool(Tool):
         sleep_fn: Optional[Callable[[float], None]] = None,
         max_retries: int = 2,
         backoff: tuple = (1.0, 4.0),
+        timeout: float = 10.0,
     ):
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +86,7 @@ class CommunicationTool(Tool):
         self._sleep = sleep_fn if sleep_fn is not None else time.sleep
         self.max_retries = int(max_retries)
         self.backoff = tuple(float(b) for b in backoff)
+        self.timeout = float(timeout)
 
     # ------------------------------------------------------------------
     # Channel 选择
@@ -92,7 +94,8 @@ class CommunicationTool(Tool):
     def _channel(self) -> Channel:
         if self._channel_name == "wecom":
             return WeComChannel(webhook_url=self._webhook_url,
-                                transport=self._transport)
+                                transport=self._transport,
+                                timeout=self.timeout)
         return MockChannel(log_path=str(self.log_path))
 
     # ------------------------------------------------------------------

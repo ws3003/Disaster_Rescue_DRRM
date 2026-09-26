@@ -49,6 +49,7 @@ class Memory:
         self,
         max_frames: int = 300,
         max_person_history: int = 100,
+        cooldown_minutes: int = 30,
     ):
         if max_frames <= 0:
             raise ValueError(
@@ -59,6 +60,14 @@ class Memory:
             raise ValueError(
                 "max_person_history must be greater than 0."
             )
+
+        if cooldown_minutes < 0:
+            raise ValueError(
+                "cooldown_minutes must be >= 0."
+            )
+
+        # 防重报冷却默认(可经 Agent/config 配置; should_cooldown 未显式传分钟时使用)
+        self.cooldown_minutes = cooldown_minutes
 
         # ------------------------------------------------------
         # Recent complete frame records
@@ -443,7 +452,7 @@ class Memory:
         self,
         person_id: int | str,
         state: str,
-        minutes: int = 30,
+        minutes: int | None = None,
     ) -> bool:
         """
         Check whether an alert for the same person/state
@@ -459,6 +468,9 @@ class Memory:
             Risk escalation is handled by
             should_break_cooldown().
         """
+
+        if minutes is None:
+            minutes = self.cooldown_minutes
 
         if minutes <= 0:
             raise ValueError(

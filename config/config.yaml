@@ -115,3 +115,38 @@ visualize:
   box_thickness: 2
 
 seed: 0
+# ============================================================
+# V4.0 B 侧配置 (P0-20) —— 供 Agent / Tools / Database 使用
+# 载入: src.agent.config.load_config()
+# 规则: 缺失/为 null 回退旧默认; WECOM_WEBHOOK_URL 等 secret 绝不进本文件(仅环境变量)
+# ============================================================
+agent:
+  trigger:
+    confirm_frames: 3           # 状态突变防抖帧数
+    high_risk_must_alert: true  # HIGH 必报
+    heartbeat_minutes: 5        # 心跳触发周期
+  memory:
+    cooldown_minutes: 30        # 防重报冷却(分钟)
+  planner:
+    max_steps: 3                # 单任务工具步数上限(受 MAX_STEPS=3 再兜底)
+    cooldown_minutes: 30
+
+db:
+  path: "data/drrm.db"          # 统一 SQLite 路径(Agent/Executor/DatabaseTool 共用)
+
+vision:
+  snapshot_path: "data/latest_vision.json"
+  recent_path: "data/vision_snapshots.jsonl"
+  scene_window_sec: 10          # get_scene 默认时间窗
+
+communication:
+  channel: "mock"               # mock|wecom (环境变量 COMMUNICATION_CHANNEL 优先)
+  max_retries: 2
+  backoff_seconds: [1, 4]
+  timeout: 10
+  log_path: "data/communication_log.jsonl"
+  pending_path: "data/pending_communication.jsonl"
+  # 无 WECOM_WEBHOOK_URL: secret 仅来自环境变量
+
+rescue:
+  snapshot_path: "data/latest_vision.json"

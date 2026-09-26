@@ -16,6 +16,7 @@ Responsibilities:
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from datetime import datetime
@@ -40,26 +41,50 @@ class Executor:
         self,
         db_path: str = "data/drrm.db",
         registry: ToolRegistry | None = None,
+        tools_config: dict[str, Any] | None = None,
     ):
         self.registry = registry or ToolRegistry()
 
-        self._register_default_tools(db_path)
+        self._register_default_tools(db_path, tools_config)
 
     # ================================================================
     # Tool registration
     # ================================================================
 
-    def _register_default_tools(self, db_path: str) -> None:
-        """Register the default P0 tools."""
+    def _register_default_tools(
+        self,
+        db_path: str = "data/drrm.db",
+        tools_config: dict[str, Any] | None = None,
+    ) -> None:
+        """Register the default P0 tools.
+
+        tools_config 为 B 配置(见 src.agent.config.load_config 的
+        vision/communication/rescue 段); 传 None 或字段缺失时使用各 Tool 默认。
+        """
+        tools_config = tools_config if isinstance(tools_config, dict) else {}
 
         if not self.registry.has("vision_tool"):
+            vc = tools_config.get("vision", {}) or {}
             self.registry.register(
-                VisionTool()
+                VisionTool(
+                    snapshot_path=vc.get("snapshot_path", "data/latest_vision.json"),
+                    recent_path=vc.get("recent_path", "data/vision_snapshots.jsonl"),
+                )
             )
 
         if not self.registry.has("communication_tool"):
+            cc = tools_config.get("communication", {}) or {}
+            channel = os.getenv("COMMUNICATION_CHANNEL") or cc.get("channel", "mock")
             self.registry.register(
-                CommunicationTool()
+                CommunicationTool(
+                    log_path=cc.get("log_path", "data/communication_log.jsonl"),
+                    pending_path=cc.get("pending_path", "data/pending_communication.jsonl"),
+                    channel=channel,
+                    max_retries=cc.get("max_retries", 2),
+                    backoff=tuple(cc.get("backoff_seconds", [1, 4])),
+                    timeout=cc.get("timeout", 10),
+                    # webhook_url 留 None: CommunicationTool 自读环境变量 WECOM_WEBHOOK_URL
+                )
             )
 
         if not self.registry.has("database_tool"):
@@ -70,8 +95,11 @@ class Executor:
             )
 
         if not self.registry.has("rescue_tool"):
+            rc = tools_config.get("rescue", {}) or {}
             self.registry.register(
-                RescueTool()
+                RescueTool(
+                    snapshot_path=rc.get("snapshot_path", "data/latest_vision.json")
+                )
             )
 
     # ================================================================

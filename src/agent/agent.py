@@ -78,37 +78,57 @@ class Agent:
 
     def __init__(
         self,
-        db_path: str = "data/drrm.db",
+        db_path: str | None = None,
+        config: dict[str, Any] | None = None,
     ):
 
+        cfg = config or {}
+        if db_path is None:
+            db_path = cfg.get("db", {}).get("path", "data/drrm.db")
         self.db_path = db_path
+
+        agent_cfg = cfg.get("agent", {}) or {}
 
         # --------------------------------------------------------
         # Trigger module
         # --------------------------------------------------------
 
-        self.trigger_manager = self._create_trigger_manager()
+        trigger_cfg = agent_cfg.get("trigger", {}) or {}
+        self.trigger_manager = self._create_trigger_manager(trigger=trigger_cfg)
 
         # --------------------------------------------------------
         # Memory
         # --------------------------------------------------------
 
-        self.memory = Memory()
+        memory_cfg = agent_cfg.get("memory", {}) or {}
+        self.memory = Memory(
+            cooldown_minutes=memory_cfg.get("cooldown_minutes", 30)
+        )
 
         # --------------------------------------------------------
         # Planner
         # --------------------------------------------------------
 
+        planner_cfg = agent_cfg.get("planner", {}) or {}
         self.planner = Planner(
-            memory=self.memory
+            memory=self.memory,
+            cooldown_minutes=planner_cfg.get("cooldown_minutes", 30),
+            max_steps=planner_cfg.get("max_steps", 3),
         )
 
         # --------------------------------------------------------
         # Executor
         # --------------------------------------------------------
 
+        tools_config = {
+            "vision": cfg.get("vision", {}) or {},
+            "communication": cfg.get("communication", {}) or {},
+            "rescue": cfg.get("rescue", {}) or {},
+        } if config is not None else None
+
         self.executor = Executor(
-            db_path=db_path
+            db_path=db_path,
+            tools_config=tools_config,
         )
 
         # --------------------------------------------------------
@@ -127,14 +147,18 @@ class Agent:
     # Trigger module compatibility
     # ============================================================
 
-    def _create_trigger_manager(self):
+    def _create_trigger_manager(self, trigger: dict[str, Any] | None = None):
         """
         Create the trigger engine from the existing triggers.py.
 
         The current project may use a different class name inside
         triggers.py. Therefore Agent does not require the class to
         be specifically named TriggerManager.
+
+        trigger: 可选配置 dict(confirm_frames/…), 传给兼容的 Trigger 构造器;
+                 不支持这些参数的类会优雅回退到无参构造。
         """
+        trigger_kwargs = dict(trigger or {})
 
         # --------------------------------------------------------
         # 1. Prefer commonly used trigger class names
@@ -163,14 +187,17 @@ class Agent:
                 continue
 
             try:
-                return cls()
+                return cls(**trigger_kwargs)
             except TypeError:
                 try:
-                    return cls(
-                        memory=self.memory
-                    )
-                except Exception:
-                    continue
+                    return cls()
+                except TypeError:
+                    try:
+                        return cls(
+                            memory=self.memory
+                        )
+                    except Exception:
+                        continue
 
         # --------------------------------------------------------
         # 2. Automatically search trigger-related classes
@@ -190,9 +217,12 @@ class Agent:
                 continue
 
             try:
-                return cls()
+                return cls(**trigger_kwargs)
             except Exception:
-                continue
+                try:
+                    return cls()
+                except Exception:
+                    continue
 
         # --------------------------------------------------------
         # 3. No compatible trigger class
