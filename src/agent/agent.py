@@ -510,27 +510,57 @@ class Agent:
     # LLM ingestion (方案 A: 统一编排入口)
     # ============================================================
 
+    def extract_authoritative_observation(self, llm_output: dict[str, Any]):
+        """A→B Contract(Phase1): 提取顶层 observation 权威块。
+
+        返回 (error|None, persons_map|None, observation|None)。
+        - 无 observation/persons → (None, None, None)：视为 legacy Contract
+        - observation 存在但缺 observation_id 或 persons 非列表 → error（拒绝执行）
+        - persons[] 内 person_id 重复 → 后者覆盖（确定性）；person_id 仅 observation 内有效
+        """
+        persons = llm_output.get("persons")
+        observation = llm_output.get("observation")
+        if observation is None and persons is None:
+            return None, None, None
+        if not isinstance(observation, dict) or not observation.get("observation_id"):
+            return "observation missing or missing observation_id", None, None
+        if not isinstance(persons, list):
+            return "observation present but 'persons' missing or not a list", None, None
+        persons_map = {}
+        for p in persons:
+            if isinstance(p, dict) and p.get("person_id") is not None:
+                persons_map[str(p["person_id"])] = p
+        return None, persons_map, observation
+
     def ingest_llm_output(
         self,
         llm_output: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """把 LLM 决策正式纳入统一编排。
+        """把 LLM 决策正式纳入统一编排（A→B Contract Phase1）。
 
         llm_output → planner.plan_from_llm_output → agent_task
         → Policy(Memory.should_alert 冷却门, 仅拦截 send_alert)
         → Executor.execute_agent_task → Tools → SQLite
         → 通信成功后 Memory.record_alert。
 
-        参数 cooldown/record 所需的 person_id/state/priority 取自 task_proposals 的
-        payload(plan_from_llm_output 已写入 send_alert args); 若缺 state, 冷却门跳过、
-        record 以 (person, None) 记录 —— 不做人为伪造。
+        Contract(Phase1, 权威): 若顶层带 `observation` + `persons[]`，
+          state/state_conf/risk_score/priority/bbox/frame_idx 以 observation.persons[target]
+          为唯一权威（Edge FACT），忽略 task_proposals.payload 中的同名字段；
+          target 缺失或不在 observation.persons → 拒绝该 send_alert（不执行、不 record）。
+        旧 Contract(无 observation/persons): 保持向后兼容（payload facts 视为 legacy 来源）。
 
-        返回: list[dict]（与 process_frame/process_trigger 风格一致）。
+        返回: list[dict]（与 process_frame 一致；含 suppressed / rejected 计数）。
         """
         context = context or {}
-        task = self.planner.plan_from_llm_output(llm_output, context=context)
 
+        # Phase1 权威观测: (error, persons_map|None, observation|None)
+        auth_error, persons_map, _obs = self.extract_authoritative_observation(llm_output)
+        if auth_error:
+            return [{"ok": False, "stage": "contract", "error": auth_error,
+                     "task": llm_output}]
+
+        task = self.planner.plan_from_llm_output(llm_output, context=context)
         if not isinstance(task, dict) or not task.get("ok"):
             err = task.get("error", "llm planning failed") if isinstance(task, dict) else "invalid task"
             return [{"ok": False, "stage": "planner", "error": err, "task": task}]
@@ -540,14 +570,43 @@ class Agent:
         actions = task.get("actions", []) or []
         filtered: list[dict[str, Any]] = []
         suppressed: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
 
-        # Policy: cooldown 门 —— 仅在真正发送前拦截 send_alert; 其他 action 照常执行
+        # Policy: 权威回填 + 冷却门 —— 仅在发送前处理 send_alert; 其他 action 照常
         for a in actions:
             if isinstance(a, dict) and a.get("tool") == "communication_tool" \
                     and (a.get("args", {}) or {}).get("action") == "send_alert":
-                args = a.get("args", {}) or {}
+                args = dict(a.get("args", {}) or {})
                 pid = args.get("person_id")
-                st = args.get("state")
+                st = None
+                if persons_map is not None:
+                    # 权威模式: target 必须是本次 observation 中的一个 person
+                    if pid is None:
+                        rejected.append({"ok": False, "tool": "communication_tool",
+                                         "action": "send_alert", "person_id": None,
+                                         "rejected": True, "reason": "target missing"})
+                        continue
+                    if str(pid) not in persons_map:
+                        rejected.append({"ok": False, "tool": "communication_tool",
+                                         "action": "send_alert", "person_id": pid,
+                                         "rejected": True,
+                                         "reason": "target not in observation.persons"})
+                        continue
+                    p = persons_map[str(pid)]
+                    # 回填 Edge FACT（覆盖 LLM payload 中的 state/priority/risk, 权威优先）
+                    args["state"] = p.get("state")
+                    args["priority"] = p.get("priority")
+                    args["risk_score"] = p.get("risk_score")
+                    st = args["state"]
+                else:
+                    # legacy: 以 payload 字段为来源
+                    st = args.get("state")
+                    if pid is None:
+                        rejected.append({"ok": False, "tool": "communication_tool",
+                                         "action": "send_alert", "person_id": None,
+                                         "rejected": True, "reason": "target missing"})
+                        continue
+
                 if pid is not None and st:
                     if not self.memory.should_alert(
                         person_id=pid, state=st,
@@ -558,8 +617,10 @@ class Agent:
                             "ok": False, "tool": "communication_tool", "action": "send_alert",
                             "person_id": pid, "state": st, "suppressed": True,
                             "reason": "Memory cooldown",
+                            "authoritative": persons_map is not None,
                         })
                         continue
+                a["args"] = args
             filtered.append(a)
 
         execution_results: list[dict[str, Any]] = []
@@ -571,25 +632,24 @@ class Agent:
                 execution_results = res.get("results", []) or []
 
             # 通信成功才 record_alert(与规则链一致); 失败不记、不入 cooldown
-            comm_ok = any(isinstance(r, dict) and r.get("tool") == "communication_tool"
-                          and r.get("ok") for r in execution_results)
-            if comm_ok:
-                for a in filtered:
-                    if isinstance(a, dict) and a.get("tool") == "communication_tool":
-                        args = a.get("args", {}) or {}
-                        self.memory.record_alert(
-                            person_id=args.get("person_id"),
-                            state=args.get("state"),
-                            risk_score=args.get("risk_score"),
-                            priority=args.get("priority"),
-                        )
-                        break
+            # 按 action 逐条记录: 每个实际成功的 send_alert 记各自 (person,state) 冷却
+            for act, res in zip(filtered, execution_results):
+                if isinstance(act, dict) and act.get("tool") == "communication_tool" \
+                        and isinstance(res, dict) and res.get("ok"):
+                    args = act.get("args", {}) or {}
+                    self.memory.record_alert(
+                        person_id=args.get("person_id"),
+                        state=args.get("state"),
+                        risk_score=args.get("risk_score"),
+                        priority=args.get("priority"),
+                    )
 
+        execution_results.extend(rejected)
         execution_results.extend(suppressed)
         return [{
             "ok": True, "stage": "completed",
             "task": task, "execution": execution_results,
-            "suppressed": len(suppressed),
+            "suppressed": len(suppressed), "rejected": len(rejected),
         }]
 
     # ============================================================
