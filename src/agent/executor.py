@@ -25,6 +25,7 @@ from src.tools.base import ToolRegistry
 from src.tools.vision_tool import VisionTool
 from src.tools.communication_tool import CommunicationTool
 from src.tools.database_tool import DatabaseTool
+from src.tools.rescue_tool import RescueTool
 
 
 class Executor:
@@ -66,6 +67,11 @@ class Executor:
                 DatabaseTool(
                     db_path=db_path
                 )
+            )
+
+        if not self.registry.has("rescue_tool"):
+            self.registry.register(
+                RescueTool()
             )
 
     # ================================================================

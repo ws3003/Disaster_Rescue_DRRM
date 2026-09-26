@@ -71,6 +71,8 @@ class Planner:
         "send_alert",
         "save_event",
         "get_recent_events",
+        "get_ranking",
+        "assess_person",
         "hardware_alarm",
         "query_map",
     }
@@ -344,6 +346,8 @@ class Planner:
         "send_alert": "communication_tool",
         "save_event": "database_tool",
         "get_recent_events": "database_tool",
+        "get_ranking": "rescue_tool",
+        "assess_person": "rescue_tool",
     }
 
     def plan_from_llm_output(
