@@ -120,7 +120,11 @@ class GatewaySuccessTest(GatewayTestCase):
         self.assertTrue(body["success"])
         self.assertIsNone(body["error"])
         self.assertEqual(body["vlm_output"]["scene_type"], "collapse")
-        self.assertEqual(body["llm_output"]["task_proposals"][0]["action"], "alert")
+        # Phase2-B authoritative contract: action 对齐 B 词表(alert→send_alert), payload 剥离事实, 顶层含 observation/persons
+        self.assertEqual(body["llm_output"]["task_proposals"][0]["action"], "send_alert")
+        self.assertEqual(body["llm_output"]["contract_version"], "0.1-observation-v1")
+        self.assertIn("observation", body["llm_output"])
+        self.assertIn("persons", body["llm_output"])
 
     def test_vlm_receives_real_temp_image(self):
         vlm_tr, _ = self._override()

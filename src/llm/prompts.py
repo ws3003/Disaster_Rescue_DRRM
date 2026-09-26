@@ -18,9 +18,11 @@ from typing import Any, Dict, List
 # LLM 可提议的动作词表 —— 解决 task_proposals.action 与 Agent actions/tool 的映射。
 # 模型只能从这里取值作为任务建议的动作, 不直接调用任何工具。
 TASK_PROPOSAL_VOCAB: Dict[str, str] = {
-    "alert": "生成针对某人员/情况的风险提醒(高危预警, 供现场关注)",
-    "notify": "通知相关系统/部门该事件(信息通报)",
-    "log": "记录一次事件/人员处置信息(留痕)",
+    "send_alert": "对指定 person(person_id) 发送报警",
+    "save_event": "记录一次事件(可为 null 目标)",
+    "get_snapshot": "查询视觉快照(person_id 或 null)",
+    "get_ranking": "查询救援排序(person_id 或 null)",
+    "assess_person": "评估指定 person(必须指向有效 person_id)",
 }
 
 
@@ -42,9 +44,13 @@ SYSTEM_PROMPT = (
     "- risk_explanations: 数组, 每项含 pid(人员编号, 对应传入的人员 person_id) 与 reason(该人员风险分级的原因)\n"
     "- rescue_suggestions: 数组, 每条为一条面向现场指挥的救援建议\n"
     "- task_proposals: 数组, 建议下游执行的任务候选; 每项为 {action, target, payload}, "
-    "action 必须取自下列词表, target 为人员编号(无特定对象则为 null), payload 为附带信息对象\n"
+    "action 必须取自下列词表, target 必须为人员数据中已存在的 person_id(非数组下标, 无特定对象则 null), "
+    "payload 仅用于补充如 message 等说明, 禁止携带 state/risk_score/priority 等人员事实字段\n"
     "动作词表(只能取其一):\n"
     f"{_format_vocab()}\n"
+    "人员事实权威: 传入的人员 person_id/state/risk_score/priority 是外部 observation 提供的"
+    "Edge 事实, 你只能读取并据此推理, 不得修改、不得重新判断、不得生成新的 state/risk_score/priority; "
+    "也不得生成 state_conf/bbox/frame_idx/observation_id/timestamp。\n"
     "职责边界:\n"
     "- 你只负责分析、提出建议、生成任务候选。\n"
     "- 你不负责直接执行救援, 不负责报警发送, 不负责设备控制; 你不代替下游系统作出最终处置。\n"

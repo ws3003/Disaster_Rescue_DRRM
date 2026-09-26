@@ -83,7 +83,7 @@ class LlmClientTest(unittest.TestCase):
     def test_alert_targets_highest_risk_person(self):
         raw = LLMClient("mock").infer(VLM_FRAME, PERSONS)
         alerts = [
-            p for p in llm_parser.parse(raw).task_proposals if p["action"] == "alert"
+            p for p in llm_parser.parse(raw).task_proposals if p["action"] == "send_alert"
         ]
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0]["target"], 2)  # risk 0.95 最高
@@ -92,10 +92,10 @@ class LlmClientTest(unittest.TestCase):
         raw = LLMClient("mock").infer({"scene_type": "flood"}, [])
         frame = llm_parser.parse(raw).to_dict()
         jsonschema.validate(frame, _setup.load_schema("llm_output"))
-        # 无人员时不应出现 alert, 但 log 留痕仍在
+        # 无人员时不应出现 send_alert, 但 save_event 留痕仍在
         actions = {p["action"] for p in frame["task_proposals"]}
-        self.assertNotIn("alert", actions)
-        self.assertIn("log", actions)
+        self.assertNotIn("send_alert", actions)
+        self.assertIn("save_event", actions)
 
     def test_unknown_provider_raises(self):
         with self.assertRaises(LLMProviderError):

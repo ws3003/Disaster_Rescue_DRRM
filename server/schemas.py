@@ -41,6 +41,42 @@ class AnalyzeResponse(BaseModel):
     error: Optional[str] = Field(None, description="失败原因; 成功为 null")
 
 
+# ---- A→B authoritative observation Contract (Phase 2-B) ----
+CONTRACT_VERSION = "0.1-observation-v1"
+
+
+class PersonObservation(BaseModel):
+    """一份 Edge observation 内的人员事实 (person_id 仅 observation 内有效，非跨帧身份)。"""
+
+    person_id: int = Field(..., description="observation 内局部人员编号")
+    state: Optional[str] = Field(None, description="Edge 状态 (authoritative)")
+    state_conf: Optional[float] = None
+    risk_score: Optional[float] = Field(None, description="DRRM 风险分 (authoritative)")
+    priority: Optional[str] = Field(None, description="Edge 优先级 (authoritative)")
+    bbox: Optional[Any] = None
+    frame_idx: Optional[int] = None
+
+
+class Observation(BaseModel):
+    """Edge observation 元信息 (由 observation layer 创建, 非 LLM)。"""
+
+    observation_id: str = Field(..., description="UUID; 一次 HTTP 请求一个")
+    timestamp: str = Field(..., description="ISO 8601 带时区")
+    frame_idx: Optional[int] = None
+
+
+class AuthoritativeLLMOutput(BaseModel):
+    """A 输出给 B 的 authoritative llm_output (FACT + INFERENCE + ACTION 分离)。"""
+
+    contract_version: str = CONTRACT_VERSION
+    observation: Observation
+    persons: List[PersonObservation]
+    event_summary: str = ""
+    risk_explanations: List[Dict[str, Any]] = Field(default_factory=list)
+    rescue_suggestions: List[str] = Field(default_factory=list)
+    task_proposals: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 # 便利构造器, 供 api.py 与测试复用
 def ok(vlm_output: Dict[str, Any], llm_output: Dict[str, Any]) -> AnalyzeResponse:
     return AnalyzeResponse(success=True, vlm_output=vlm_output, llm_output=llm_output,

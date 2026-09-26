@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 import server.schemas as sch
@@ -139,6 +140,88 @@ def _error_response(status: int, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content=body.model_dump())
 
 
+# ----------------------------------------------------------------------
+# A→B authoritative observation Contract (Phase 2-B)
+# ----------------------------------------------------------------------
+# Edge FACT + LLM INFERENCE + LLM ACTION 分离; 人员事实唯一来自 Edge person_events。
+_ACTION_ALIAS = {"alert": "send_alert", "notify": "send_alert", "log": "save_event"}
+_ALLOWED_ACTIONS = {"send_alert", "save_event", "get_snapshot", "get_ranking", "assess_person"}
+# LLM 禁止在 payload 携带的人员事实字段(A 侧一律剥离; 权威以 persons[] 为准)
+_PAYLOAD_FORBIDDEN = ("state", "risk_score", "priority", "state_conf", "bbox", "frame_idx")
+# 需要有效 person 目标的 action
+_REQUIRE_PERSON_TARGET = ("send_alert", "assess_person")
+
+
+def _iso_now() -> str:
+    """observation 层创建时间戳: ISO 8601 带时区。"""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _build_persons(edge_persons: List[dict]) -> List[dict]:
+    """由 Edge person_events 构造 persons[](Edge FACT); 缺失字段一律 null, 不伪造。"""
+    out: List[dict] = []
+    for p in edge_persons:
+        out.append({
+            "person_id": p.get("person_id"),
+            "state": p.get("state"),
+            "state_conf": None,
+            "risk_score": p.get("risk_score"),
+            "priority": p.get("priority"),
+            "bbox": None,
+            "frame_idx": None,
+        })
+    return out
+
+
+def _sanitize_proposal(proposal: dict, person_ids: set) -> Optional[dict]:
+    """规整单条 task_proposal: 对齐 B 词表、剥离 payload 事实字段、校验 target。"""
+    if not isinstance(proposal, dict):
+        return None
+    action = _ACTION_ALIAS.get(str(proposal.get("action") or ""), str(proposal.get("action") or ""))
+    if action not in _ALLOWED_ACTIONS:
+        return None  # 未知 action 丢弃
+
+    target = proposal.get("target")
+    if isinstance(target, bool):
+        target = None
+    elif isinstance(target, str):
+        target = int(target.strip()) if target.strip().lstrip("-").isdigit() else None
+    if not isinstance(target, int):
+        target = None
+
+    payload = dict(proposal.get("payload") or {})
+    for f in _PAYLOAD_FORBIDDEN:
+        payload.pop(f, None)  # 剥离 LLM 可能带去的事实字段
+
+    # target 必须是 observation 内 person_id(非数组下标); 需要 person 的 action 不得为 null
+    if action in _REQUIRE_PERSON_TARGET and (target is None or str(target) not in person_ids):
+        return None
+    if target is not None and str(target) not in person_ids:
+        return None
+
+    return {"action": action, "target": target, "payload": payload}
+
+
+def _assemble_contract(observation: dict, persons: List[dict], llm: dict) -> dict:
+    """组装 authoritative llm_output = observation + persons(Edge FACT) + LLM(INFERENCE/ACTION)。"""
+    person_ids = {str(p["person_id"]) for p in persons if p.get("person_id") is not None}
+    proposals: List[dict] = []
+    for p in (llm.get("task_proposals") or []):
+        s = _sanitize_proposal(p, person_ids)
+        if s is not None:
+            proposals.append(s)
+
+    return {
+        "contract_version": sch.CONTRACT_VERSION,
+        "observation": observation,
+        "persons": persons,
+        "event_summary": llm.get("event_summary", ""),
+        "risk_explanations": llm.get("risk_explanations", []),
+        "rescue_suggestions": llm.get("rescue_suggestions", []),
+        "task_proposals": proposals,
+    }
+
+
 @app.post("/api/v1/analyze", response_model=sch.AnalyzeResponse)
 def analyze(
     image: UploadFile = File(..., description="灾害现场图片 (jpg/jpeg/png)"),
@@ -151,13 +234,24 @@ def analyze(
         temp_path = _save_upload(image)
         persons = _parse_persons(person_events)
 
+        # [A→B Contract] observation layer: 一次 HTTP 请求一个 observation_id; timestamp 由本层创建
+        observation = {
+            "observation_id": f"obs-{uuid.uuid4().hex}",
+            "timestamp": _iso_now(),
+            "frame_idx": None,
+        }
+        persons_facts = _build_persons(persons)  # Edge FACT (缺失字段 null, 不伪造)
+
         # [1] VLM → 标准化 vlm_output
         vlm_raw = vlm_client.analyze(temp_path)
         vlm_output = parse_vlm(vlm_raw).to_dict()
 
-        # [2] LLM → 标准化 llm_output
+        # [2] LLM → 标准化 llm_output (INFERENCE + ACTION)
         llm_raw = llm_client.infer(vlm_output, persons)
-        llm_output = parse_llm(llm_raw).to_dict()
+        llm = parse_llm(llm_raw).to_dict()
+
+        # [3] 组装 authoritative Contract: 由 server 注入 persons(非 LLM), 剥离 payload 事实字段
+        llm_output = _assemble_contract(observation, persons_facts, llm)
     except ApiImageError as exc:
         return _error_response(sch.HTTP_IMAGE_ERROR, f"图片错误: {exc}")
     except ApiRequestError as exc:

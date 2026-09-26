@@ -77,7 +77,7 @@ class LlmPromptTest(unittest.TestCase):
 class TaskProposalVocabTest(unittest.TestCase):
     def test_vocab_exists_and_has_required_actions(self):
         self.assertIsInstance(llm_prompts.TASK_PROPOSAL_VOCAB, dict)
-        for action in ("alert", "notify", "log"):
+        for action in ("send_alert", "save_event", "get_snapshot", "get_ranking", "assess_person"):
             self.assertIn(action, llm_prompts.TASK_PROPOSAL_VOCAB)
 
     def test_actions_have_meaning(self):
@@ -85,7 +85,7 @@ class TaskProposalVocabTest(unittest.TestCase):
             self.assertTrue(meaning.strip(), f"action {action} 缺含义说明")
 
     def test_vocab_injected_into_system_prompt(self):
-        for action in ("alert", "notify", "log"):
+        for action in ("send_alert", "save_event", "get_snapshot", "get_ranking", "assess_person"):
             self.assertIn(action, llm_prompts.SYSTEM_PROMPT)
 
 

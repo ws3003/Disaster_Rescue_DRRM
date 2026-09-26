@@ -166,22 +166,14 @@ class LLMClient:
             top = max(persons, key=lambda p: _risk_key(p))
             task_proposals.append(
                 {
-                    "action": "alert",
+                    "action": "send_alert",
                     "target": top["person_id"],
                     "payload": {"severity": severity, "state": top.get("state")},
                 }
             )
-        if severity in ("high", "critical"):
-            task_proposals.append(
-                {
-                    "action": "notify",
-                    "target": None,
-                    "payload": {"scene": scene, "severity": severity},
-                }
-            )
         task_proposals.append(
             {
-                "action": "log",
+                "action": "save_event",
                 "target": None,
                 "payload": {"scene": scene, "severity": severity, "n_persons": len(persons)},
             }

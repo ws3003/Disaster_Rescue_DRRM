@@ -66,14 +66,14 @@ class DemoPipelineTest(unittest.TestCase):
         jsonschema.validate(self.llm_output, _setup.load_schema("llm_output"))
 
     def test_task_proposals_non_empty_and_in_vocab(self):
-        # mock 逻辑: 有人员(风险 0.82)→alert; critical 场景→notify; 必有 log
+        # mock 逻辑: 有人员(风险 0.82)→send_alert; 必有 save_event 留痕
         proposals = self.llm_output["task_proposals"]
         self.assertTrue(proposals)
         actions = {p["action"] for p in proposals}
         self.assertTrue(actions)
         self.assertTrue(actions.issubset(set(TASK_PROPOSAL_VOCAB)))
-        self.assertIn("alert", actions)  # person_event.json 中风险最高者
-        self.assertIn("log", actions)
+        self.assertIn("send_alert", actions)  # person_event.json 中风险最高者
+        self.assertIn("save_event", actions)
 
     def test_risk_explanations_cover_person_event(self):
         pids = {item["pid"] for item in self.llm_output["risk_explanations"]}
