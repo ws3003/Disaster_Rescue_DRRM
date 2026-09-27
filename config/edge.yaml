@@ -25,3 +25,38 @@ perception:
   #       桥接层按约束"只调用不接管"不读取它们。
   model_path: "models/disaster_best.pt"
   device: "cpu"
+
+# ──────────────────────────────────────────────────────────────
+# V4.0-B Agent 决策辅助 (feature/v4.0-edge-agent 接入)
+# 默认关闭; 置 agent.enabled: true 后, 边缘感知 person_events 会旁路送入
+# Agent.process_frame (Trigger→Memory→Planner→Executor→Tools→SQLite)。
+# 任何 Agent 异常都不阻断原有 "perception → uploader" 上传链路。
+# ──────────────────────────────────────────────────────────────
+agent:
+  enabled: false              # 默认关闭, 保持纯上传降级路径
+  trigger:
+    high_risk_must_alert: true  # Fall/Lying 高风险必须报警(可突破 cooldown)
+  memory:
+    cooldown_minutes: 30        # 防重报冷却(分钟)
+  planner:
+    cooldown_minutes: 30
+    max_steps: 3
+
+# SQLite 统一路径 (Agent/Executor/DatabaseTool 共用)
+db:
+  path: "data/drrm.db"
+
+# Vision 工具配置
+vision:
+  snapshot_path: "data/latest_vision.json"
+  recent_path: "data/vision_snapshots.jsonl"
+
+# 通讯工具配置 (树莓派默认 mock, 不触达真实微信, 仅写 jsonl)
+communication:
+  channel: "mock"                # mock|wecom; 环境变量 COMMUNICATION_CHANNEL 优先
+  log_path: "data/communication_log.jsonl"
+  pending_path: "data/pending_communication.jsonl"
+
+# 救援工具配置
+rescue:
+  snapshot_path: "data/latest_vision.json"

@@ -19,12 +19,21 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import cv2
 import requests
 import yaml
+
+# 保证可从 `cd src && python edge_client.py` 运行 (顶层 import camera/edge_perception)
+# 同时把 repo 根加入 sys.path, 使 V4.0-B Agent 用 b 分支真实约定 `from src.agent.agent`
+# 导入 (src/ 无 __init__.py, 为 namespace package, 不可用 `from agent import`)。
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_SRC_DIR)
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
 
 # 默认配置文件 (repo 根/config/edge.yaml)
 CONFIG_PATH = os.path.join(
@@ -255,6 +264,7 @@ def run_loop(
     sleep: Callable[[float], None] = time.sleep,
     perception: Optional[Any] = None,
     preview: bool = False,
+    agent: Optional[Any] = None,
 ) -> int:
     """周期性 采集→(感知)→编码→上传→打印; preview 时叠加显示相机帧。
 
@@ -262,6 +272,9 @@ def run_loop(
     max_uploads 限制迭代次数(供测试/--once); sleep 可注入(测试用 no-op)。
     perception: 本地感知桥接(EdgePerception), 提供 analyze(frame)->person_events;
                 为 None 时上传空 person_events。
+    agent: V4.0-B Agent 决策辅助(旁路). 为 None 时完全不启用;
+           异常只打印不阻断 upload. 必须由调用方在 main() 中初始化一次(跨帧复用,
+           保证 memory cooldown 生效, 避免重复报警).
     """
     iterations = 0
     while True:
@@ -306,6 +319,21 @@ def run_loop(
             print("[Perception]")
             print("person_events:")
             print(json.dumps(person_events, indent=2, ensure_ascii=False))
+
+        # V4.0-B Agent 决策辅助: 旁路接入, 不修改 person_events, 不影响 upload
+        # 失败只打印并继续, 绝不阻断上传链路
+        if agent is not None and person_events:
+            try:
+                from src.agent.input_adapter import person_events_to_frame_record
+                frame_record = person_events_to_frame_record(
+                    person_events,
+                    timestamp=ts,
+                )
+                agent.process_frame(frame_record)
+            except Exception as exc:  # noqa: BLE001
+                print("[EdgeClient]")
+                print(ts)
+                print(f"agent process failed (upload continues): {exc}")
 
         # 预览模式: 叠加 person_events 文字显示相机帧; 按 q 退出
         # (headless/无显示环境抛错时自动关闭预览, 不影响后续上传)
@@ -399,12 +427,24 @@ def main(argv: Optional[list] = None) -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"[EdgeClient] perception init failed, upload image only: {exc}")
 
+    # V4.0-B Agent 决策辅助: main() 中一次性初始化, 跨帧复用 (memory cooldown 生效)
+    # 默认关闭 (agent.enabled=false); 初始化失败回退为仅上传, 不阻塞
+    agent = None
+    agent_cfg = cfg.get("agent", {}) or {}
+    if agent_cfg.get("enabled", False):
+        try:
+            from src.agent.agent import Agent
+            agent = Agent(config=cfg)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[EdgeClient] agent init failed, fallback to upload only: {exc}")
+
     try:
         run_loop(
             uploader, cam, interval=interval, quality=quality,
             max_uploads=1 if args.once else None,
             perception=perception,
             preview=args.preview,
+            agent=agent,
         )
     finally:
         cam.close()
