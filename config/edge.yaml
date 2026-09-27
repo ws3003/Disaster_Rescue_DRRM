@@ -33,7 +33,7 @@ perception:
 # 任何 Agent 异常都不阻断原有 "perception → uploader" 上传链路。
 # ──────────────────────────────────────────────────────────────
 agent:
-  enabled: false              # 默认关闭, 保持纯上传降级路径
+  enabled: true              # 默认关闭, 保持纯上传降级路径
   trigger:
     high_risk_must_alert: true  # Fall/Lying 高风险必须报警(可突破 cooldown)
   memory:
