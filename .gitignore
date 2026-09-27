@@ -36,3 +36,6 @@ src/database/data/
 
 # system
 .DS_Store
+
+# env secrets (commit .env.example, never commit real .env)
+.env

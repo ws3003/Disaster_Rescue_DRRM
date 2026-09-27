@@ -5,8 +5,9 @@ src/tools/channels.py — 通信渠道抽象 (P0-17)
 
     Channel
       ↑
-      ├── MockChannel   (本地日志, 无网络, 单测/离线用)
-      └── WeComChannel  (企业微信群机器人 Webhook, 真实发送)
+      ├── MockChannel      (本地日志, 无网络, 单测/离线用)
+      ├── WeComChannel     (企业微信群机器人 Webhook, 真实发送)
+      └── DingTalkChannel  (钉钉机器人 Webhook, 真实发送)
 
 设计约束:
   - webhook 地址绝不硬编码; 由构造参数 / 环境变量提供;
@@ -162,3 +163,85 @@ class WeComChannel(Channel):
         b64 = base64.b64encode(data).decode("ascii")
         md5 = hashlib.md5(data).hexdigest()
         return self._call({"msgtype": "image", "image": {"base64": b64, "md5": md5}})
+
+
+class DingTalkChannel(Channel):
+    """钉钉机器人 Webhook 渠道 (真实发送)。
+
+    webhook_url 由构造参数或环境 DINGTALK_WEBHOOK 提供; 禁止硬编码。
+    transport 可注入(签名同 requests.post): url, json=, headers=, timeout=。
+
+    钉钉安全须知: markdown 内容首行需包含安全关键词(本项目 "灾害报警"),
+    否则钉钉拒绝发送(返回 errcode 310000)。本渠道不自动注入关键词,
+    由调用方(CommunicationTool)构造含关键词的 markdown; 仅在此保有兜底:
+    检测首行无关键词时自动前缀一行, 提高真实发送成功概率。
+    """
+
+    name = "DINGTALK"
+    _KEYWORD = "灾害报警"
+
+    def __init__(
+        self,
+        webhook_url: Optional[str] = None,
+        transport: Optional[Callable[..., Any]] = None,
+        timeout: float = 10.0,
+    ):
+        self.webhook_url = webhook_url
+        self._post = transport if transport is not None else self._default_post
+        self.timeout = timeout
+
+    @staticmethod
+    def _default_post(url: str, **kwargs: Any) -> Any:
+        import requests
+        return requests.post(url, **kwargs)
+
+    def verify(self) -> bool:
+        return bool(self.webhook_url and str(self.webhook_url).strip())
+
+    def _call(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """POST 钉钉 robot webhook 并校验 HTTP + errcode。"""
+        if not self.verify():
+            return {"ok": False, "transient": False,
+                    "error": "DINGTALK_WEBHOOK 未配置", "channel": self.name}
+        try:
+            resp = self._post(
+                self.webhook_url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=self.timeout,
+            )
+        except Exception as exc:  # network/timeout 等 → 可重试
+            return {"ok": False, "transient": True,
+                    "error": f"network error: {exc}", "channel": self.name}
+
+        http = getattr(resp, "status_code", None)
+        try:
+            body = resp.json()
+        except Exception:
+            body = {}
+        ok = http == 200 and isinstance(body, dict) and body.get("errcode") == 0
+        if ok:
+            return {"ok": True, "channel": self.name, "transient": False}
+
+        # 钉钉失败体: {"errcode": 310000, "errmsg": "..."}; transient=True 由调用方重试
+        errcode = body.get("errcode") if isinstance(body, dict) else None
+        errmsg = body.get("errmsg") if isinstance(body, dict) else "non-json response"
+        return {"ok": False, "transient": True, "http": http,
+                "errcode": errcode, "error": errmsg or f"http {http}",
+                "channel": self.name}
+
+    def send_markdown(self, content: str, **meta: Any) -> Dict[str, Any]:
+        # 钉钉安全: 内容首行需含安全关键词, 缺则兜底前缀(保证真实发送不因关键词被拒)
+        if self._KEYWORD not in content.splitlines()[0] if content else False:
+            content = f"## {self._KEYWORD}\n\n{content}"
+        return self._call({"msgtype": "markdown",
+                           "markdown": {"title": self._KEYWORD, "text": content}})
+
+    def send_image(self, image_path: str, **meta: Any) -> Dict[str, Any]:
+        try:
+            data = open(image_path, "rb").read()
+        except Exception as exc:
+            return {"ok": False, "transient": False, "channel": self.name,
+                    "error": f"image read failed: {exc}"}
+        b64 = base64.b64encode(data).decode("ascii")
+        return self._call({"msgtype": "image", "image": {"base64": b64}})

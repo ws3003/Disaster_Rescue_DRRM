@@ -4,19 +4,21 @@ src/tools/communication_tool.py — 通信工具 (P0-17 真实化)
 统一发送救援报警到所选 Channel:
 
     Planner → Executor → CommunicationTool.run(send_alert) → Channel
-          ├── MockChannel   (本地日志, 无网络, 单测/离线)
-          └── WeComChannel  (企业微信 Webhook, 真实发送)
+          ├── MockChannel      (本地日志, 无网络, 单测/离线)
+          ├── WeComChannel     (企业微信 Webhook, 真实发送)
+          └── DingTalkChannel  (钉钉机器人 Webhook, 真实发送)
 
 P0-17 新增能力:
   - Channel 抽象 + Mock/WeCom 两种后端;
   - 重试(首次 + 2 次 = 最多 3 次尝试), 指数退避 1s / 4s, 可注入 sleep 供测试;
   - 持久化 pending 队列(data/pending_communication.jsonl), 失败/配置缺失入库;
   - 恢复补发 flush_pending(成功移除, 失败保留);
-  - 严禁: 无 WECOM_WEBHOOK_URL 时静默回落 Mock —— 显式 channel=wecom 缺 URL 报错并入队。
+  - 严禁: 无 webhook 时静默回落 Mock —— 显式 channel=wecom/dingtalk 缺 URL 报错并入队。
 
 渠道显式选择(环境变量, 不硬编码):
-  COMMUNICATION_CHANNEL = mock | wecom   (默认 mock, 兼容既有测试)
+  COMMUNICATION_CHANNEL = mock | wecom | dingtalk   (默认 mock, 兼容既有测试)
   WECOM_WEBHOOK_URL     = 企业微信 webhook 地址
+  DINGTALK_WEBHOOK      = 钉钉机器人 webhook 地址 (https://oapi.dingtalk.com/robot/send?access_token=...)
 
 run() 契约保持不变: send_alert / get_recent_alerts 继续可用; 新增 flush_pending。
 """
@@ -39,6 +41,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.tools.base import Tool  # noqa: E402
 from src.tools.channels import (  # noqa: E402
     Channel,
+    DingTalkChannel,
     MockChannel,
     WeComChannel,
 )
@@ -72,15 +75,20 @@ class CommunicationTool(Tool):
         if channel == "auto":
             channel = os.getenv("COMMUNICATION_CHANNEL", "mock")
         channel = str(channel or "mock").lower()
-        if channel not in ("mock", "wecom"):
-            raise ValueError(f"COMMUNICATION_CHANNEL 非法: {channel!r}(mock|wecom)")
+        if channel not in ("mock", "wecom", "dingtalk"):
+            raise ValueError(
+                f"COMMUNICATION_CHANNEL 非法: {channel!r}(mock|wecom|dingtalk)"
+            )
         self._channel_name = channel
 
         # webhook 地址仅来自显式参数或环境变量, 禁止硬编码
+        env_key = "WECOM_WEBHOOK_URL" if channel == "wecom" else "DINGTALK_WEBHOOK"
         if webhook_url is not None:
             self._webhook_url = webhook_url or None
+        elif channel == "dingtalk":
+            self._webhook_url = os.getenv("DINGTALK_WEBHOOK") or None
         else:
-            self._webhook_url = os.getenv("WECOM_WEBHOOK_URL") or None
+            self._webhook_url = os.getenv(env_key) or None
 
         self._transport = transport
         self._sleep = sleep_fn if sleep_fn is not None else time.sleep
@@ -96,6 +104,10 @@ class CommunicationTool(Tool):
             return WeComChannel(webhook_url=self._webhook_url,
                                 transport=self._transport,
                                 timeout=self.timeout)
+        if self._channel_name == "dingtalk":
+            return DingTalkChannel(webhook_url=self._webhook_url,
+                                   transport=self._transport,
+                                   timeout=self.timeout)
         return MockChannel(log_path=str(self.log_path))
 
     # ------------------------------------------------------------------
@@ -108,8 +120,8 @@ class CommunicationTool(Tool):
     @property
     def description(self) -> str:
         return ("Create and send structured disaster rescue alerts. "
-                "Channels: MockChannel/WeComChannel. Actions: send_alert / "
-                "flush_pending / get_recent_alerts.")
+                "Channels: MockChannel/WeComChannel/DingTalkChannel. "
+                "Actions: send_alert / flush_pending / get_recent_alerts.")
 
     @property
     def input_schema(self) -> dict[str, Any]:
@@ -187,6 +199,45 @@ class CommunicationTool(Tool):
             lines.append(f"**task**: {alert['task_id']}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _build_dingtalk_markdown(alert: dict[str, Any]) -> str:
+        """钉钉 markdown 报警模板。
+
+        首行必须含"灾害报警"(钉钉安全关键词, 否则 errcode 310000 拒绝)。
+        取值优先读 alert 顶层, 再回退 extra(Agent/Executor 可能把
+        state/risk_score/priority 放在 extra 内)。
+        """
+        ts = alert.get("timestamp") or datetime.now().isoformat(timespec="seconds")
+        extra = alert.get("extra") or {}
+        person = alert.get("person_id")
+        state = alert.get("state") or extra.get("state") or "-"
+        priority = alert.get("priority") or alert.get("severity") or extra.get("priority") or "-"
+        risk = extra.get("risk_score") if extra.get("risk_score") is not None else (
+            alert.get("risk_score") if alert.get("risk_score") is not None else "-"
+        )
+        lines = [
+            "## 🚨 灾害报警",
+            "",
+            "人员ID:",
+            str(person if person is not None else "-"),
+            "",
+            "状态:",
+            str(state),
+            "",
+            "风险等级:",
+            str(priority),
+            "",
+            "风险分数:",
+            str(risk),
+            "",
+            "时间:",
+            ts,
+            "",
+            "来源:",
+            "Raspberry Pi Edge AI",
+        ]
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # 发送(带重试 + 指数退避)
     # ------------------------------------------------------------------
@@ -256,10 +307,14 @@ class CommunicationTool(Tool):
         kept: List[dict] = []
         flushed = 0
         for e in entries:
-            channel = (WeComChannel(webhook_url=self._webhook_url,
-                                    transport=self._transport)
-                       if e.get("channel") == "WECOM"
-                       else MockChannel(log_path=str(self.log_path)))
+            if e.get("channel") == "WECOM":
+                channel: Channel = WeComChannel(webhook_url=self._webhook_url,
+                                                transport=self._transport)
+            elif e.get("channel") == "DINGTALK":
+                channel = DingTalkChannel(webhook_url=self._webhook_url,
+                                          transport=self._transport)
+            else:
+                channel = MockChannel(log_path=str(self.log_path))
             res = self._send_with_retry(channel, e.get("type", "markdown"),
                                         e.get("payload"),
                                         e.get("meta", {}) or {})
@@ -278,17 +333,20 @@ class CommunicationTool(Tool):
     def _send_alert(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         alert = self._build_alert(kwargs)
         channel = self._channel()
+        is_dingtalk = self._channel_name == "dingtalk"
+        content = (self._build_dingtalk_markdown(alert) if is_dingtalk
+                   else self._build_markdown(alert))
 
-        # 显式 wecom 但缺 URL → 明确失败并入队(绝不伪装成功/静默降级 Mock)
-        if self._channel_name == "wecom" and not channel.verify():
+        # 显式 wecom/dingtalk 但缺 URL → 明确失败并入队(绝不伪装成功/静默降级 Mock)
+        if self._channel_name in ("wecom", "dingtalk") and not channel.verify():
+            err_key = ("DINGTALK_WEBHOOK" if is_dingtalk else "WECOM_WEBHOOK_URL")
             entry = self._write_pending(
-                "markdown", self._build_markdown(alert), {"alert": alert},
-                channel.name, "WECOM_WEBHOOK_URL missing")
+                "markdown", content, {"alert": alert},
+                channel.name, f"{err_key} missing")
             return {"ok": False, "action": "send_alert", "queued": True,
                     "channel": channel.name, "msg_id": entry["msg_id"],
-                    "error": "WECOM_WEBHOOK_URL missing"}
+                    "error": f"{err_key} missing"}
 
-        content = self._build_markdown(alert)
         res = self._send_with_retry(channel, "markdown", content, {"alert": alert})
 
         if res.get("ok"):
