@@ -752,18 +752,75 @@ class Planner:
         )
 
         # ------------------------------------------------------
-        # HIGH is always allowed.
+        # HIGH is nearly always allowed.
         #
-        # This follows the PRD:
-        # HIGH must alert and cannot be blocked by LLM.
+        # Baseline follows the PRD: HIGH must alert and cannot be
+        # blocked by LLM. However, repeated alerts for the same
+        # person/state within the cooldown window (without a
+        # meaningful risk increase) are suppressed, so the cooldown
+        # recorded by Memory.record_alert is actually enforced.
         # ------------------------------------------------------
 
         if trigger_type in self.IMMEDIATE_TRIGGERS:
+
+            # 无 memory 时保持旧语义(无条件放行), 由调用方保证注入
+            if self.memory is None:
+                return {
+                    "allowed": True,
+                    "reason": (
+                        "HIGH-risk trigger requires "
+                        "immediate handling (no memory)."
+                    ),
+                }
+
+            # 基础 cooldown 窗口: 无上次记录(首次)或已超出窗口 -> 放行。
+            # should_cooldown 的 key=(person_id, state), state/person 变化
+            # 天然区分,不会被其他人的 cooldown 影响。
+            if not self.memory.should_cooldown(
+                person_id=person_id,
+                state=state,
+                minutes=self.cooldown_minutes,
+            ):
+                return {
+                    "allowed": True,
+                    "reason": (
+                        "HIGH-risk trigger allowed "
+                        "(first alert or cooldown expired)."
+                    ),
+                }
+
+            # cooldown 内: 只有风险明显提升 (risk_delta >= 0.10) 才突破;
+            # 微升/持平(同 person+state) 一律抑制, 避免连续帧重复报警。
+            # 不依赖 should_break_cooldown(任意微升即放行), 显式用阈值判定。
+            last_alert = (self.memory.last_alerts or {}).get(
+                (person_id, str(state))
+            )
+            last_risk = (
+                (last_alert or {}).get("risk_score")
+                if last_alert else None
+            )
+
+            if (
+                last_risk is not None
+                and risk_score is not None
+                and (
+                    float(risk_score) - float(last_risk)
+                ) >= 0.10
+            ):
+                return {
+                    "allowed": True,
+                    "reason": (
+                        "RISK delta >= 0.10 inside "
+                        "cooldown window, escalation allowed."
+                    ),
+                }
+
             return {
-                "allowed": True,
+                "allowed": False,
                 "reason": (
-                    "HIGH-risk trigger requires "
-                    "immediate handling."
+                    "Same person/state inside "
+                    f"{self.cooldown_minutes}-min cooldown "
+                    "with risk_delta < 0.10."
                 ),
             }
 
