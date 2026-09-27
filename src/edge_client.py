@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import time
+import traceback
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import cv2
@@ -265,6 +266,8 @@ def run_loop(
     perception: Optional[Any] = None,
     preview: bool = False,
     agent: Optional[Any] = None,
+    observation: Optional[Dict[str, Any]] = None,
+    flush_state: Optional[Dict[str, Any]] = None,
 ) -> int:
     """周期性 采集→(感知)→编码→上传→打印; preview 时叠加显示相机帧。
 
@@ -275,7 +278,20 @@ def run_loop(
     agent: V4.0-B Agent 决策辅助(旁路). 为 None 时完全不启用;
            异常只打印不阻断 upload. 必须由调用方在 main() 中初始化一次(跨帧复用,
            保证 memory cooldown 生效, 避免重复报警).
+    observation: 观测配置 {enabled,status_every,flush_every}; 为 None 时不输出摘要。
+    flush_state: pending 补偿状态 {caller, flush_every}; caller 为可调用对象,
+                 每 flush_every 帧调一次(no-arg) 用于补发 communication pending。
     """
+    obs_cfg = observation if isinstance(observation, dict) else {}
+    obs_enabled = bool(obs_cfg.get("enabled", True))
+    status_every = int(obs_cfg.get("status_every", 50))
+    flush_every = int(
+        (flush_state or {}).get("flush_every")
+        if flush_state
+        else obs_cfg.get("flush_every", 50)
+    )
+    flush_caller = (flush_state or {}).get("caller") if flush_state else None
+
     iterations = 0
     while True:
         if max_uploads is not None and iterations >= max_uploads:
@@ -334,6 +350,40 @@ def run_loop(
                 print("[EdgeClient]")
                 print(ts)
                 print(f"agent process failed (upload continues): {exc}")
+
+        # ── 阶段1A: Agent 运行状态周期摘要(不阻断主循环) ──
+        if obs_enabled and agent is not None and status_every > 0 \
+                and iterations % status_every == 0:
+            try:
+                stats = getattr(agent, "stats", {}) or {}
+                print("[AgentStatus]")
+                print("frames:")
+                print(iterations)
+                print("triggers_received:")
+                print(stats.get("triggers_received", 0))
+                print("plans_created:")
+                print(stats.get("plans_created", 0))
+                print("tasks_completed:")
+                print(stats.get("tasks_completed", 0))
+                print("tasks_failed:")
+                print(stats.get("tasks_failed", 0))
+                print("tasks_suppressed:")
+                print(stats.get("tasks_suppressed", 0))
+            except Exception:  # noqa: BLE001 — 观测失败绝不阻断上传
+                print("[EdgeClient] observation status output failed")
+
+        # ── 阶段1B: communication pending 自动补偿(周期 flush, 不阻断) ──
+        if flush_caller is not None and flush_every > 0 \
+                and iterations % flush_every == 0:
+            try:
+                result = flush_caller()
+                if isinstance(result, dict):
+                    flushed = result.get("flushed")
+                    remaining = result.get("remaining")
+                    print("[EdgeClient] flush_pending result: "
+                          f"flushed={flushed} remaining={remaining}")
+            except Exception:  # noqa: BLE001
+                print("[EdgeClient] flush_pending failed")
 
         # 预览模式: 叠加 person_events 文字显示相机帧; 按 q 退出
         # (headless/无显示环境抛错时自动关闭预览, 不影响后续上传)
@@ -428,15 +478,48 @@ def main(argv: Optional[list] = None) -> int:
             print(f"[EdgeClient] perception init failed, upload image only: {exc}")
 
     # V4.0-B Agent 决策辅助: main() 中一次性初始化, 跨帧复用 (memory cooldown 生效)
-    # 默认关闭 (agent.enabled=false); 初始化失败回退为仅上传, 不阻塞
+    # agent.enabled=true 才初始化; 失败回退为仅上传(不阻塞 camera/perception/upload)。
     agent = None
+    agent_ready = False
     agent_cfg = cfg.get("agent", {}) or {}
     if agent_cfg.get("enabled", False):
         try:
             from src.agent.agent import Agent
             agent = Agent(config=cfg)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[EdgeClient] agent init failed, fallback to upload only: {exc}")
+            agent_ready = True
+        except Exception:  # noqa: BLE001
+            print("[EdgeClient][Agent] initialization failed, "
+                  "fallback to upload only:")
+            traceback.print_exc()
+            agent = None
+            agent_ready = False
+
+    # ── 观测/补偿配置 (阶段1 A+B) ──
+    obs_cfg = cfg.get("observation", {}) or {}
+    obs_enabled = bool(obs_cfg.get("enabled", True))
+    status_every = int(obs_cfg.get("status_every", 50))
+    flush_every = int(obs_cfg.get("flush_every", 50))
+
+    # ── 阶段1B: 独立 CommunicationTool 只用于 pending 补发 ──
+    # 与 Agent 内部 communication 实例分隔; 共享同一 pending_path(读取同一队列)。
+    # 通道由环境变量 COMMUNICATION_CHANNEL 决定(mock|wecom|dingtalk)。
+    flush_caller = None
+    if obs_enabled and flush_every > 0:
+        try:
+            from src.tools.communication_tool import CommunicationTool
+            comm_cfg = cfg.get("communication", {}) or {}
+            _flusher = CommunicationTool(
+                log_path=comm_cfg.get("log_path", "data/communication_log.jsonl"),
+                pending_path=comm_cfg.get("pending_path",
+                                          "data/pending_communication.jsonl"),
+                channel="auto",
+            )
+            flush_caller = _flusher.flush_pending
+        except Exception:  # noqa: BLE001 — 补偿不可用不阻断主流程
+            print("[EdgeClient] communication flusher init failed "
+                  "(pending recovery disabled):")
+            traceback.print_exc()
+            flush_caller = None
 
     try:
         run_loop(
@@ -445,6 +528,15 @@ def main(argv: Optional[list] = None) -> int:
             perception=perception,
             preview=args.preview,
             agent=agent,
+            observation={
+                "enabled": obs_enabled,
+                "status_every": status_every,
+                "flush_every": flush_every,
+            },
+            flush_state={
+                "flush_every": flush_every,
+                "caller": flush_caller,
+            },
         )
     finally:
         cam.close()
