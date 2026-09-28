@@ -247,6 +247,10 @@ class DingTalkChannel(Channel):
         if not image_url or not str(image_url).startswith(("http://", "https://")):
             return {"ok": False, "transient": False, "channel": self.name,
                     "error": f"invalid image_url: {image_url}"}
+        print("=" * 50)
+        print("[DingTalk] image_url received:")
+        print(image_url)
+        print("=" * 50)
         try:
             payload = {
                 "msgtype": "image",
