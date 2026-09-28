@@ -150,7 +150,8 @@ class GatewaySuccessTest(GatewayTestCase):
     def test_response_keys_consistent(self):
         self._override()
         body = self._post().json()
-        self.assertEqual(set(body.keys()), {"success", "vlm_output", "llm_output", "error"})
+        self.assertEqual(set(body.keys()),
+                         {"success", "vlm_output", "llm_output", "error", "snapshot_url"})
 
 
 class GatewayRequestSchemaTest(GatewayTestCase):

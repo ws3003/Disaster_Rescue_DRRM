@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import server.schemas as sch
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 from src.llm.client import LLMClient, LLMConfigError, LLMProviderError
@@ -91,8 +91,8 @@ def _detect_suffix(data: bytes) -> Optional[str]:
     return None  # 非支持的图片
 
 
-def _save_upload(image: UploadFile) -> str:
-    """读取并校验上传图片, 写入临时文件, 返回临时路径。"""
+def _save_upload(image: UploadFile) -> Tuple[str, bytes]:
+    """读取并校验上传图片, 写入临时文件, 返回 (临时路径, 原始字节)。"""
     data = image.file.read()
     if not data:
         raise ApiImageError("图片文件为空")
@@ -103,7 +103,37 @@ def _save_upload(image: UploadFile) -> str:
     path = os.path.join(_UPLOAD_DIR, f"tmp_{uuid.uuid4().hex}{suffix}")
     with open(path, "wb") as fh:
         fh.write(data)
-    return path
+    return path, data
+
+
+def _save_snapshot(data: bytes) -> Optional[str]:
+    """把上传图片原字节保存一份到 data/snapshots/, 返回文件名(或 None)。"""
+    try:
+        suffix = _detect_suffix(data)
+        if suffix is None:
+            return None
+        SNAP_DIR.mkdir(parents=True, exist_ok=True)
+        name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_analysis{suffix}"
+        (SNAP_DIR / name).write_bytes(data)
+        return name
+    except Exception:  # noqa: BLE001 — snapshot 保存失败不影响 analyze 主流程
+        return None
+
+
+def _snapshot_url(request: Request, filename: str) -> Optional[str]:
+    """构造 snapshot 完整 URL。
+
+    优先读 storage 基础(env STORAGE_BASE_URL), 否则用当前请求 host 拼。
+    """
+    if not filename:
+        return None
+    base = os.getenv("STORAGE_BASE_URL", "").strip().rstrip("/")
+    if not base:
+        try:
+            base = str(request.base_url).rstrip("/")
+        except Exception:
+            base = ""
+    return f"{base}/snapshots/{filename}" if base else None
 
 
 def _cleanup_temp(path: Optional[str]) -> None:
@@ -226,14 +256,16 @@ def _assemble_contract(observation: dict, persons: List[dict], llm: dict) -> dic
 
 @app.post("/api/v1/analyze", response_model=sch.AnalyzeResponse)
 def analyze(
+    request: Request,
     image: UploadFile = File(..., description="灾害现场图片 (jpg/jpeg/png)"),
     person_events: Optional[str] = Form(None, description="人员事件 JSON 数组字符串"),
     clients: Tuple[VLMClient, LLMClient] = Depends(get_clients),
 ):
     vlm_client, llm_client = clients
     temp_path: Optional[str] = None
+    snap_filename: Optional[str] = None
     try:
-        temp_path = _save_upload(image)
+        temp_path, image_data = _save_upload(image)
         persons = _parse_persons(person_events)
 
         # [A→B Contract] observation layer: 一次 HTTP 请求一个 observation_id; timestamp 由本层创建
@@ -254,6 +286,9 @@ def analyze(
 
         # [3] 组装 authoritative Contract: 由 server 注入 persons(非 LLM), 剥离 payload 事实字段
         llm_output = _assemble_contract(observation, persons_facts, llm)
+
+        # [4] VLM/LLM 成功后: 上传图片保存一份到 data/snapshots/ 供静态访问
+        snap_filename = _save_snapshot(image_data)
     except ApiImageError as exc:
         return _error_response(sch.HTTP_IMAGE_ERROR, f"图片错误: {exc}")
     except ApiRequestError as exc:
@@ -275,7 +310,8 @@ def analyze(
     finally:
         _cleanup_temp(temp_path)
 
-    return sch.ok(vlm_output, llm_output)
+    return sch.ok(vlm_output, llm_output,
+                  snapshot_url=_snapshot_url(request, snap_filename))
 
 
 # ======================================================================

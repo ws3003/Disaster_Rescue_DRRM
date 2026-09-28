@@ -39,6 +39,9 @@ class AnalyzeResponse(BaseModel):
         default_factory=dict, description="标准化 llm_output (失败为空字典)"
     )
     error: Optional[str] = Field(None, description="失败原因; 成功为 null")
+    snapshot_url: Optional[str] = Field(
+        None, description="本次分析上传图片的 snapshot 可访问 URL (成功且已保存时非空)"
+    )
 
 
 # ---- A→B authoritative observation Contract (Phase 2-B) ----
@@ -78,9 +81,11 @@ class AuthoritativeLLMOutput(BaseModel):
 
 
 # 便利构造器, 供 api.py 与测试复用
-def ok(vlm_output: Dict[str, Any], llm_output: Dict[str, Any]) -> AnalyzeResponse:
+def ok(vlm_output: Dict[str, Any], llm_output: Dict[str, Any],
+       snapshot_url: Optional[str] = None) -> AnalyzeResponse:
+    """成功响应; snapshot_url 为分析上传图片的可访问 URL (可空)。"""
     return AnalyzeResponse(success=True, vlm_output=vlm_output, llm_output=llm_output,
-                           error=None)
+                           error=None, snapshot_url=snapshot_url)
 
 
 def fail(message: str, status_code: Optional[int] = None) -> AnalyzeResponse:
