@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import sys
 import uuid
@@ -238,10 +239,52 @@ class DingTalkChannel(Channel):
                            "markdown": {"title": self._KEYWORD, "text": content}})
 
     def send_image(self, image_path: str, **meta: Any) -> Dict[str, Any]:
+        """发送图片(自动压缩以满足钉钉 body<=20000 限制)。
+
+        Pillow 可选; 若不可用则回退到原始发送(可能超限失败)。
+        压缩策略: 缩放到 640x360 内 + 逐步降 quality(70→20), 目标 <=15000 bytes。
+        """
         try:
-            data = open(image_path, "rb").read()
+            from PIL import Image
+        except Exception:
+            try:
+                data = open(image_path, "rb").read()
+            except Exception as exc:
+                return {"ok": False, "transient": False, "channel": self.name,
+                        "error": f"image read failed: {exc}"}
+            if len(data) > 20000:
+                return {"ok": False, "transient": False, "channel": self.name,
+                        "error": f"convert failed: image too large {len(data)} bytes"}
+            b64 = base64.b64encode(data).decode("ascii")
+            return self._call({"msgtype": "image", "image": {"base64": b64}})
+        try:
+            img = Image.open(image_path)
+            img = img.convert("RGB")
+            # 降低分辨率
+            img.thumbnail((640, 360))
+            quality = 70
+            data = b""
+            while True:
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=quality, optimize=True)
+                data = buffer.getvalue()
+                if len(data) <= 15000:
+                    break
+                quality -= 10
+                if quality <= 20:
+                    break
+            if len(data) > 20000:
+                return {"ok": False, "transient": False, "channel": self.name,
+                        "error": f"compressed image too large: {len(data)} bytes"}
+            b64 = base64.b64encode(data).decode("ascii")
+            payload = {
+                "msgtype": "image",
+                "image": {
+                    "base64": b64,
+                    "md5": hashlib.md5(data).hexdigest(),
+                },
+            }
+            return self._call(payload)
         except Exception as exc:
             return {"ok": False, "transient": False, "channel": self.name,
-                    "error": f"image read failed: {exc}"}
-        b64 = base64.b64encode(data).decode("ascii")
-        return self._call({"msgtype": "image", "image": {"base64": b64}})
+                    "error": f"send image failed: {exc}"}
