@@ -7,7 +7,7 @@ storage:
 
   # Local 模式: snapshot URL 前缀 (实际静态服务由外部 server 挂载 data/snapshots/)
   local:
-    base_url: "http://clip-loops-education-january.trycloudflare.com"
+    base_url: "https://alert-boat-specialties-executive.trycloudflare.com"
 
   # 预留: 阿里云 OSS (未接入)
   aliyun_oss:

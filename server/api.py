@@ -120,14 +120,42 @@ def _save_snapshot(data: bytes) -> Optional[str]:
         return None
 
 
+def _load_storage_base_url() -> Optional[str]:
+    """从 config/storage.yaml 读取 storage.local.base_url (公网前缀)。
+
+    不解析完整 storage 配置, 仅取本项目 snapshot 所需字段。
+    返回 None 当配置缺失/不可读。
+    """
+    try:
+        import yaml
+        cfg_path = Path(__file__).resolve().parents[1] / "config" / "storage.yaml"
+        if not cfg_path.exists():
+            return None
+        with open(cfg_path, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+        local = (data.get("storage", {}) or {}).get("local", {}) or {}
+        base = str(local.get("base_url") or "").strip()
+        return base.rstrip("/") if base else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _snapshot_url(request: Request, filename: str) -> Optional[str]:
     """构造 snapshot 完整 URL。
 
-    优先读 storage 基础(env STORAGE_BASE_URL), 否则用当前请求 host 拼。
+    优先级:
+        1. 环境变量 STORAGE_BASE_URL
+        2. config/storage.yaml 的 storage.local.base_url (公网/隧道地址)
+        3. 兜底: 当前请求 base_url
+
+    注意: 钉钉等公网服务无法访问局域网 IP, 故必须优先用显式配置的公网地址,
+          而不是用请求的局域网 host 覆盖。
     """
     if not filename:
         return None
     base = os.getenv("STORAGE_BASE_URL", "").strip().rstrip("/")
+    if not base:
+        base = _load_storage_base_url() or ""
     if not base:
         try:
             base = str(request.base_url).rstrip("/")
