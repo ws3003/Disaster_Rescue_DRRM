@@ -443,6 +443,20 @@ def run_loop(
         _print_log(ts, w, h, status)
         if status == 200:
             _print_summary(body if isinstance(body, dict) else {})
+            # ── 路径B: 云端 AI (VLM+LLM) 决策接入 Agent ──
+            # server 返回的 llm_output 正式喂给 Agent.ingest_llm_output,
+            # 走 planner→executor→tools→DingTalk/SQLite。
+            # 与路径A(边缘规则 process_frame)并存不互相覆盖;
+            # 失败/缺 llm_output 时静默降级, 不影响原规则报警与上传。
+            if agent is not None and isinstance(body, dict):
+                llm_output = body.get("llm_output")
+                if llm_output:
+                    try:
+                        agent.ingest_llm_output(llm_output)
+                    except Exception as exc:  # noqa: BLE001
+                        print("[EdgeClient]")
+                        print(ts)
+                        print(f"llm output ingest failed (rule alert unaffected): {exc}")
         else:
             err = body.get("error") if isinstance(body, dict) else ""
             print(f"server error: {status} {err}")
