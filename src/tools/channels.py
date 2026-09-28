@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import io
 import json
 import sys
 import uuid
@@ -238,50 +237,21 @@ class DingTalkChannel(Channel):
         return self._call({"msgtype": "markdown",
                            "markdown": {"title": self._KEYWORD, "text": content}})
 
-    def send_image(self, image_path: str, **meta: Any) -> Dict[str, Any]:
-        """发送图片(自动压缩以满足钉钉 body<=20000 限制)。
+    def send_image(self, image_url: str, **meta: Any) -> Dict[str, Any]:
+        """发送图片 (钉钉 image 消息要求 picURL)。
 
-        Pillow 可选; 若不可用则回退到原始发送(可能超限失败)。
-        压缩策略: 缩放到 640x360 内 + 逐步降 quality(70→20), 目标 <=15000 bytes。
+        参数: image_url (须为可公开访问的 http(s) URL, 通常由
+              StorageProvider.upload(snapshot_path) 产生)。
+        不再使用 base64(钉钉 webhook 图片消息仅支持 picURL)。
         """
+        if not image_url or not str(image_url).startswith(("http://", "https://")):
+            return {"ok": False, "transient": False, "channel": self.name,
+                    "error": f"invalid image_url: {image_url}"}
         try:
-            from PIL import Image
-        except Exception:
-            try:
-                data = open(image_path, "rb").read()
-            except Exception as exc:
-                return {"ok": False, "transient": False, "channel": self.name,
-                        "error": f"image read failed: {exc}"}
-            if len(data) > 20000:
-                return {"ok": False, "transient": False, "channel": self.name,
-                        "error": f"convert failed: image too large {len(data)} bytes"}
-            b64 = base64.b64encode(data).decode("ascii")
-            return self._call({"msgtype": "image", "image": {"base64": b64}})
-        try:
-            img = Image.open(image_path)
-            img = img.convert("RGB")
-            # 降低分辨率
-            img.thumbnail((640, 360))
-            quality = 70
-            data = b""
-            while True:
-                buffer = io.BytesIO()
-                img.save(buffer, format="JPEG", quality=quality, optimize=True)
-                data = buffer.getvalue()
-                if len(data) <= 15000:
-                    break
-                quality -= 10
-                if quality <= 20:
-                    break
-            if len(data) > 20000:
-                return {"ok": False, "transient": False, "channel": self.name,
-                        "error": f"compressed image too large: {len(data)} bytes"}
-            b64 = base64.b64encode(data).decode("ascii")
             payload = {
                 "msgtype": "image",
                 "image": {
-                    "base64": b64,
-                    "md5": hashlib.md5(data).hexdigest(),
+                    "picURL": str(image_url),
                 },
             }
             return self._call(payload)
