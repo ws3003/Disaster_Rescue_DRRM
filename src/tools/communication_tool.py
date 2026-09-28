@@ -350,27 +350,39 @@ class CommunicationTool(Tool):
         res = self._send_with_retry(channel, "markdown", content, {"alert": alert})
 
         if res.get("ok"):
-            # 现场图片证据: 上传 snapshot 得 image_url, 再随文字报警发送图片
+            # 现场图片证据: 优先用 server 返回的远程 snapshot_url; 否则上传本地快照
             img_path = alert.get("image_path")
             img_ok = None
             image_url = None
             image_error = None
             if img_path:
                 try:
-                    from src.storage import upload_snapshot
-                    up = upload_snapshot(img_path)
-                    if up.get("ok") and up.get("url"):
-                        image_url = up["url"]
+                    _is_url = str(img_path).startswith(("http://", "https://"))
+                    if _is_url:
+                        # 已是可访问 URL (server snapshot_url): 直接发送, 不重复上传
+                        image_url = img_path
                         img_res = self._send_with_retry(
                             channel, "image", image_url,
-                            {"alert": alert, "source": "snapshot"},
+                            {"alert": alert, "source": "snapshot_url"},
                         )
                         img_ok = bool(img_res and img_res.get("ok"))
                         if not img_ok:
                             image_error = (img_res or {}).get("error")
                     else:
-                        img_ok = False
-                        image_error = up.get("error", "upload failed")
+                        from src.storage import upload_snapshot
+                        up = upload_snapshot(img_path)
+                        if up.get("ok") and up.get("url"):
+                            image_url = up["url"]
+                            img_res = self._send_with_retry(
+                                channel, "image", image_url,
+                                {"alert": alert, "source": "snapshot"},
+                            )
+                            img_ok = bool(img_res and img_res.get("ok"))
+                            if not img_ok:
+                                image_error = (img_res or {}).get("error")
+                        else:
+                            img_ok = False
+                            image_error = up.get("error", "upload failed")
                 except Exception as exc:  # noqa: BLE001
                     img_ok = False
                     image_error = f"upload exception: {exc}"

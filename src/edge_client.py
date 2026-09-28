@@ -133,11 +133,16 @@ class EdgeUploader:
         self.api_url = api_url
         self._post = transport if transport is not None else requests.post
         self.timeout = timeout
+        self.last_snapshot_url: Optional[str] = None  # 最近一次成功 upload 的 snapshot_url
 
     def upload(
         self, image_bytes: bytes, person_events: Optional[list] = None
     ) -> Tuple[int, Any]:
-        """上传一帧, 返回 (HTTP status, 响应 JSON)。"""
+        """上传一帧, 返回 (HTTP status, 响应 JSON)。
+
+        成功后把响应的 snapshot_url 缓存在 self.last_snapshot_url,
+        供边缘 Agent 报警优先使用(server 已存 snapshot 时)。
+        """
         files = {"image": ("frame.jpg", image_bytes, "image/jpeg")}
         data = {"person_events": json.dumps(person_events or [], ensure_ascii=False)}
         resp = self._post(self.api_url, files=files, data=data, timeout=self.timeout)
@@ -145,6 +150,10 @@ class EdgeUploader:
             body = resp.json()
         except Exception:
             body = {}
+        if int(resp.status_code) == 200 and isinstance(body, dict):
+            url = body.get("snapshot_url")
+            if isinstance(url, str) and url:
+                self.last_snapshot_url = url
         return int(resp.status_code), body
 
 
@@ -353,10 +362,20 @@ def run_loop(
                         isinstance(_risk, (int, float)) and _risk >= 0.60
                     )
                     if _high:
-                        _snap = save_snapshot(frame, _ev.get("person_id"))
-                        if _snap:
-                            _ev["snapshot_path"] = _snap
-                            print("[Snapshot] saved: " + str(_snap))
+                        # 优先用 server 最近一次返回的 snapshot_url; 否则 fallback 本地快照
+                        _server_url = getattr(uploader, "last_snapshot_url", None)
+                        if _server_url:
+                            _ev["image_path"] = _server_url
+                            _ev["snapshot_url"] = _server_url
+                            _ev.pop("snapshot_path", None)
+                            print("[Snapshot] using remote snapshot_url: " + str(_server_url))
+                        else:
+                            _snap = save_snapshot(frame, _ev.get("person_id"))
+                            if _snap:
+                                _ev["snapshot_path"] = _snap
+                                _ev["image_path"] = _snap
+                                _ev.pop("snapshot_url", None)
+                                print("[Snapshot] saved: " + str(_snap))
 
                 from src.agent.input_adapter import person_events_to_frame_record
                 frame_record = person_events_to_frame_record(

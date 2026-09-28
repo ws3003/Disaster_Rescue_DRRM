@@ -1402,7 +1402,8 @@ class Planner:
         """
         try:
             person = trigger.get("person") or {}
-            return person.get("snapshot_path") or trigger.get("image_path")
+            return person.get("image_path") or person.get("snapshot_path") \
+                or trigger.get("image_path")
         except Exception:  # noqa: BLE001
             return None
 
