@@ -7,7 +7,7 @@ storage:
 
   # Local 模式: snapshot URL 前缀 (实际静态服务由外部 server 挂载 data/snapshots/)
   local:
-    base_url: "https://hdtv-bull-outcomes-frequent.trycloudflare.com"
+    base_url: "https://remix-london-barrel-personalized.trycloudflare.com"
 
   # 预留: 阿里云 OSS (未接入)
   aliyun_oss:
