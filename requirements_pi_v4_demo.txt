@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# Raspberry Pi V4.0 Edge Demo 依赖 (ARM64, Python 3.11)
+# ===========================================================================
+# 用途: 恢复/复现 V4.0 Edge Demo(树莓派边缘)运行环境。
+# 注意:
+#   - 本文件用于 Raspberry Pi 上重建环境; 不覆盖 Windows 开发机 requirements.txt。
+#   - picamera2 走 Debian 系统包, 不能 pip 安装:
+#       sudo apt update
+#       sudo apt install -y python3-picamera2
+#   - torch/torchvision 装 CPU 版(树莓派无 CUDA):
+#       pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   - 其余纯 pip 依赖可直接安装。
+# ---------------------------------------------------------------------------
+
+# ---- 视觉/感知 ----
+opencv-python==4.9.0.80
+mediapipe==0.10.9
+numpy>=1.24,<1.27
+Pillow>=10.0
+
+# ---- YOLO 检测 (CPU) ----
+# 先在单独的 venv 里装 CPU torch:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# 再装 ultralytics (会自动评估 torch):
+ultralytics==8.4.138
+
+# ---- HTTP / API ----
+requests>=2.31
+PyYAML>=6.0
+
+# ---- 树莓派摄像头 (系统包) ----
+# sudo apt install -y python3-picamera2
+# (不上 pip; Anthropic 说明: 见文件头)
+
+# ---- 可选: 项目里用到的其他运行时依赖 (按需) ----
+psutil>=5.9
+python-dateutil>=2.8
+
+# ---- 说明 ----
+# 服务器端 (FastAPI Gateway / VLM / LLM) 依赖不在此文件:
+# 参考项目 requirements.txt 中 fastapi/uvicorn/python-multipart 部分, 部署在 Windows 端。
