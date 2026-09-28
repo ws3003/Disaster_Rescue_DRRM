@@ -34,6 +34,12 @@ data/latest_vision.json
 data/agent_task.json
 src/database/data/
 
+# secrets
+.env
+
+# server runtime temp uploads
+server/uploads/
+
 # system
 .DS_Store
 

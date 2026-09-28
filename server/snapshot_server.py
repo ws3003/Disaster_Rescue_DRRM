@@ -1,19 +1,14 @@
 """
 server/snapshot_server.py — Snapshot 静态访问服务 (Phase 2.7)
 ============================================================
-目的: 把 data/snapshots/ 目录暴露为 HTTP 静态访问, 供 DingTalk picURL
-      及后续 VLM/LLM 拉取现场图片。
+⚠️ DEPRECATED / 已废弃
+    Phase 2.7 整合后, 图片静态访问已迁移到 `server/api.py` 的统一 Gateway:
+        GET /snapshots/<filename>
+    本文件保留仅为向后兼容/参考, 不再建议作为独立入口启动。
+    请使用:  uvicorn server.api:app --host 0.0.0.0 --port 8000
 
-端点:
+原用途:
     GET /snapshots/<filename>    -> 返回图片文件 (仅 jpg/jpeg/png)
-
-运行:
-    uvicorn server.snapshot_server:app --host 0.0.0.0 --port 8000
-
-约束:
-    - 仅允许 jpg/jpeg/png 扩展名(白名单)
-    - 不修改任何现有业务代码(独立 FastAPI 应用)
-    - storage.yaml base_url 默认 http://localhost:8000, 与本服务端口一致
 """
 
 from __future__ import annotations
