@@ -39,3 +39,12 @@ src/database/data/
 
 # env secrets (commit .env.example, never commit real .env)
 .env
+# runtime data
+data/
+
+# test images
+*.jpg
+*.png
+
+# backup files
+*.before*
