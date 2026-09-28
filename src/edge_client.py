@@ -340,9 +340,27 @@ def run_loop(
         # 失败只打印并继续, 绝不阻断上传链路
         if agent is not None and person_events:
             try:
+                # ── Phase 2.5: HIGH 人员保存现场快照, 供 DingTalk 图片报警 ──
+                # 在 frame_record 构建前, 把快照保存给 HIGH 人员, 并注入 snapshot_path。
+                from src.snapshot import save_snapshot
+                _events = list(person_events)  # 浅拷贝, 不修改原上传 payload
+                for _ev in _events:
+                    if not isinstance(_ev, dict):
+                        continue
+                    _prio = str(_ev.get("priority", "")).upper()
+                    _risk = _ev.get("risk_score")
+                    _high = (_prio == "HIGH") or (
+                        isinstance(_risk, (int, float)) and _risk >= 0.60
+                    )
+                    if _high:
+                        _snap = save_snapshot(frame, _ev.get("person_id"))
+                        if _snap:
+                            _ev["snapshot_path"] = _snap
+                            print("[Snapshot] saved: " + str(_snap))
+
                 from src.agent.input_adapter import person_events_to_frame_record
                 frame_record = person_events_to_frame_record(
-                    person_events,
+                    _events,
                     timestamp=ts,
                 )
                 agent.process_frame(frame_record)

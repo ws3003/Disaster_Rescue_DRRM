@@ -350,12 +350,27 @@ class CommunicationTool(Tool):
         res = self._send_with_retry(channel, "markdown", content, {"alert": alert})
 
         if res.get("ok"):
+            # 现场图片证据: 若发送了快照路径, 文字报警后附带图片(失败不影响文字结果)
+            img_path = alert.get("image_path")
+            img_ok = None
+            if img_path:
+                img_res = self._send_with_retry(
+                    channel, "image", img_path, {"alert": alert, "source": "snapshot"}
+                )
+                img_ok = bool(img_res and img_res.get("ok"))
+                if not img_ok:
+                    self._append_log({
+                        **alert, "status": "IMAGE_FAILED", "channel": channel.name,
+                        "image_path": img_path,
+                        "error": (img_res or {}).get("error"),
+                    })
             self._append_log({
                 **alert, "status": "SENT", "channel": channel.name,
                 "msgid": res.get("msgid"),
             })
             return {"ok": True, "action": "send_alert", "channel": channel.name,
-                    "msgid": res.get("msgid"), "status": "SENT"}
+                    "msgid": res.get("msgid"), "status": "SENT",
+                    "image_sent": img_ok}
 
         # transient/队列化
         entry = self._write_pending("markdown", content, {"alert": alert},

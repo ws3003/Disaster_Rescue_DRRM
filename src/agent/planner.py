@@ -1016,6 +1016,7 @@ class Planner:
                         "priority": priority,
                         "state": state,
                         "risk_score": risk_score,
+                        "image_path": self._extract_snapshot_path(trigger),
                         "title": (
                             "High-Risk Personnel Alert"
                         ),
@@ -1389,6 +1390,21 @@ class Planner:
     # ==========================================================
     # Alert message
     # ==========================================================
+
+    def _extract_snapshot_path(
+        self,
+        trigger: dict[str, Any],
+    ) -> Optional[str]:
+        """从 trigger 中提取现场快照路径 (若有), 供图片报警带图。
+
+        Edge 感知侧可把 snapshot_path 放进 person dict (经 frame_record
+        原样透传至 trigger.person)。此处仅做最小字段透传, 找不到返回 None。
+        """
+        try:
+            person = trigger.get("person") or {}
+            return person.get("snapshot_path") or trigger.get("image_path")
+        except Exception:  # noqa: BLE001
+            return None
 
     def _build_alert_message(
         self,
