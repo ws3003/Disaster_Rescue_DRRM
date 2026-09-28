@@ -144,7 +144,7 @@ class PerceptionBridgeTest(unittest.TestCase):
         events = make_bridge([FakeDetection(), FakeDetection()]).analyze(self.frame)
         for ev in events:
             self.assertEqual(set(ev.keys()),
-                             {"person_id", "state", "risk_score", "priority"})
+                             {"person_id", "bbox", "state", "risk_score", "priority"})
             self.assertIsInstance(ev["risk_score"], float)
             # 能作为 multipart 的 JSON 字符串上传 (格式正确)
             parsed = json.loads(json.dumps(ev, ensure_ascii=False))
