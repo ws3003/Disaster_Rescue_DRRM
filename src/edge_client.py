@@ -452,11 +452,20 @@ def run_loop(
                 llm_output = body.get("llm_output")
                 if llm_output:
                     try:
-                        agent.ingest_llm_output(llm_output)
+                        print("[LLM->Agent] ingest_llm_output triggered")
+                        result = agent.ingest_llm_output(llm_output)
+                        print(
+                            "[LLM->Agent] result:",
+                            result,
+                        )
                     except Exception as exc:  # noqa: BLE001
                         print("[EdgeClient]")
                         print(ts)
                         print(f"llm output ingest failed (rule alert unaffected): {exc}")
+                        print(
+                            "[LLM->Agent] failed:",
+                            exc,
+                        )
         else:
             err = body.get("error") if isinstance(body, dict) else ""
             print(f"server error: {status} {err}")
