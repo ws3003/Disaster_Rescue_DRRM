@@ -108,11 +108,38 @@ class OSSStorageProvider(StorageProvider):
         self.config = config
 
     def upload(self, path: str) -> Dict:
-        return {
-            "ok": False,
-            "error": "OSSStorageProvider not implemented "
-                     "(Phase 2.6 预留; 需 OSS SDK + env AK/SK)",
-        }
+        """把本地快照上传到阿里云 OSS, 返回可公网访问的 picURL。
+
+        AK/SK 仅从环境变量读取(绝不写入 yaml / 不写死代码):
+          OSS_ACCESS_KEY / OSS_ACCESS_SECRET (必填, env-only)
+          OSS_BUCKET / OSS_ENDPOINT (env 优先, 缺失回退 config 非机密字段)
+        """
+        try:
+            if not path or not Path(path).exists():
+                return {"ok": False, "error": f"snapshot not found: {path}"}
+            # 机密仅来自 env, 不回退 config
+            access_key = os.environ.get("OSS_ACCESS_KEY")
+            access_secret = os.environ.get("OSS_ACCESS_SECRET")
+            bucket_name = os.environ.get("OSS_BUCKET") or self.config.bucket
+            endpoint = os.environ.get("OSS_ENDPOINT") or self.config.endpoint
+            if not all((access_key, access_secret, bucket_name, endpoint)):
+                return {"ok": False,
+                        "error": "OSS 配置缺失: 需 env OSS_ACCESS_KEY / OSS_ACCESS_SECRET / "
+                                 "OSS_BUCKET / OSS_ENDPOINT"}
+            import oss2  # 惰性导入, 避免 blob 依赖影响其它 provider
+            auth = oss2.Auth(access_key, access_secret)
+            bucket = oss2.Bucket(auth, endpoint, bucket_name)
+            filename = Path(path).name
+            object_key = f"snapshots/{filename}"
+            bucket.put_object_from_file(object_key, path)
+            # 输出: https://{bucket}.{endpoint}/{object_key}  (endpoint 去掉协议前缀)
+            ep = str(endpoint).rstrip("/")
+            if "://" in ep:
+                ep = ep.split("://", 1)[1]
+            url = f"https://{bucket_name}.{ep}/{object_key}"
+            return {"ok": True, "url": url, "provider": self.name}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
 
 def create_storage(config_path: str = "config/storage.yaml") -> StorageProvider:

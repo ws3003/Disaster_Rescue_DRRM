@@ -48,6 +48,7 @@ from src.vlm.client import (
     VLMProviderError,
 )
 from src.vlm.parser import SceneParseError, parse as parse_vlm
+from src.storage import upload_snapshot
 
 app = FastAPI(
     title="Disaster_Rescue_DRRM Inference API",
@@ -317,6 +318,17 @@ def analyze(
 
         # [4] VLM/LLM 成功后: 上传图片保存一份到 data/snapshots/ 供静态访问
         snap_filename = _save_snapshot(image_data)
+        # 统一接入 OSS: 上传刚生成的快照取公网 URL; OSS 失败回退本地 snapshot_url
+        snap_url = None
+        if snap_filename:
+            try:
+                _snap_file = SNAP_DIR / snap_filename
+                if _snap_file.is_file():
+                    _up = upload_snapshot(str(_snap_file))
+                    if _up.get("ok") and _up.get("url"):
+                        snap_url = _up["url"]
+            except Exception:  # noqa: BLE001 — OSS 失败仅回退本地, 不影响 analyze 主流程
+                snap_url = None
     except ApiImageError as exc:
         return _error_response(sch.HTTP_IMAGE_ERROR, f"图片错误: {exc}")
     except ApiRequestError as exc:
@@ -339,7 +351,7 @@ def analyze(
         _cleanup_temp(temp_path)
 
     return sch.ok(vlm_output, llm_output,
-                  snapshot_url=_snapshot_url(request, snap_filename))
+                  snapshot_url=snap_url if snap_url else _snapshot_url(request, snap_filename))
 
 
 # ======================================================================

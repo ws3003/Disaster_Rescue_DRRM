@@ -453,7 +453,14 @@ def run_loop(
                 if llm_output:
                     try:
                         print("[LLM->Agent] ingest_llm_output triggered")
-                        result = agent.ingest_llm_output(llm_output)
+                        result = agent.ingest_llm_output(
+                            llm_output,
+                            context={
+                                "image_url":
+                                    body.get("snapshot_url")
+                                    or getattr(uploader, "last_snapshot_url", None),
+                            },
+                        )
                         print(
                             "[LLM->Agent] result:",
                             result,

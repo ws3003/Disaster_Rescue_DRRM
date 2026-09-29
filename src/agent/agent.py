@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import sys
 import json
+import re
 import inspect
 from pathlib import Path
 from datetime import datetime
@@ -635,6 +636,32 @@ class Agent:
                         args["persons"] = injected_persons
                         print(f"[LLM->Agent] persons injected into {act.get('tool')} "
                               f"action ({len(injected_persons)} persons)")
+
+        # ── 图片注入(最小补丁): 把 context 携带的当前分析图公网 URL 接到 send_alert。
+        #    仅处理 communication_tool / send_alert; 已有 image_path 不覆盖;
+        #    注入前规范化: 兼容 Markdown 链接 [url](url) → 纯 http(s) URL;
+        #    复用 communication_tool._send_alert 既有 image_path→图片发送机制, 不影响规则路径。
+        raw_url = (context or {}).get("image_url")
+        if raw_url:
+            _raw_s = str(raw_url).strip()
+            _m = re.search(r"\[.*?\]\((https?://[^)]+)\)", _raw_s)
+            img_url = (_m.group(1).strip() if _m else _raw_s)
+            if not img_url.lower().startswith(("http://", "https://")):
+                img_url = ""
+            print(f"[IMAGE] original_url = {raw_url}")
+            print(f"[IMAGE] normalized_url = {img_url}")
+        else:
+            img_url = ""
+
+        if img_url:
+            for act in filtered:
+                if isinstance(act, dict) and act.get("tool") == "communication_tool" \
+                        and (act.get("args") or {}).get("action") == "send_alert":
+                    args = act.get("args")
+                    if isinstance(args, dict) and not args.get("image_path"):
+                        args["image_path"] = img_url
+                        print(f"[LLM->Agent] image injected into communication_tool "
+                              f"action: {img_url}")
 
         execution_results: list[dict[str, Any]] = []
         if filtered:
