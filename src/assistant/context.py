@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 
 _DEFAULT_DB = "data/drrm.db"
 _DEFAULT_SNAPSHOT_DIR = "data/snapshots"
+_VISION_PATH = "data/vision_persons.json"
 _SNAPSHOT_GLOB = "*_analysis.*"
 
 
@@ -44,6 +45,7 @@ class AssistantContext:
         place: Optional[str] = None,
         route_origin: Optional[str] = None,
         route_destination: Optional[str] = None,
+        vision_path: Optional[str] = None,
     ):
         self.db_path = db_path or _DEFAULT_DB
         self.snapshot_dir = snapshot_dir or _DEFAULT_SNAPSHOT_DIR
@@ -53,6 +55,7 @@ class AssistantContext:
         self._place = place
         self._route_origin = route_origin or "现场"
         self._route_destination = route_destination or "最近救援点"
+        self._vision_path = vision_path or _VISION_PATH
 
     # ---------------------------------------------------------------- 数据读取
     def _latest_task(self) -> Dict[str, Any]:
@@ -143,15 +146,27 @@ class AssistantContext:
         except Exception:
             return {}
 
+    def _vision(self) -> Dict[str, Any]:
+        """读取最新视况人员快照; 无/损坏返回 {}。"""
+        try:
+            from ..vision_snapshot import read_latest
+            data = read_latest(self._vision_path)
+            if isinstance(data, dict) and data.get("persons"):
+                return data
+            return {}
+        except Exception:
+            return {}
+
     # ---------------------------------------------------------------- 聚合并对外
     def collect(self) -> Dict[str, Any]:
-        """返回结构化上下文。weather/location/map 未接入(或无提供器)时为空(weather=None)。"""
+        """返回结构化上下文。weather/location/map/vision 未接入(或无提供器)时为空/None。"""
         latest_task = self._latest_task()
         scene = self._scene(latest_task)
         snapshot = self._latest_snapshot()
         weather = self._weather()
         map_location = self._map_location()
         map_route = self._map_route()
+        vision = self._vision()
         return {
             # 当前可用
             "scene": scene,
@@ -160,4 +175,5 @@ class AssistantContext:
             "weather": weather,
             "location": map_location,
             "map": {"route": map_route} if map_route else {},
+            "vision": vision,
         }

@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import server.schemas as sch
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 from src.llm.client import LLMClient, LLMConfigError, LLMProviderError
@@ -413,6 +413,22 @@ def assistant_voice(
         answer=out.get("answer", ""),
         audio_url=out.get("audio_url"),
     )
+
+
+@app.post("/api/v1/vision/snapshot")
+def vision_snapshot_ingest(payload: dict = Body(...)) -> dict:
+    """接收边缘人员快照(persons JSON), 写 vision snapshot。
+
+    独立新端点, 不影响 /api/v1/analyze 核心分析与 OSS 流程。
+    """
+    from src.vision_snapshot import write_persons
+
+    persons = payload.get("persons") if isinstance(payload, dict) else None
+    if not isinstance(persons, list):
+        return {"ok": False, "error": "persons must be a list"}
+    res = write_persons(persons, ts=payload.get("ts"))
+    return {"ok": bool(res.get("ok")),
+            "error": res.get("error") if not res.get("ok") else None}
 
 
 # ======================================================================

@@ -121,6 +121,26 @@ class AssistantResponder:
             ans = "当前未连接地图服务，暂无法提供路线建议。"
         return {"answer": ans, "sources": sources}
 
+    def _answer_people(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        v = ctx.get("vision") if isinstance(ctx.get("vision"), dict) else {}
+        persons = v.get("persons") or []
+        sources: list[Dict[str, Any]] = [{"type": "vision", "ts": v.get("ts"),
+                                          "count": len(persons)}]
+        if not persons:
+            return {"answer": "当前暂无现场人员状态信息。", "sources": sources}
+        lines = [f"现场共识别到 {len(persons)} 人。"]
+        high = []
+        for p in persons:
+            pid = p.get("id") or p.get("person_id")
+            st = p.get("state")
+            risk = p.get("risk") or p.get("priority")
+            lines.append(f"- 人员 {pid}：状态 {st}，风险 {risk}。")
+            if str(risk or "").upper() == "HIGH":
+                high.append(pid)
+        if high:
+            lines.append("其中高风险人员请人工重点研判处理。")
+        return {"answer": "\n".join(lines), "sources": sources}
+
     # ---------------------------------------------------------------- 入口
     def answer(self, question: str) -> Dict[str, Any]:
         """返回 {answer, sources, intent}。"""
@@ -128,6 +148,8 @@ class AssistantResponder:
         ctx = self._ctx.collect()
         if intent == intent_mod.INTENT_SCENE:
             out = self._answer_scene(ctx)
+        elif intent == intent_mod.INTENT_PEOPLE:
+            out = self._answer_people(ctx)
         elif intent == intent_mod.INTENT_RISK:
             out = self._answer_risk(ctx)
         elif intent == intent_mod.INTENT_SNAPSHOT:
