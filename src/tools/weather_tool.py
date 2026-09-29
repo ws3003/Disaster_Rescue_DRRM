@@ -1,10 +1,17 @@
 """src/tools/weather_tool.py — 天气信息工具 (V4.1 Assistant 信息辅助)。
 
 定位: 信息类工具, 仅查询并返回现场天气; 不作为风险评分因素, 不触发任何动作。
-Phase 2 阶段: 使用 mock provider(零网络), 不接入真实天气 API。
-真实接入预留: WEATHER_API_KEY 环境变量(不写死; 本阶段 mock 不使用)。
 
-工具契约: 继承 src.tools.base.Tool, run(**kwargs) 分发 action="get_current"。
+Provider 架构 (Phase5.1):
+  - mock  默认, 零网络, 返回固定天气(离线/测试/CI)
+  - live  真实天气 API, 惰性 requests, 由环境变量驱动
+
+环境变量:
+  WEATHER_PROVIDER   选择器: mock(默认) / live
+  WEATHER_API_KEY    真实天气 key(live 必需)
+  WEATHER_BASE_URL   天气 API 端点(live 必需)
+
+接口不变: get_current(lat, lng) -> {ok, weather:{condition,temperature,wind,humidity,timestamp,provider}}
 """
 
 from __future__ import annotations
@@ -15,14 +22,29 @@ from typing import Any, Dict, Optional
 
 from src.tools.base import Tool
 
-# 真实天气 API 接入时读取的 Key(本阶段 mock 不调用; 仅占位标注, 不 fetch 网络)
+_WEATHER_PROVIDER_ENV = "WEATHER_PROVIDER"
 _WEATHER_API_KEY_ENV = "WEATHER_API_KEY"
+_WEATHER_BASE_URL_ENV = "WEATHER_BASE_URL"
 
 
 class WeatherTool(Tool):
-    """现场天气信息查询(mock provider)。"""
+    """现场天气信息查询 (mock / live 双 provider)。"""
 
     name = "weather_tool"
+
+    SUPPORTED_PROVIDERS = ("mock", "live")
+
+    def __init__(self, provider: Optional[str] = None):
+        """provider 缺省读 WEATHER_PROVIDER 环境变量, 再缺省 "mock"。"""
+        if provider is None:
+            provider = os.environ.get(_WEATHER_PROVIDER_ENV, "mock")
+        provider = str(provider or "mock").lower()
+        if provider not in self.SUPPORTED_PROVIDERS:
+            raise ValueError(
+                f"unsupported weather provider: {provider!r}, "
+                f"support: {self.SUPPORTED_PROVIDERS}"
+            )
+        self.provider = provider
 
     @property
     def description(self) -> str:
@@ -51,8 +73,14 @@ class WeatherTool(Tool):
         return {"ok": False, "action": action or "?",
                 "error": f"Unsupported weather action: {action}"}
 
+    # ------------------------------------------------------------ 对外入口(接口不变)
     def get_current(self, lat: Optional[Any] = None, lng: Optional[Any] = None) -> Dict[str, Any]:
-        """返回当前天气(mock)。真实接入时代理会解析 WEATHER_API_KEY 并发起请求。"""
+        if self.provider == "live":
+            return self._get_live(lat, lng)
+        return self._get_mock(lat, lng)
+
+    # ------------------------------------------------------------ mock
+    def _get_mock(self, lat: Optional[Any] = None, lng: Optional[Any] = None) -> Dict[str, Any]:
         try:
             weather = {
                 "condition": "晴",
@@ -60,17 +88,81 @@ class WeatherTool(Tool):
                 "wind": "3级",
                 "humidity": 50,
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "source": "mock",
+                "provider": "mock",
                 "lat": lat,
                 "lng": lng,
             }
-            return {"ok": True, "weather": weather, "provider": "mock"}
+            return {"ok": True, "weather": weather, "provider": self.provider}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "action": "get_current", "error": str(exc)}
+
+    # ------------------------------------------------------------ live
+    def _get_live(self, lat: Optional[Any] = None, lng: Optional[Any] = None) -> Dict[str, Any]:
+        try:
+            key = os.environ.get(_WEATHER_API_KEY_ENV, "").strip()
+            base = os.environ.get(_WEATHER_BASE_URL_ENV, "").strip()
+            if not key or not base:
+                return {"ok": False, "action": "get_current",
+                        "error": f"{_WEATHER_API_KEY_ENV} / {_WEATHER_BASE_URL_ENV} 未配置"}
+            import requests  # 惰性加载, 不影响 mock / 启动
+
+            params: Dict[str, Any] = {"key": key}
+            if lat is not None:
+                params["lat"] = lat
+            if lng is not None:
+                params["lng"] = lng
+            resp = requests.get(base, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            weather = self._normalize_live(data)
+            weather["provider"] = "live"
+            weather["timestamp"] = datetime.now().isoformat(timespec="seconds")
+            return {"ok": True, "weather": weather, "provider": self.provider}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "action": "get_current", "error": str(exc)}
+
+    @staticmethod
+    def _normalize_live(data: Dict[str, Any]) -> Dict[str, Any]:
+        """尽力归一化常见天气 API 结构为统一字段(某些字段可能缺失)。"""
+        def _extract(obj, *keys):
+            for k in keys:
+                v = obj.get(k) if isinstance(obj, dict) else None
+                if v is not None:
+                    return v
+            return None
+
+        now = data.get("now") if isinstance(data.get("now"), dict) else {}
+        current = data.get("current") if isinstance(data.get("current"), dict) else {}
+        main = data.get("main") if isinstance(data.get("main"), dict) else {}
+        cond0 = data.get("condition") if isinstance(data.get("condition"), dict) else {}
+        weather_list = data.get("weather")
+        w0 = weather_list[0] if isinstance(weather_list, list) and weather_list else {}
+
+        temp = (_extract(now, "temp")
+                or _extract(current, "temp_c")
+                or main.get("temp"))
+        condition = (_extract(now, "text")
+                     or (cond0.get("text")
+                         or _extract(current, "condition"))
+                     or w0.get("main")
+                     or w0.get("description"))
+        wind = (_extract(now, "windScale")
+                or _extract(current, "wind_kph")
+                or _extract(current, "wind"))
+        humidity = (_extract(now, "humidity")
+                    or main.get("humidity"))
+
+        return {
+            "condition": condition,
+            "temperature": temp,
+            "wind": wind,
+            "humidity": humidity,
+        }
 
 
 if __name__ == "__main__":
     t = WeatherTool()
     print(t.info())
-    print("Key env 预留:", _WEATHER_API_KEY_ENV)
-    print(json := t.run(action="get_current", lat=31.2, lng=121.5))
+    print("Provider(=mock 若未 set):", t.provider)
+    print("live 需 env:", _WEATHER_PROVIDER_ENV, _WEATHER_API_KEY_ENV, _WEATHER_BASE_URL_ENV)
+    print(t.run(action="get_current", lat=31.2, lng=121.5))
