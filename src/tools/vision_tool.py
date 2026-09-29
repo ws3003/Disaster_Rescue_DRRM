@@ -162,6 +162,11 @@ class VisionTool(Tool):
     # get_snapshot(person_id)
     # ------------------------------------------------------------------
     def _get_snapshot(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        # 权威图片优先: 调用方(Agent 从 llm 上下文)注入的 image_url(如 OSS 公网 URL)
+        provided_url = kwargs.get("image_url")
+        if provided_url:
+            return {"ok": True, "action": "get_snapshot",
+                    "snapshot": {"url": provided_url}}
         if not self.snapshot_path.exists():
             return {"ok": True, "action": "get_snapshot", "snapshot": None,
                     "message": "No vision snapshot available."}

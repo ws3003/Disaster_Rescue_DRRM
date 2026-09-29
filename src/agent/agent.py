@@ -662,6 +662,14 @@ class Agent:
                         args["image_path"] = img_url
                         print(f"[LLM->Agent] image injected into communication_tool "
                               f"action: {img_url}")
+            # vision_tool 也注入权威 image_url, 供 get_snapshot 直接返回 OSS 公网 URL
+            for act in filtered:
+                if isinstance(act, dict) and act.get("tool") == "vision_tool" \
+                        and (act.get("args") or {}).get("action") == "get_snapshot":
+                    vargs = act.get("args")
+                    if isinstance(vargs, dict) and not vargs.get("image_url"):
+                        vargs["image_url"] = img_url
+                        print(f"[LLM->Agent] image injected into vision_tool action: {img_url}")
 
         execution_results: list[dict[str, Any]] = []
         if filtered:

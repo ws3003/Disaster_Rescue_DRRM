@@ -22,6 +22,7 @@ import os
 import sys
 import time
 import traceback
+import uuid
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import cv2
@@ -307,6 +308,12 @@ def run_loop(
             break
         iterations += 1
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        # 同一次迭代双路径(规则 process_frame + LLM ingest)复用同一 task_id,
+        # 使 SQLite tasks 表同一次事件只产一行主要任务(executor 按 task_id upsert)。
+        iter_task_id = "T-%s-%s" % (
+            time.strftime("%Y%m%d%H%M%S"),
+            uuid.uuid4().hex[:6],
+        )
 
         try:
             frame = cam.capture()
@@ -382,7 +389,10 @@ def run_loop(
                     _events,
                     timestamp=ts,
                 )
-                agent.process_frame(frame_record)
+                agent.process_frame(
+                    frame_record,
+                    context={"task_id": iter_task_id},
+                )
             except Exception as exc:  # noqa: BLE001
                 print("[EdgeClient]")
                 print(ts)
@@ -459,6 +469,7 @@ def run_loop(
                                 "image_url":
                                     body.get("snapshot_url")
                                     or getattr(uploader, "last_snapshot_url", None),
+                                "task_id": iter_task_id,
                             },
                         )
                         print(
