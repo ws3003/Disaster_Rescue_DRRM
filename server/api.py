@@ -49,6 +49,7 @@ from src.vlm.client import (
 )
 from src.vlm.parser import SceneParseError, parse as parse_vlm
 from src.storage import upload_snapshot
+from src.assistant.responder import AssistantResponder
 
 app = FastAPI(
     title="Disaster_Rescue_DRRM Inference API",
@@ -352,6 +353,26 @@ def analyze(
 
     return sch.ok(vlm_output, llm_output,
                   snapshot_url=snap_url if snap_url else _snapshot_url(request, snap_filename))
+
+
+# ======================================================================
+# V4.1 Assistant: 信息辅助决策问答 (独立层, 不调用 rescue/communication)
+# ----------------------------------------------------------------------
+@app.post("/api/v1/assistant/ask", response_model=sch.AssistantAskResponse)
+def assistant_ask(payload: sch.AssistantAskRequest) -> sch.AssistantAskResponse:
+    """仅信息类回答: 现场状态 / 风险提示 / 现场快照。
+
+    只读取上下文并返回自然语言信息, 不产生报警/救援任务,
+    不调用 rescue_tool / communication_tool。
+    """
+    responder = AssistantResponder()
+    out = responder.answer(payload.question)
+    return sch.AssistantAskResponse(
+        ok=True,
+        answer=out.get("answer", ""),
+        intent=out.get("intent", ""),
+        sources=out.get("sources", []),
+    )
 
 
 # ======================================================================

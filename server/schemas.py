@@ -99,3 +99,21 @@ HTTP_IMAGE_ERROR = 400     # 图片错误: 空文件/非图片/无法读取
 HTTP_UNPROCESSABLE = 422   # 请求参数错误: person_events 非法 JSON / 字段不符
 HTTP_CONFIG_ERROR = 500    # 服务端缺 API Key 等配置
 HTTP_UPSTREAM_ERROR = 502  # VLM/LLM 或 parser 失败
+
+
+# ======================================================================
+# V4.1 Assistant (信息辅助决策) DTO
+# ----------------------------------------------------------------
+class AssistantAskRequest(BaseModel):
+    """Assistant 提问请求。仅信息咨询, 不触发任何动作。"""
+
+    question: str = Field(..., description="用户自然语言问题")
+
+
+class AssistantAskResponse(BaseModel):
+    """Assistant 提问响应。"""
+
+    ok: bool = True
+    answer: str = ""
+    intent: str = ""
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
