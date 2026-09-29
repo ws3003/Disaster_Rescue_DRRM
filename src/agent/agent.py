@@ -623,6 +623,19 @@ class Agent:
                 a["args"] = args
             filtered.append(a)
 
+        # ── persons 注入(方案A): 把权威 persons_map 传给 rescue_tool / vision_tool。
+        #    仅限这两个 tool; 保留原 args; 已有 persons 不覆盖;
+        #    仅发生在 LLM 路径 ingest_llm_output, 不影响规则路径 process_frame。
+        if persons_map is not None:
+            injected_persons = list(persons_map.values())
+            for act in filtered:
+                if isinstance(act, dict) and act.get("tool") in ("rescue_tool", "vision_tool"):
+                    args = act.get("args")
+                    if isinstance(args, dict) and "persons" not in args:
+                        args["persons"] = injected_persons
+                        print(f"[LLM->Agent] persons injected into {act.get('tool')} "
+                              f"action ({len(injected_persons)} persons)")
+
         execution_results: list[dict[str, Any]] = []
         if filtered:
             exec_task = dict(task)
