@@ -24,15 +24,24 @@ _SNAPSHOT_GLOB = "*_analysis.*"
 
 
 class AssistantContext:
-    """只读上下文聚合。构造时指定数据源路径以方便测试/隔离; 默认指向项目运行时数据。"""
+    """只读上下文聚合。构造时指定数据源路径以方便测试/隔离; 默认指向项目运行时数据。
+
+    weather_provider: 可选天气提供回调, 形如 (lat, lng) -> {ok, weather: {...}}。
+                       为 None 时天气字段返回 None(未接入/不可用)。
+    location: 查询天气使用的坐标(可选 dict: {lat, lng})。
+    """
 
     def __init__(
         self,
         db_path: Optional[str] = None,
         snapshot_dir: Optional[str] = None,
+        weather_provider: Optional[callable] = None,
+        location: Optional[Dict[str, Any]] = None,
     ):
         self.db_path = db_path or _DEFAULT_DB
         self.snapshot_dir = snapshot_dir or _DEFAULT_SNAPSHOT_DIR
+        self._weather_provider = weather_provider
+        self._location = location or {}
 
     # ---------------------------------------------------------------- 数据读取
     def _latest_task(self) -> Dict[str, Any]:
@@ -81,19 +90,35 @@ class AssistantContext:
         except Exception:
             return {}
 
+    def _weather(self) -> Optional[Dict[str, Any]]:
+        """有 weather_provider 时查询天气(信息类, mock/future 真实); 无则 None。"""
+        if self._weather_provider is None:
+            return None
+        try:
+            res = self._weather_provider(
+                lat=self._location.get("lat"),
+                lng=self._location.get("lng"),
+            )
+            if isinstance(res, dict) and res.get("ok") and res.get("weather"):
+                return res["weather"]
+            return None
+        except Exception:
+            return None
+
     # ---------------------------------------------------------------- 聚合并对外
     def collect(self) -> Dict[str, Any]:
-        """返回结构化上下文: 包含现用字段与未来扩展占位。"""
+        """返回结构化上下文: 包含现用字段与未来扩展占位(weather 未接入时为 None)。"""
         latest_task = self._latest_task()
         scene = self._scene(latest_task)
         snapshot = self._latest_snapshot()
+        weather = self._weather()
         return {
             # 当前可用
             "scene": scene,
             "latest_task": latest_task,
             "snapshot": snapshot,
+            "weather": weather,
             # 未来扩展占位(当前为空)
-            "weather": {},
             "location": {},
             "map": {},
         }

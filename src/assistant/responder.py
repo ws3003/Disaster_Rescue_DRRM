@@ -69,8 +69,27 @@ class AssistantResponder:
 
     def _answer_general(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         ans = ("我可以为您提供信息辅助：可询问\"现场怎么样\"（场景状态）、"
-               "\"有没有危险\"（风险）、\"图片在哪里\"（现场快照）。系统仅提供信息，不发起任何救援动作。")
+               "\"有没有危险\"（风险）、\"图片在哪里\"（现场快照）、"
+               "\"天气怎么样\"（天气）。系统仅提供信息，不发起任何救援动作。")
         return {"answer": ans, "sources": []}
+
+    def _answer_weather(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        w = ctx.get("weather")
+        sources: list[Dict[str, Any]] = []
+        if isinstance(w, dict) and w:
+            cond = w.get("condition")
+            temp = w.get("temperature")
+            wind = w.get("wind")
+            sources.append({"type": "weather", "timestamp": w.get("timestamp"),
+                            "source": w.get("source")})
+            cond_txt = cond if isinstance(cond, str) else "未知"
+            temp_txt = f"{temp}℃" if temp is not None else "—"
+            ans = f"当前天气{cond_txt}，温度{temp_txt}。"
+            if wind:
+                ans += f"风力{wind}。"
+        else:
+            ans = "当前未接入实时天气服务，天气信息暂不可用。"
+        return {"answer": ans, "sources": sources}
 
     # ---------------------------------------------------------------- 入口
     def answer(self, question: str) -> Dict[str, Any]:
@@ -83,6 +102,8 @@ class AssistantResponder:
             out = self._answer_risk(ctx)
         elif intent == intent_mod.INTENT_SNAPSHOT:
             out = self._answer_snapshot(ctx)
+        elif intent == intent_mod.INTENT_WEATHER:
+            out = self._answer_weather(ctx)
         else:
             out = self._answer_general(ctx)
         return {"answer": out["answer"], "sources": out["sources"], "intent": intent}
