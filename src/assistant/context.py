@@ -29,6 +29,9 @@ class AssistantContext:
     weather_provider: 可选天气提供回调, 形如 (lat, lng) -> {ok, weather: {...}}。
                        为 None 时天气字段返回 None(未接入/不可用)。
     location: 查询天气使用的坐标(可选 dict: {lat, lng})。
+    map_provider: 可选地图提供器(如 MapTool), 需提供 geocode(address)/rescue_route(o,d)。
+    place: 现场位置文本(用于 geocode)。
+    route_origin / route_destination: 路线查询起终点(可选)。
     """
 
     def __init__(
@@ -37,11 +40,19 @@ class AssistantContext:
         snapshot_dir: Optional[str] = None,
         weather_provider: Optional[callable] = None,
         location: Optional[Dict[str, Any]] = None,
+        map_provider: Optional[Any] = None,
+        place: Optional[str] = None,
+        route_origin: Optional[str] = None,
+        route_destination: Optional[str] = None,
     ):
         self.db_path = db_path or _DEFAULT_DB
         self.snapshot_dir = snapshot_dir or _DEFAULT_SNAPSHOT_DIR
         self._weather_provider = weather_provider
         self._location = location or {}
+        self._map_provider = map_provider
+        self._place = place
+        self._route_origin = route_origin or "现场"
+        self._route_destination = route_destination or "最近救援点"
 
     # ---------------------------------------------------------------- 数据读取
     def _latest_task(self) -> Dict[str, Any]:
@@ -105,20 +116,48 @@ class AssistantContext:
         except Exception:
             return None
 
+    def _map_location(self) -> Dict[str, Any]:
+        """有 map_provider 且给定 place 时定位; 否则空。"""
+        if self._map_provider is None or not self._place:
+            return {}
+        try:
+            res = self._map_provider.geocode(self._place)
+            if isinstance(res, dict) and res.get("ok") and res.get("location"):
+                return res["location"]
+            return {}
+        except Exception:
+            return {}
+
+    def _map_route(self) -> Dict[str, Any]:
+        """有 map_provider 时给路线建议; 否则空。仅信息, 不派单。"""
+        if self._map_provider is None:
+            return {}
+        try:
+            res = self._map_provider.rescue_route(
+                origin=self._route_origin,
+                destination=self._route_destination,
+            )
+            if isinstance(res, dict) and res.get("ok") and res.get("route"):
+                return res["route"]
+            return {}
+        except Exception:
+            return {}
+
     # ---------------------------------------------------------------- 聚合并对外
     def collect(self) -> Dict[str, Any]:
-        """返回结构化上下文: 包含现用字段与未来扩展占位(weather 未接入时为 None)。"""
+        """返回结构化上下文。weather/location/map 未接入(或无提供器)时为空(weather=None)。"""
         latest_task = self._latest_task()
         scene = self._scene(latest_task)
         snapshot = self._latest_snapshot()
         weather = self._weather()
+        map_location = self._map_location()
+        map_route = self._map_route()
         return {
             # 当前可用
             "scene": scene,
             "latest_task": latest_task,
             "snapshot": snapshot,
             "weather": weather,
-            # 未来扩展占位(当前为空)
-            "location": {},
-            "map": {},
+            "location": map_location,
+            "map": {"route": map_route} if map_route else {},
         }

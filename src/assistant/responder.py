@@ -70,7 +70,8 @@ class AssistantResponder:
     def _answer_general(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         ans = ("我可以为您提供信息辅助：可询问\"现场怎么样\"（场景状态）、"
                "\"有没有危险\"（风险）、\"图片在哪里\"（现场快照）、"
-               "\"天气怎么样\"（天气）。系统仅提供信息，不发起任何救援动作。")
+               "\"天气怎么样\"（天气）、\"在哪里\"（位置）、\"路线怎么走\"（路线）。"
+               "系统仅提供信息，不发起任何救援动作。")
         return {"answer": ans, "sources": []}
 
     def _answer_weather(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -91,6 +92,35 @@ class AssistantResponder:
             ans = "当前未接入实时天气服务，天气信息暂不可用。"
         return {"answer": ans, "sources": sources}
 
+    def _answer_location(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        loc = ctx.get("location") or {}
+        sources: list[Dict[str, Any]] = []
+        place = loc.get("place")
+        lat = loc.get("lat")
+        lng = loc.get("lng")
+        if place or (lat is not None and lng is not None):
+            sources.append({"type": "map", "place": place, "lat": lat, "lng": lng})
+            pos = place or f"({lat}, {lng})"
+            ans = f"当前现场位置为：{pos}。"
+        else:
+            ans = "当前未连接地图服务，暂无法提供位置信息。"
+        return {"answer": ans, "sources": sources}
+
+    def _answer_route(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        m = ctx.get("map") or {}
+        route = m.get("route") or {}
+        sources: list[Dict[str, Any]] = []
+        dist = route.get("distance_km")
+        dur = route.get("duration_min")
+        if dist is not None and dur is not None:
+            sources.append({"type": "map", "route": {k: route.get(k)
+                            for k in ("distance_km", "duration_min", "summary")}})
+            ans = (f"建议路线距离约{dist}公里，预计{dur}分钟。"
+                   + (f" 概要：{route.get('summary')}" if route.get("summary") else ""))
+        else:
+            ans = "当前未连接地图服务，暂无法提供路线建议。"
+        return {"answer": ans, "sources": sources}
+
     # ---------------------------------------------------------------- 入口
     def answer(self, question: str) -> Dict[str, Any]:
         """返回 {answer, sources, intent}。"""
@@ -104,6 +134,10 @@ class AssistantResponder:
             out = self._answer_snapshot(ctx)
         elif intent == intent_mod.INTENT_WEATHER:
             out = self._answer_weather(ctx)
+        elif intent == intent_mod.INTENT_LOCATION:
+            out = self._answer_location(ctx)
+        elif intent == intent_mod.INTENT_ROUTE:
+            out = self._answer_route(ctx)
         else:
             out = self._answer_general(ctx)
         return {"answer": out["answer"], "sources": out["sources"], "intent": intent}
