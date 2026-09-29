@@ -50,6 +50,7 @@ from src.vlm.client import (
 from src.vlm.parser import SceneParseError, parse as parse_vlm
 from src.storage import upload_snapshot
 from src.assistant.responder import AssistantResponder
+from src.assistant.voice import VoiceAssistant
 
 app = FastAPI(
     title="Disaster_Rescue_DRRM Inference API",
@@ -372,6 +373,45 @@ def assistant_ask(payload: sch.AssistantAskRequest) -> sch.AssistantAskResponse:
         answer=out.get("answer", ""),
         intent=out.get("intent", ""),
         sources=out.get("sources", []),
+    )
+
+
+def _save_audio_temp(audio: UploadFile) -> Optional[str]:
+    """把上传音频写入临时文件, 返回路径(供 mock ASR; 失败返回 None)。"""
+    try:
+        import tempfile
+        data = audio.file.read()
+        fd, path = tempfile.mkstemp(suffix=".wav")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        return path
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@app.post("/api/v1/assistant/voice", response_model=sch.VoiceAskResponse)
+def assistant_voice(
+    text: Optional[str] = Form(None),
+    audio: Optional[UploadFile] = File(None),
+) -> sch.VoiceAskResponse:
+    """语音交互: audio(经 ASR) 或 text → 信息回答 → TTS audio_url。
+
+    仅作输入输出转换, 不触发任何救援动作。
+    """
+    voice = VoiceAssistant()
+    audio_path = None
+    if audio is not None:
+        audio_path = _save_audio_temp(audio)
+    try:
+        out = voice.handle(audio_path=audio_path, text=text)
+    finally:
+        if audio_path:
+            _cleanup_temp(audio_path)
+    return sch.VoiceAskResponse(
+        ok=True,
+        question=out.get("question"),
+        answer=out.get("answer", ""),
+        audio_url=out.get("audio_url"),
     )
 
 

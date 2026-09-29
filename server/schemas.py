@@ -117,3 +117,12 @@ class AssistantAskResponse(BaseModel):
     answer: str = ""
     intent: str = ""
     sources: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class VoiceAskResponse(BaseModel):
+    """语音交互响应(信息辅助, 不触发动作)。"""
+
+    ok: bool = True
+    question: Optional[str] = None
+    answer: str = ""
+    audio_url: Optional[str] = None
