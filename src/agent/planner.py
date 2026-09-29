@@ -215,7 +215,11 @@ class Planner:
         # Generate task ID (context.task_id 优先, 供同一次 edge 迭代双路径复用)
         # ------------------------------------------------------
 
-        task_id = context.get("task_id") or self._generate_task_id()
+        task_id = (
+            context.get("task_id")
+            or (context.get("external_context") or {}).get("task_id")
+            or self._generate_task_id()
+        )
 
         # ------------------------------------------------------
         # Build task goal
