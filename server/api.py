@@ -51,6 +51,7 @@ from src.vlm.parser import SceneParseError, parse as parse_vlm
 from src.storage import upload_snapshot
 from src.assistant.responder import AssistantResponder
 from src.assistant.voice import VoiceAssistant
+from src.tools.weather_tool import WeatherTool
 
 app = FastAPI(
     title="Disaster_Rescue_DRRM Inference API",
@@ -359,6 +360,26 @@ def analyze(
 # ======================================================================
 # V4.1 Assistant: 信息辅助决策问答 (独立层, 不调用 rescue/communication)
 # ----------------------------------------------------------------------
+
+def _build_responder_with_weather() -> AssistantResponder:
+    """构造带实时天气的 AssistantResponder(供 /assistant/ask 与 /assistant/voice 共用)。
+
+    位置由环境变量 WEATHER_LAT / WEATHER_LNG 提供(默认南京 32.0603,118.7969);
+    不修改 weather_tool/context/responder, 仅在此层注入 weather_provider。
+    """
+    from src.assistant.context import AssistantContext
+    try:
+        lat = float(os.environ.get("WEATHER_LAT", "32.0603"))
+        lng = float(os.environ.get("WEATHER_LNG", "118.7969"))
+    except (TypeError, ValueError):  # noqa: BLE001
+        lat, lng = 32.0603, 118.7969
+    ctx = AssistantContext(
+        weather_provider=WeatherTool().get_current,
+        location={"lat": lat, "lng": lng},
+    )
+    return AssistantResponder(context=ctx)
+
+
 @app.post("/api/v1/assistant/ask", response_model=sch.AssistantAskResponse)
 def assistant_ask(payload: sch.AssistantAskRequest) -> sch.AssistantAskResponse:
     """仅信息类回答: 现场状态 / 风险提示 / 现场快照。
@@ -366,7 +387,7 @@ def assistant_ask(payload: sch.AssistantAskRequest) -> sch.AssistantAskResponse:
     只读取上下文并返回自然语言信息, 不产生报警/救援任务,
     不调用 rescue_tool / communication_tool。
     """
-    responder = AssistantResponder()
+    responder = _build_responder_with_weather()
     out = responder.answer(payload.question)
     # 显式 UTF-8 charset, 兼容 PowerShell 等按 Content-Type 解码的中文客户端;
     # 字段与 AssistantAskResponse 完全一致, 不改变 API 契约。
@@ -403,7 +424,7 @@ def assistant_voice(
 
     仅作输入输出转换, 不触发任何救援动作。
     """
-    voice = VoiceAssistant()
+    voice = VoiceAssistant(responder=_build_responder_with_weather())
     audio_path = None
     if audio is not None:
         audio_path = _save_audio_temp(audio)

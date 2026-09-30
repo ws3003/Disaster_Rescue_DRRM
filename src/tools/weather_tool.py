@@ -107,13 +107,17 @@ class WeatherTool(Tool):
             import requests  # 惰性加载, 不影响 mock / 启动
 
             params: Dict[str, Any] = {"key": key}
-            if lat is not None:
-                params["lat"] = lat
-            if lng is not None:
-                params["lng"] = lng
+            # QWeather v7: location=<经度>,<纬度> (经度在前); 不接受 lat/lng
+            if lat is not None and lng is not None:
+                params["location"] = f"{lng},{lat}"
             resp = requests.get(base, params=params, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
+            try:
+                data = resp.json()
+            except Exception:  # noqa: BLE001
+                data = {}
+            if resp.status_code != 200:
+                return {"ok": False, "action": "get_current",
+                        "error": f"QWeather API error: status={resp.status_code}, body={data}"}
             weather = self._normalize_live(data)
             weather["provider"] = "live"
             weather["timestamp"] = datetime.now().isoformat(timespec="seconds")
