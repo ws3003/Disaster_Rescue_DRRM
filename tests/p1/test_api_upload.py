@@ -8,6 +8,8 @@ import json
 import os
 import sys
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import requests
 from fastapi.testclient import TestClient
@@ -76,8 +78,19 @@ class UploadTestCase(unittest.TestCase):
         os.environ["LLM_API_KEY"] = "llm"
         os.environ.pop("VLM_PROVIDER", None)
         os.environ.pop("LLM_PROVIDER", None)
+        # 禁止写入仓库 data/snapshots: 改用临时目录
+        import tempfile
+        self._snap_tmp = tempfile.TemporaryDirectory()
+        self._snap_patch = patch("server.api.SNAP_DIR",
+                                 Path(self._snap_tmp.name))
+        self._snap_patch.start()
 
     def tearDown(self):
+        try:
+            self._snap_patch.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        self._snap_tmp.cleanup()
         api.app.dependency_overrides.pop(api.get_clients, None)
         for key, value in self._saved.items():
             if value is None:

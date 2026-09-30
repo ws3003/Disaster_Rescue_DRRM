@@ -58,6 +58,9 @@ class AgentBridge:
         persons = adapter.latest_persons()
         task = adapter.build_voice_task(intent, True, persons, payload)
         llm_output = adapter.to_llm_output(intent, persons, payload)
+        # 传 context.image_url → 复用 Agent 既有图片注入(自动把 args["image_path"] 补上)
+        image_url = (persons[0].get("image_url") if persons else None)
+        context = {"image_url": image_url} if image_url else {}
         try:
             agent = self._get_agent()
             return {
@@ -65,7 +68,7 @@ class AgentBridge:
                 "intent": intent,
                 "confirmed": True,
                 "task": task,
-                "agent_result": agent.ingest_llm_output(llm_output),
+                "agent_result": agent.ingest_llm_output(llm_output, context=context),
             }
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "intent": intent, "confirmed": True, "error": str(exc)}

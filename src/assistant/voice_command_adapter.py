@@ -38,7 +38,9 @@ def to_llm_output(intent: str, persons: list, payload: Optional[Dict] = None) ->
     target = [p for p in persons if str(p.get("id")) == str(pid)] if pid else [p for p in persons]
     persons_out = [
         {"person_id": p.get("id"), "state": p.get("state"),
-         "risk_score": p.get("risk_score"), "priority": p.get("risk", p.get("priority"))}
+         "risk": p.get("risk"), "risk_score": p.get("risk_score"),
+         "priority": p.get("priority"), "bbox": p.get("bbox"),
+         "image_url": p.get("image_url")}
         for p in persons if p.get("id") is not None
     ]
     proposals: list[Dict[str, Any]] = []

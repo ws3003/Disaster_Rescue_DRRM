@@ -623,6 +623,7 @@ class Planner:
                     "state": state,
                     "title": title,
                     "message": message,
+                    "risk_score": payload.get("risk_score"),
                 },
             }
 

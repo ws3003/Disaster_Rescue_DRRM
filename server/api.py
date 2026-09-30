@@ -476,16 +476,49 @@ def vision_snapshot_ingest(payload: dict = Body(...), request: Request = None) -
             "error": res.get("error") if not res.get("ok") else None}
 
 
-def _latest_snapshot_public_url(request: Request) -> Optional[str]:
-    """返回 data/snapshots 里最新一张分析图的公网 URL; 无则 None。"""
+_MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024  # 5MB 上限
+
+
+def _valid_snapshot_image(path: Path) -> bool:
+    """校验快照图: 存在/非空/大小上限/扩展名白名单/PIL 可decode。"""
     try:
-        files = sorted(SNAP_DIR.glob("*_analysis.*"),
+        if not path.is_file():
+            return False
+        size = path.stat().st_size
+        if not (0 < size <= _MAX_SNAPSHOT_BYTES):
+            return False
+        if path.suffix.lower() not in SNAP_ALLOWED_EXT:
+            return False
+        from PIL import Image  # 惰性导入, 避免无 Pillow 时影响其它逻辑
+        with Image.open(path) as im:
+            im.verify()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _latest_snapshot_public_url(request: Request) -> Optional[str]:
+    """返回 data/snapshots 里最新一张**有效**分析图的公网 URL; 无有效图片返回 None。
+
+    优先复用 upload_snapshot(OSS) 生成公网 URL(钉钉可访问); OSS 失败时回退原 _snapshot_url。
+    jpg 优先; 有大小/PIL 校验; 无有效图片 → None。
+    """
+    try:
+        cands = sorted(SNAP_DIR.glob("*_analysis.*"),
                        key=lambda p: p.stat().st_mtime, reverse=True)
     except Exception:  # noqa: BLE001
         return None
-    if not files:
+    valid = [p for p in cands if _valid_snapshot_image(p)]
+    if not valid:
         return None
-    return _snapshot_url(request, files[0].name)
+    target = next((p for p in valid if p.suffix.lower() in (".jpg", ".jpeg")), valid[0])
+    try:
+        up = upload_snapshot(str(target))
+        if isinstance(up, dict) and up.get("ok") and up.get("url"):
+            return up["url"]
+    except Exception:  # noqa: BLE001 — OSS 失败仅回退
+        pass
+    return _snapshot_url(request, target.name)
 
 
 # ======================================================================
