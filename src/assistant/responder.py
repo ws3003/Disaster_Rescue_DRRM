@@ -106,19 +106,34 @@ class AssistantResponder:
         sources: list[Dict[str, Any]] = []
         hazards: list[str] = []
 
+        # ── 天气情况 ──
         w = ctx.get("weather")
+        cond_txt = "未知"
         if isinstance(w, dict) and w:
-            sources.append({"type": "weather", "condition": w.get("condition"),
-                            "temperature": w.get("temperature")})
-            cond = str(w.get("condition") or "")
-            if any(b in cond for b in self._BAD_WEATHER):
-                hazards.append(f"当前天气（{cond}）不利")
+            cond = w.get("condition") or "未知"
+            temp = w.get("temperature")
+            hum = w.get("humidity")
+            cond_txt = str(cond)
+            parts = [f"{cond}"]
+            if temp is not None:
+                parts.append(f"{temp}℃")
+            if hum is not None:
+                parts.append(f"湿度{hum}%")
+            sources.append({"type": "weather", "condition": cond,
+                            "temperature": temp, "humidity": hum})
+            if any(b in cond_txt for b in self._BAD_WEATHER):
+                hazards.append(f"当前天气（{cond_txt}）不利")
+            weather_line = "，".join(parts)
+        else:
+            weather_line = "未取得实时天气数据"
 
+        # ── 天气预警 ──
         warn = ctx.get("warning")
         if isinstance(warn, list) and warn:
             sources.append({"type": "weather_warning", "count": len(warn)})
             hazards.append(f"{len(warn)}项天气预警")
 
+        # ── 现场人员情况 ──
         v = ctx.get("vision")
         persons = (v.get("persons") or []) if isinstance(v, dict) else []
         high = []
@@ -132,14 +147,21 @@ class AssistantResponder:
             sources.append({"type": "vision", "high_risk_count": len(high)})
             hazards.append(f"{len(high)}名人员处于高风险")
 
-        title = f"当前现场有 {len(persons)} 名人员；"
+        # ── 综合输出 ──
+        weather_risk = "、".join(hazards) if hazards else "无明显不利因素"
+        people_line = (f"{len(persons)} 名人员"
+                       + (f"，其中 {len(high)} 名高风险" if high else ""))
         if not hazards:
-            ans = (f"{title}天气较平稳，无明显环境不利因素。总体较适宜开展救援，"
-                   f"但仍请人工现场研判后再行动。")
+            advice = "总体较适宜开展救援，但仍请人工现场研判后再行动。"
         else:
-            ans = (f"{title}存在以下不利因素：{'、'.join(hazards)}。"
-                   f"建议在做好防护且条件允许时开展救援，并优先处置高风险人员；"
-                   f"请人工研判决策，系统仅提供信息辅助。")
+            advice = ("存在上述不利因素，建议在做好防护且条件允许时开展救援，"
+                      "并优先处置高风险人员；请人工研判决策。")
+        ans = ("当前救援环境评估：\n"
+               f"- 天气情况：{weather_line}\n"
+               f"- 天气风险：{weather_risk}\n"
+               f"- 现场人员情况：{people_line}\n"
+               f"- 综合建议：{advice}\n"
+               "（系统仅提供信息辅助，不自动决定是否救援。）")
         return {"answer": ans, "sources": sources}
 
     def _answer_warning(self, ctx: Dict[str, Any]) -> Dict[str, Any]:

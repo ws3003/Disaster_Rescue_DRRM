@@ -86,6 +86,18 @@ class EnvSuitabilityTest(unittest.TestCase):
         self.assertEqual(cmd["category"], "info")
         self.assertEqual(cmd["intent"], "env_suitability")
 
+    # 5. weather 存在时应进入回答
+    def test_answer_includes_weather(self):
+        r = self._wh(
+            vision_persons=[{"id": 1, "state": "Fall", "risk": "HIGH", "risk_score": 0.92}],
+            weather={"ok": True, "weather": {"condition": "阴", "temperature": 22, "humidity": 89}})
+        out = r.answer("环境适合救援吗")
+        self.assertIn("天气情况：", out["answer"])
+        self.assertIn("阴", out["answer"])
+        self.assertIn("22℃", out["answer"])
+        self.assertIn("湿度89%", out["answer"])
+        self.assertIn("综合建议：", out["answer"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
