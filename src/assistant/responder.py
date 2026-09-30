@@ -99,6 +99,49 @@ class AssistantResponder:
             ans = "当前未接入实时天气服务，天气信息暂不可用。"
         return {"answer": ans, "sources": sources}
 
+    _BAD_WEATHER = ("暴雨", "大雨", "台风", "大风", "雷暴", "冰雹", "大雾", "暴雪", "雾")
+
+    def _answer_env_suitability(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """聚合天气 + 预警 + 人员风险 → 救援适宜性建议(信息辅助, 不自动行动)。"""
+        sources: list[Dict[str, Any]] = []
+        hazards: list[str] = []
+
+        w = ctx.get("weather")
+        if isinstance(w, dict) and w:
+            sources.append({"type": "weather", "condition": w.get("condition"),
+                            "temperature": w.get("temperature")})
+            cond = str(w.get("condition") or "")
+            if any(b in cond for b in self._BAD_WEATHER):
+                hazards.append(f"当前天气（{cond}）不利")
+
+        warn = ctx.get("warning")
+        if isinstance(warn, list) and warn:
+            sources.append({"type": "weather_warning", "count": len(warn)})
+            hazards.append(f"{len(warn)}项天气预警")
+
+        v = ctx.get("vision")
+        persons = (v.get("persons") or []) if isinstance(v, dict) else []
+        high = []
+        for p in persons:
+            risk = p.get("risk") or p.get("priority")
+            risk_score = p.get("risk_score")
+            if str(risk or "").upper() == "HIGH" \
+                    or (isinstance(risk_score, (int, float)) and risk_score >= 0.6):
+                high.append(p.get("id"))
+        if high:
+            sources.append({"type": "vision", "high_risk_count": len(high)})
+            hazards.append(f"{len(high)}名人员处于高风险")
+
+        title = f"当前现场有 {len(persons)} 名人员；"
+        if not hazards:
+            ans = (f"{title}天气较平稳，无明显环境不利因素。总体较适宜开展救援，"
+                   f"但仍请人工现场研判后再行动。")
+        else:
+            ans = (f"{title}存在以下不利因素：{'、'.join(hazards)}。"
+                   f"建议在做好防护且条件允许时开展救援，并优先处置高风险人员；"
+                   f"请人工研判决策，系统仅提供信息辅助。")
+        return {"answer": ans, "sources": sources}
+
     def _answer_warning(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         wlist = ctx.get("warning")
         sources: list[Dict[str, Any]] = []
@@ -253,6 +296,8 @@ class AssistantResponder:
             out = self._answer_weather(ctx)
         elif intent == intent_mod.INTENT_WARNING:
             out = self._answer_warning(ctx)
+        elif intent == intent_mod.INTENT_ENV:
+            out = self._answer_env_suitability(ctx)
         elif intent == intent_mod.INTENT_LOCATION:
             out = self._answer_location(ctx)
         elif intent == intent_mod.INTENT_ROUTE:

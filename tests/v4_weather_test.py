@@ -28,6 +28,9 @@ from src.tools.weather_tool import WeatherTool  # noqa: E402
 class WeatherTest(unittest.TestCase):
 
     def setUp(self):
+        # 环境隔离: 测试固定 mock, 不受生产 WEATHER_PROVIDER=live 影响
+        self._saved_weather_provider = os.environ.get("WEATHER_PROVIDER")
+        os.environ["WEATHER_PROVIDER"] = "mock"
         self._tmp = tempfile.TemporaryDirectory()
         self.db = os.path.join(self._tmp.name, "w.db")
         self.snap_dir = os.path.join(self._tmp.name, "snapshots")
@@ -39,6 +42,10 @@ class WeatherTest(unittest.TestCase):
         Path(self.snap_dir, "w_20260929.jpg").write_bytes(b"x")
 
     def tearDown(self):
+        if self._saved_weather_provider is None:
+            os.environ.pop("WEATHER_PROVIDER", None)
+        else:
+            os.environ["WEATHER_PROVIDER"] = self._saved_weather_provider
         self._tmp.cleanup()
 
     # 1. 意图识别

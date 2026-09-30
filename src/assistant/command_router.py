@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-INFO_COMMANDS = {"scene_status", "count_query", "fall_query", "weather", "plan_route"}
+INFO_COMMANDS = {"scene_status", "count_query", "fall_query", "weather", "plan_route",
+                 "env_suitability"}
 ACTION_WHITELIST = {"needs_rescue", "max_risk", "send_alert", "notify_rescue"}
 DANGEROUS = {"send_alert", "notify_rescue"}
 
@@ -22,6 +23,7 @@ _CMD_KEYWORDS: List[tuple] = [
     ("count_query", ("多少人", "几个人", "当前几人", "人数")),
     ("fall_query", ("倒地", "有没有倒地", "倒下")),
     ("weather", ("天气", "温度")),
+    ("env_suitability", ("适合救援", "适宜救援", "救援条件", "环境适合", "能否救援", "适合开展救援")),
     ("plan_route", ("规划路线", "救援路线", "怎么走")),
 ]
 
