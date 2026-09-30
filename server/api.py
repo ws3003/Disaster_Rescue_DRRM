@@ -497,6 +497,24 @@ SNAP_ALLOWED_EXT = {".jpg", ".jpeg", ".png"}
 # snapshot 根目录 (相对 repo 根; 运行 uvicorn 时 cwd 应为 repo 根)
 SNAP_DIR = Path(__file__).resolve().parents[1] / "data" / "snapshots"
 
+# 语音临时音频目录 (供 /api/v1/assistant/audio/{filename} 静态访问, 仅供 DashScope ASR 拉取)
+AUDIO_DIR = Path(__file__).resolve().parents[1] / "data" / "audio"
+AUDIO_ALLOWED_EXT = {".wav", ".mp3", ".pcm"}
+
+
+@app.get("/api/v1/assistant/audio/{filename}")
+def assistant_audio(filename: str) -> FileResponse:
+    """返回 data/audio 下的 wav/音频文件(供 ASR 拉取)。仅白名单+基名, 防路径穿越。"""
+    if not filename or Path(filename).suffix.lower() not in AUDIO_ALLOWED_EXT:
+        raise HTTPException(status_code=400, detail="仅允许 wav/mp3/pcm")
+    # 仅允许纯文件名(无路径成分/../), 并做 ASCII 白名单
+    if Path(filename).name != filename or not re.fullmatch(r"[\w\-.]+", filename, flags=re.ASCII):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    fpath = AUDIO_DIR / filename
+    if not fpath.is_file():
+        raise HTTPException(status_code=404, detail="音频不存在")
+    return FileResponse(fpath, media_type="audio/wav")
+
 
 @app.get("/snapshots/{filename}")
 def get_snapshot(filename: str) -> FileResponse:

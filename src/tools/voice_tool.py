@@ -31,8 +31,11 @@ _VOICE_ASR_PROVIDER_ENV = "VOICE_ASR_PROVIDER"
 _VOICE_TTS_PROVIDER_ENV = "VOICE_TTS_PROVIDER"
 _ASR_API_KEY_ENV = "ASR_API_KEY"
 _ASR_BASE_URL_ENV = "ASR_BASE_URL"
+_ASR_MODEL_ENV = "ASR_MODEL"
+_ASR_DEFAULT_MODEL = "paraformer-realtime-v2"
 _TTS_API_KEY_ENV = "TTS_API_KEY"
 _TTS_BASE_URL_ENV = "TTS_BASE_URL"
+_VOICE_AUDIO_DIR = "data/audio"
 
 _DEFAULT_ASR_TEXT = "现场情况怎么样"
 _VOICE_OUT_DIR = "data/voice"
@@ -83,9 +86,11 @@ class VoiceTool(Tool):
         return {"ok": False, "action": action or "?", "error": f"Unsupported voice action: {action}"}
 
     # ------------------------------------------------------------ 侧级选择
-    def _asr_is_live(self) -> bool:
-        p = (os.environ.get(_VOICE_ASR_PROVIDER_ENV, "").strip().lower() or self.provider)
-        return p == "live"
+    def _asr_mode(self) -> str:
+        """返回 ASR provider: mock | live | aliyun。VOICE_ASR_PROVIDER 优先, 否则 provider。"""
+        p = (os.environ.get(_VOICE_ASR_PROVIDER_ENV, "").strip().lower()
+             or self.provider or "mock")
+        return p if p in ("mock", "live", "aliyun") else "mock"
 
     def _tts_is_live(self) -> bool:
         p = (os.environ.get(_VOICE_TTS_PROVIDER_ENV, "").strip().lower() or self.provider)
@@ -93,7 +98,10 @@ class VoiceTool(Tool):
 
     # ------------------------------------------------------------ ASR
     def audio_to_text(self, audio_path: Optional[str] = None) -> Dict[str, Any]:
-        if self._asr_is_live():
+        mode = self._asr_mode()
+        if mode == "aliyun":
+            return self._asr_aliyun(audio_path)
+        if mode == "live":
             return self._asr_live(audio_path)
         return self._asr_mock(audio_path)
 
@@ -128,6 +136,69 @@ class VoiceTool(Tool):
             return {"ok": True, "text": text, "provider": "live"}
         except Exception as exc:  # noqa: BLE001 — 真实服务失败不冒泡
             return {"ok": False, "text": "", "error": "ASR service unavailable"}
+
+    def _asr_aliyun(self, audio_path: Optional[str] = None) -> Dict[str, Any]:
+        """阿里云 DashScope 一句话识别(Paraformer)。音频先落 data/audio 供静态 URL, 再 POST asr。"""
+        try:
+            key = os.environ.get(_ASR_API_KEY_ENV, "").strip()
+            base = os.environ.get("STORAGE_BASE_URL", "").strip()
+            model = os.environ.get(_ASR_MODEL_ENV, "").strip() or _ASR_DEFAULT_MODEL
+            if not key or not base:
+                return {"ok": False, "text": "", "error": "ASR service unavailable"}
+            if not audio_path or not os.path.exists(audio_path):
+                return {"ok": False, "text": "", "error": "audio file not found"}
+            # 拷入 data/audio 以生成可访问 URL(供 DashScope 拉取)
+            from pathlib import Path
+            from datetime import datetime
+            adir = Path(_VOICE_AUDIO_DIR)
+            adir.mkdir(parents=True, exist_ok=True)
+            name = f"asr_{datetime.now().strftime('%Y%m%d%H%M%S')}.wav"
+            dest = adir / name
+            dest.write_bytes(Path(audio_path).read_bytes())
+            file_url = f"{base.rstrip('/')}/api/v1/assistant/audio/{name}"
+
+            import requests  # 惰性加载
+
+            url = "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/recognition"
+            payload = {
+                "model": model,
+                "input": {"file_urls": [file_url]},
+            }
+            headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+            resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            resp.raise_for_status()
+            text = self._extract_asr_text(resp.json())
+            if not text:
+                return {"ok": False, "text": "", "error": "ASR service unavailable"}
+            return {"ok": True, "text": text, "provider": "aliyun"}
+        except Exception as exc:  # noqa: BLE001 — 真实服务失败不冒泡
+            return {"ok": False, "text": "", "error": "ASR service unavailable"}
+
+    @staticmethod
+    def _extract_asr_text(data: Any) -> str:
+        """从 DashScope 一句话识别响应取 text(尽力尝试多字段)。"""
+        if not isinstance(data, dict):
+            return ""
+        # 常见: {"output": {"text": ...}} / {"result": [{"transcription": {"text": ...}}]}
+        out = data.get("output")
+        if isinstance(out, dict) and out.get("text"):
+            return str(out["text"])
+        result = data.get("result")
+        if isinstance(result, dict) and isinstance(result.get("transcription"), dict):
+            t = result["transcription"].get("text")
+            if t:
+                return str(t)
+        if isinstance(result, list):
+            for r in result:
+                if isinstance(r, dict):
+                    tr = r.get("transcription")
+                    if isinstance(tr, dict) and tr.get("text"):
+                        return str(tr["text"])
+                    if r.get("text"):
+                        return str(r["text"])
+        if data.get("text"):
+            return str(data["text"])
+        return ""
 
     @staticmethod
     def _extract_text(resp: Any) -> str:

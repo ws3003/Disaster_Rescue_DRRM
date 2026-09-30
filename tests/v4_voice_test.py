@@ -9,6 +9,7 @@
 """
 
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -133,6 +134,63 @@ class VoiceTest(unittest.TestCase):
         t = VoiceTool(provider="live")
         r = t.run(action="tts", text="天气")
         self.assertEqual(r["provider"], "live")
+
+
+from src.tools.voice_tool import (_ASR_API_KEY_ENV, _VOICE_ASR_PROVIDER_ENV)  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from server import api  # noqa: E402
+
+
+class VoiceAliyunTest(unittest.TestCase):
+    """Aliyun ASR 分支测试(全部 mock transport, 不触网)。"""
+
+    def _tmp_wav(self):
+        p = os.path.join(tempfile.mkdtemp(), "in.wav")
+        Path(p).write_bytes(b"RIFFfakewave")
+        return p
+
+    def test_audio_url_endpoint(self):
+        # 在 data/audio 放一个临时 wav, GET 应 200; 路径穿越应 400
+        adir = api.AUDIO_DIR
+        adir.mkdir(parents=True, exist_ok=True)
+        f = adir / "_voice_endpoint_test.wav"
+        f.write_bytes(b"wav")
+        c = TestClient(api.app)
+        try:
+            r = c.get("/api/v1/assistant/audio/_voice_endpoint_test.wav")
+            self.assertEqual(r.status_code, 200)
+            r2 = c.get("/api/v1/assistant/audio/..%2F..%2Fetc/passwd")
+            self.assertIn(r2.status_code, (400, 404))
+        finally:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+    def test_aliyun_asr_mock_transport(self):
+        from unittest.mock import patch
+        from src.tools.voice_tool import VoiceTool as VT
+        with patch("requests.post") as mpost, \
+             patch.dict(os.environ, {
+                 _VOICE_ASR_PROVIDER_ENV: "aliyun",
+                 _ASR_API_KEY_ENV: "k",
+                 "STORAGE_BASE_URL": "http://alias",
+             }):
+            class Resp:
+                def raise_for_status(self):
+                    return None
+                def json(self):
+                    return {"output": {"text": "前方有落石，请绕行"}}
+            mpost.return_value = Resp()
+            t = VT()
+            r = t.audio_to_text(self._tmp_wav())
+            self.assertTrue(r["ok"])
+            self.assertEqual(r["provider"], "aliyun")
+            self.assertIn("落石", r["text"])
+            args, kwargs = mpost.call_args
+            self.assertIn("recognition", args[0])
+            urls = kwargs["json"]["input"]["file_urls"]
+            self.assertTrue(urls[0].startswith("http://alias/api/v1/assistant/audio/"))
 
 
 if __name__ == "__main__":
