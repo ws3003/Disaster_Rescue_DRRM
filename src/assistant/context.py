@@ -186,9 +186,8 @@ class AssistantContext:
     def query_route(self, origin: str, destination: str) -> Optional[Dict[str, Any]]:
         """按起终点动态查询路线。origin/destination 来自用户问题, 由 responder 调用。
 
-        若 origin == "现场" 且本 context 有 _location(lat,lng)，则将其转成高德坐标
-        "<经度>,<纬度>"（origin 用灾害现场坐标）。依赖注入, 不 import MapTool;
-        无 map_provider / 失败返回 None。
+        origin=="现场" 时用本 context 的 _location 坐标。依赖注入, 不 import MapTool;
+        失败返回 None。
         """
         if self._map_provider is None:
             return None
@@ -205,6 +204,18 @@ class AssistantContext:
             )
             if isinstance(res, dict) and res.get("ok") and res.get("route"):
                 return res["route"]
+            return None
+        except Exception:
+            return None
+
+    def query_geocode(self, place: str) -> Optional[Dict[str, Any]]:
+        """地址/地点 → 坐标 {lat,lng,place}。依赖注入, 不 import MapTool; 失败返回 None。"""
+        if self._map_provider is None or not place:
+            return None
+        try:
+            res = self._map_provider.geocode(place)
+            if isinstance(res, dict) and res.get("ok") and res.get("location"):
+                return res["location"]
             return None
         except Exception:
             return None

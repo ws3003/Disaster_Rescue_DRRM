@@ -324,6 +324,54 @@ class AssistantResponder:
         lines.append("系统仅提供信息辅助，不自动执行救援。")
         return {"answer": "\n".join(lines), "sources": sources}
 
+    def _answer_rescue_route_priority(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """人员风险 + 附近医院 → geocode → 路线 → 救援推荐(信息辅助)。"""
+        sources: list[Dict[str, Any]] = []
+
+        v = ctx.get("vision") if isinstance(ctx.get("vision"), dict) else {}
+        persons = v.get("persons") or []
+        high = [p for p in persons
+                if str((p.get("risk") or p.get("priority") or "")).upper() == "HIGH"
+                or (isinstance(p.get("risk_score"), (int, float)) and p["risk_score"] >= 0.6)]
+        if persons:
+            sources.append({"type": "vision", "persons": len(persons), "high_risk": len(high)})
+
+        try:
+            poi_list = self._ctx.query_nearby("医院")
+        except Exception:  # noqa: BLE001
+            poi_list = None
+        hospital = {}
+        if isinstance(poi_list, list) and poi_list and isinstance(poi_list[0], dict):
+            hospital = poi_list[0]
+        name = hospital.get("name") or "最近医院"
+
+        loc = None
+        if name and name != "最近医院":
+            loc = self._ctx.query_geocode(name)
+        route = None
+        if loc and loc.get("lat") is not None and loc.get("lng") is not None:
+            route = self._ctx.query_route(origin="现场", destination=f"{loc['lng']},{loc['lat']}")
+        elif name != "最近医院":
+            route = self._ctx.query_route(origin="现场", destination=name)
+
+        lines = [f"当前现场检测到：{len(persons)} 名人员"
+                 + (f"，其中 {len(high)} 名高风险。" if high else "。")]
+        lines.append(f"推荐救援目标：{name}")
+        if route and route.get("distance_km") is not None:
+            dist = route.get("distance_km")
+            dur = route.get("duration_min")
+            lines.append(f"路线信息：距离约 {dist} km，预计约 {dur} 分钟。"
+                         if dur is not None else f"路线信息：距离约 {dist} km。")
+            sources.append({"type": "map", "hospital": name,
+                            "distance_km": dist, "duration_min": dur})
+        else:
+            lines.append("路线信息：暂无法获取路线。")
+            sources.append({"type": "map", "hospital": name})
+
+        lines.append("建议：优先关注高风险人员，并结合现场情况选择救援路线。")
+        lines.append("系统仅提供信息辅助，不自动执行救援。")
+        return {"answer": "\n".join(lines), "sources": sources}
+
     def _answer_people(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         v = ctx.get("vision") if isinstance(ctx.get("vision"), dict) else {}
         persons = v.get("persons") or []
@@ -375,6 +423,8 @@ class AssistantResponder:
             out = self._answer_nearby(ctx, question)
         elif intent == intent_mod.INTENT_RESCUE_RESOURCE:
             out = self._answer_nearby_rescue_resource(ctx)
+        elif intent == intent_mod.INTENT_RESCUE_ROUTE:
+            out = self._answer_rescue_route_priority(ctx)
         else:
             out = self._answer_general(ctx)
         return {"answer": out["answer"], "sources": out["sources"], "intent": intent}
