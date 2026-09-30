@@ -336,9 +336,9 @@ def run(config_path: str | Path, input_path: str | Path | None = None,
         if _repo_root not in _sys.path:
             _sys.path.insert(0, _repo_root)
         from src.agent.agent import Agent
-        from src.agent.config import load_config
+        from src.agent.config import load_config as load_agent_config
         from src.tools.vision_tool import VisionTool
-        bcfg = load_config()
+        bcfg = load_agent_config()
         agent_runner = Agent(config=bcfg, db_path=bcfg["db"]["path"])
         vision_tool = VisionTool(
             snapshot_path=bcfg["vision"]["snapshot_path"],
