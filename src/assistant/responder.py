@@ -277,6 +277,53 @@ class AssistantResponder:
             lines.append(f"{i}. {name}\n    类型：{t}\n    距离：{dist}")
         return {"answer": "\n".join(lines), "sources": sources}
 
+    def _answer_nearby_rescue_resource(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """结合 vision 人员风险 + 地图 POI → 附近救援资源语义回答(信息辅助)。"""
+        sources: list[Dict[str, Any]] = []
+
+        # 人员统计
+        v = ctx.get("vision") if isinstance(ctx.get("vision"), dict) else {}
+        persons = v.get("persons") or []
+        high = []
+        for p in persons:
+            risk = p.get("risk") or p.get("priority")
+            rs = p.get("risk_score")
+            if str(risk or "").upper() == "HIGH" \
+                    or (isinstance(rs, (int, float)) and rs >= 0.6):
+                high.append(p.get("id"))
+        if persons:
+            sources.append({"type": "vision", "persons": len(persons),
+                            "high_risk": len(high)})
+
+        kw_groups = (("医院",), ("消防站",), ("避难所",),)
+
+        def _one_poi(keyword: str):
+            try:
+                poi_list = self._ctx.query_nearby(keyword)
+                if isinstance(poi_list, list) and poi_list:
+                    p0 = poi_list[0] if isinstance(poi_list[0], dict) else {}
+                    return {"name": p0.get("name") or "—", "distance": p0.get("distance") or "—"}
+            except Exception:  # noqa: BLE001
+                return None
+            return None
+
+        lines = [f"当前现场检测到：{len(persons)} 名人员"
+                 + (f"，其中 {len(high)} 名高风险。" if high else "。")]
+        lines.append("附近救援资源：")
+        for (kw,) in kw_groups:
+            poi = _one_poi(kw)
+            if poi:
+                lines.append(f"{kw}：\n  - {poi['name']}（{poi['distance']}）")
+                sources.append({"type": "map", "keyword": kw, "name": poi["name"]})
+            else:
+                lines.append(f"{kw}：暂无数据")
+
+        high_tip = "请优先根据人员风险，关注就近医疗与救援资源并及时处置高风险人员；" if high else \
+            "可结合现场人员状态评估就近救援资源需求。"
+        lines.append(f"建议：{high_tip}")
+        lines.append("系统仅提供信息辅助，不自动执行救援。")
+        return {"answer": "\n".join(lines), "sources": sources}
+
     def _answer_people(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         v = ctx.get("vision") if isinstance(ctx.get("vision"), dict) else {}
         persons = v.get("persons") or []
@@ -326,6 +373,8 @@ class AssistantResponder:
             out = self._answer_route(ctx, question)
         elif intent == intent_mod.INTENT_NEARBY:
             out = self._answer_nearby(ctx, question)
+        elif intent == intent_mod.INTENT_RESCUE_RESOURCE:
+            out = self._answer_nearby_rescue_resource(ctx)
         else:
             out = self._answer_general(ctx)
         return {"answer": out["answer"], "sources": out["sources"], "intent": intent}

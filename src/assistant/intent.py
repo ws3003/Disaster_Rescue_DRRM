@@ -15,6 +15,7 @@ INTENT_WARNING = "warning_query"    # 询问天气预警/警报
 INTENT_ENV = "env_suitability"      # 询问环境是否适合救援
 INTENT_LOCATION = "location_query"  # 询问位置/地点
 INTENT_NEARBY = "nearby_query"      # 询问附近设施/医院/消防站/避难所
+INTENT_RESCUE_RESOURCE = "nearby_rescue_resource"  # 询问附近救援资源
 INTENT_ROUTE = "route_query"        # 询问路线/怎么过去
 INTENT_GENERAL = "general_query"    # 其它
 
@@ -29,6 +30,9 @@ _PATTERNS = [
     # 路线优先短语: 置于 nearby 前, 避免 "附近医院怎么走" 被 nearby 抢占
     (INTENT_ROUTE, ("附近医院怎么走", "附近消防站怎么走", "附近避难所路线", "附近怎么走",
                     "怎么去医院", "怎么去消防站", "怎么去避难所")),
+    (INTENT_RESCUE_RESOURCE, ("附近哪里可以救援", "哪里可以救援", "附近医院在哪里",
+                              "附近消防在哪里", "附近消防站在哪里", "最近避难点",
+                              "附近救援资源", "附近的避难所在哪")),
     (INTENT_NEARBY, ("附近", "周边", "医院", "消防站", "避难所", "避难", "加油站", "哪里有")),
     (INTENT_LOCATION, ("在哪里", "位置", "地点", "在哪", "位于", "where", "定位")),
     (INTENT_ROUTE, ("路线", "怎么过去", "路径", "怎么到达", "路线规划", "怎么走", "路程")),
