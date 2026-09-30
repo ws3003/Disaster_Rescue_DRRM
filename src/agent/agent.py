@@ -638,22 +638,22 @@ class Agent:
                               f"action ({len(injected_persons)} persons)")
 
         # ── 图片注入(最小补丁): 把 context 携带的当前分析图公网 URL 接到 send_alert。
-        #    仅处理 communication_tool / send_alert; 已有 image_path 不覆盖;
-        #    注入前规范化: 兼容 Markdown 链接 [url](url) → 纯 http(s) URL;
-        #    复用 communication_tool._send_alert 既有 image_path→图片发送机制, 不影响规则路径。
+        #    强保证: 只要 context.image_url 是 http 且 filtered 存在 send_alert, 执行前必补 image_path。
+        #    注入前规范化: 兼容 Markdown 链接 [url](url) → 纯 http(s) URL。
         raw_url = (context or {}).get("image_url")
-        if raw_url:
-            _raw_s = str(raw_url).strip()
+        img_url = ""
+        if isinstance(raw_url, str) and raw_url.strip():
+            _raw_s = raw_url.strip()
             _m = re.search(r"\[.*?\]\((https?://[^)]+)\)", _raw_s)
             img_url = (_m.group(1).strip() if _m else _raw_s)
             if not img_url.lower().startswith(("http://", "https://")):
                 img_url = ""
             print(f"[IMAGE] original_url = {raw_url}")
             print(f"[IMAGE] normalized_url = {img_url}")
-        else:
-            img_url = ""
 
         if img_url:
+            # communication_tool / send_alert:
+            #   → args["image_path"]=img_url  (已有 image_path 不覆盖)
             for act in filtered:
                 if isinstance(act, dict) and act.get("tool") == "communication_tool" \
                         and (act.get("args") or {}).get("action") == "send_alert":
@@ -662,7 +662,7 @@ class Agent:
                         args["image_path"] = img_url
                         print(f"[LLM->Agent] image injected into communication_tool "
                               f"action: {img_url}")
-            # vision_tool 也注入权威 image_url, 供 get_snapshot 直接返回 OSS 公网 URL
+            # vision_tool / get_snapshot → args["image_url"]=img_url (供返回 OSS 公网 URL)
             for act in filtered:
                 if isinstance(act, dict) and act.get("tool") == "vision_tool" \
                         and (act.get("args") or {}).get("action") == "get_snapshot":
