@@ -59,8 +59,15 @@ class AssistantResponder:
     def _answer_snapshot(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         snap = ctx.get("snapshot") or {}
         fname = snap.get("file")
+        # 优先返回 vision 人员携带的现场图片 URL(若存在)
+        v = ctx.get("vision") if isinstance(ctx.get("vision"), dict) else {}
+        img_url = next((p.get("image_url") for p in (v.get("persons") or [])
+                        if p.get("image_url")), None)
         sources: list[Dict[str, Any]] = []
-        if fname:
+        if img_url:
+            sources.append({"type": "vision", "image_url": img_url})
+            ans = f"最近现场快照图片地址：{img_url}。"
+        elif fname:
             sources.append({"type": "snapshot", "file": fname})
             ans = f"最近一张现场快照已保存为：{fname}（公网图片地址请通过 OSS 存储服务访问）。"
         else:
@@ -139,6 +146,10 @@ class AssistantResponder:
                 high.append(pid)
         if high:
             lines.append("其中高风险人员请人工重点研判处理。")
+        # 附带最近现场快照图片 URL(若 vision 人员带 image_url)
+        img_url = next((p.get("image_url") for p in persons if p.get("image_url")), None)
+        if img_url:
+            lines.append(f"现场图片：{img_url}")
         return {"answer": "\n".join(lines), "sources": sources}
 
     # ---------------------------------------------------------------- 入口

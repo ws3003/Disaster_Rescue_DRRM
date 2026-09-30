@@ -421,9 +421,11 @@ def assistant_voice(
 
 
 @app.post("/api/v1/vision/snapshot")
-def vision_snapshot_ingest(payload: dict = Body(...)) -> dict:
+def vision_snapshot_ingest(payload: dict = Body(...), request: Request = None) -> dict:
     """接收边缘人员快照(persons JSON), 写 vision snapshot。
 
+    额外为每个 person 附加「最近一次分析快照」的公网图片 URL(image_url),
+    供 Assistant 回答「现场图片在哪里/给我看看受困人员」。
     独立新端点, 不影响 /api/v1/analyze 核心分析与 OSS 流程。
     """
     from src.vision_snapshot import write_persons
@@ -431,9 +433,28 @@ def vision_snapshot_ingest(payload: dict = Body(...)) -> dict:
     persons = payload.get("persons") if isinstance(payload, dict) else None
     if not isinstance(persons, list):
         return {"ok": False, "error": "persons must be a list"}
+
+    img_url = _latest_snapshot_public_url(request)
+    if img_url:
+        persons = [
+            (dict(p) | {"image_url": img_url}) if isinstance(p, dict) else p
+            for p in persons
+        ]
     res = write_persons(persons, ts=payload.get("ts"))
     return {"ok": bool(res.get("ok")),
             "error": res.get("error") if not res.get("ok") else None}
+
+
+def _latest_snapshot_public_url(request: Request) -> Optional[str]:
+    """返回 data/snapshots 里最新一张分析图的公网 URL; 无则 None。"""
+    try:
+        files = sorted(SNAP_DIR.glob("*_analysis.*"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+    except Exception:  # noqa: BLE001
+        return None
+    if not files:
+        return None
+    return _snapshot_url(request, files[0].name)
 
 
 # ======================================================================

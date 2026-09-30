@@ -32,6 +32,7 @@ def _norm_person(p: Any) -> Dict[str, Any]:
         "priority": p.get("priority"),
         "risk_score": p.get("risk_score"),
         "bbox": p.get("bbox"),
+        "image_url": p.get("image_url"),
     }
     # 丢弃 None 字段, 保持精简
     return {k: v for k, v in out.items() if v is not None}
