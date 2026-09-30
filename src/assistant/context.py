@@ -183,6 +183,24 @@ class AssistantContext:
         except Exception:
             return None
 
+    def query_route(self, origin: str, destination: str) -> Optional[Dict[str, Any]]:
+        """按起终点动态查询路线。origin/destination 来自用户问题, 由 responder 调用。
+
+        依赖注入, 不 import MapTool; 无 map_provider / 失败返回 None。
+        """
+        if self._map_provider is None:
+            return None
+        try:
+            res = self._map_provider.rescue_route(
+                origin=origin,
+                destination=destination,
+            )
+            if isinstance(res, dict) and res.get("ok") and res.get("route"):
+                return res["route"]
+            return None
+        except Exception:
+            return None
+
     def _vision(self) -> Dict[str, Any]:
         """读取最新视况人员快照; 无/损坏返回 {}。"""
         try:

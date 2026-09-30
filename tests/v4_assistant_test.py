@@ -112,6 +112,41 @@ class AssistantTest(unittest.TestCase):
         with sqlite3.connect(self.db) as c:
             return c.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
 
+    # ---- V4.1 AMap route 语义: nearby 保持 / 附近医院怎么走 → route ----
+    def test_nearby_intent(self):
+        self.assertEqual(classify("附近有没有医院"), "nearby_query")
+
+    def test_route_intent(self):
+        self.assertEqual(classify("附近医院怎么走"), "route_query")
+        self.assertEqual(classify("怎么去消防站"), "route_query")
+
+    def test_dynamic_route_calls_query_route(self):
+        fm = _FakeMap()
+        vision_path = os.path.join(self._tmp.name, "vision_persons2.json")
+        Path(vision_path).write_text("{}", encoding="utf-8")
+        ctx = AssistantContext(db_path=self.db, snapshot_dir=self.snap_dir,
+                               map_provider=fm, vision_path=vision_path)
+        r = AssistantResponder(context=ctx)
+        out = r.answer("附近医院怎么走")
+        self.assertEqual(out["intent"], "route_query")
+        self.assertIn(("现场", "医院"), fm.route_calls)  # query_route(现场→医院) 被调用
+        self.assertIn("路线", out["answer"])
+        self.assertIn("距离", out["answer"])
+
+
+class _FakeMap:
+    """隔离用的 mock map provider(不依赖真实高德)。"""
+    def __init__(self):
+        self.route_calls = []
+
+    def nearby(self, keyword=None, location=None):
+        return {"ok": True, "poi": []}
+
+    def rescue_route(self, origin=None, destination=None):
+        self.route_calls.append((origin, destination))
+        return {"ok": True, "route": {"distance_km": 9.9, "duration_min": 30,
+                                      "summary": "mock route"}}
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -130,23 +130,48 @@ class AssistantResponder:
             ans = "当前未连接地图服务，暂无法提供位置信息。"
         return {"answer": ans, "sources": sources}
 
-    def _answer_route(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+    def _answer_route(self, ctx: Dict[str, Any], question: str = "") -> Dict[str, Any]:
+        # 优先: 从问题提取目的地 → 动态查询路线("现场" → 目标设施)
+        dest = self._extract_destination(question)
+        if dest:
+            route = self._ctx.query_route(origin="现场", destination=dest)
+            if route:
+                return self._format_route(route, prefix=f"现场 → {dest}")
+        # 兜底: 保持旧逻辑 —— 读取 context 固定 route
         m = ctx.get("map") or {}
         route = m.get("route") or {}
-        sources: list[Dict[str, Any]] = []
+        if route.get("distance_km") is not None and route.get("duration_min") is not None:
+            return self._format_route(route, prefix=None)
+        return {"answer": "当前未连接地图服务，暂无法提供路线建议。", "sources": []}
+
+    def _format_route(self, route: Dict[str, Any], prefix: Optional[str]) -> Dict[str, Any]:
         dist = route.get("distance_km")
         dur = route.get("duration_min")
-        if dist is not None and dur is not None:
-            sources.append({"type": "map", "route": {k: route.get(k)
-                            for k in ("distance_km", "duration_min", "summary")}})
-            ans = (f"建议路线距离约{dist}公里，预计{dur}分钟。"
-                   + (f" 概要：{route.get('summary')}" if route.get("summary") else ""))
-        else:
-            ans = "当前未连接地图服务，暂无法提供路线建议。"
-        return {"answer": ans, "sources": sources}
+        sources: list[Dict[str, Any]] = [{"type": "map", "route": {k: route.get(k)
+                for k in ("distance_km", "duration_min", "summary")}}]
+        lines = []
+        if prefix:
+            lines.append(f"路线：{prefix}")
+        if dist is not None:
+            lines.append(f"距离：{dist}公里")
+        if dur is not None:
+            lines.append(f"预计时间：{dur}分钟")
+        if route.get("summary"):
+            lines.append(f"概要：{route.get('summary')}")
+        return {"answer": "\n".join(lines) if lines else "当前暂无路线信息。", "sources": sources}
 
     # 附近设施/医院/消防站/避难所等关键词(优先于 location("哪里"))
     _NEARBY_KEYWORDS = ("消防站", "避难所", "避难", "加油站", "医院")
+
+    def _extract_destination(self, question: str) -> Optional[str]:
+        """从用户问题提取目标地点(医院/消防站/避难所/避难/加油站); 未匹配返回 None。"""
+        if not isinstance(question, str):
+            return None
+        q = question
+        for kw in ("消防站", "避难所", "避难", "加油站", "医院"):
+            if kw in q:
+                return kw
+        return None
 
     def _answer_nearby(self, ctx: Dict[str, Any], question: str) -> Dict[str, Any]:
         keyword = None
@@ -220,7 +245,7 @@ class AssistantResponder:
         elif intent == intent_mod.INTENT_LOCATION:
             out = self._answer_location(ctx)
         elif intent == intent_mod.INTENT_ROUTE:
-            out = self._answer_route(ctx)
+            out = self._answer_route(ctx, question)
         elif intent == intent_mod.INTENT_NEARBY:
             out = self._answer_nearby(ctx, question)
         else:
