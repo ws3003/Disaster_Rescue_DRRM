@@ -32,11 +32,13 @@ class VoiceAssistant:
         asr: Optional[Callable[[str], Dict[str, Any]]] = None,
         tts: Optional[Callable[[str], Dict[str, Any]]] = None,
         responder: Optional[AssistantResponder] = None,
+        bridge: Optional[Any] = None,
     ):
         _vt = VoiceTool()
         self._asr = asr or _vt.audio_to_text
         self._tts = tts or _vt.text_to_audio
         self._responder = responder or AssistantResponder()
+        self._bridge = bridge or AgentBridge()
 
     def handle(
         self,
@@ -76,7 +78,7 @@ class VoiceAssistant:
         # action 命令 → AgentBridge(二次确认 / 进入 Agent)
         action = cmd.get("intent")
         need_confirm = cmd.get("require_confirm", False)
-        bridge = AgentBridge()
+        bridge = self._bridge
         res = bridge.handle(action, confirmed=(not need_confirm))
         answer = res.get("confirm_message") if (need_confirm and not res.get("confirmed")) \
             else self._summarize_action(res, action)

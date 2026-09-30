@@ -51,7 +51,11 @@ from src.vlm.parser import SceneParseError, parse as parse_vlm
 from src.storage import upload_snapshot
 from src.assistant.responder import AssistantResponder
 from src.assistant.voice import VoiceAssistant
+from src.assistant.agent_bridge import AgentBridge
 from src.tools.weather_tool import WeatherTool
+
+# 进程级单例: 复用一个 AgentBridge(内部惰性持有 Agent), 跨请求保留 Memory/cooldown
+_BRIDGE = AgentBridge()
 
 app = FastAPI(
     title="Disaster_Rescue_DRRM Inference API",
@@ -430,7 +434,7 @@ def assistant_voice(
 
     仅作输入输出转换, 不触发任何救援动作。
     """
-    voice = VoiceAssistant(responder=_build_responder_with_weather())
+    voice = VoiceAssistant(responder=_build_responder_with_weather(), bridge=_BRIDGE)
     audio_path = None
     if audio is not None:
         audio_path = _save_audio_temp(audio)

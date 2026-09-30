@@ -124,6 +124,29 @@ class VoiceAgentTest(unittest.TestCase):
     def test_live_skip_placeholder(self):
         self.fail("should be skipped")
 
+    # 8. bridge 注入复用: 外部注入的 bridge 不被替换
+    def test_bridge_injection_reused(self):
+        from src.assistant.voice import VoiceAssistant as VA
+        from src.assistant.agent_bridge import AgentBridge
+        injected = AgentBridge(agent=_FakeAgent())
+        va = VA(asr=_noop_asr, tts=_noop_tts,
+                responder=AssistantResponder(context=_ctx(self.db, self.snap, self.vision)),
+                bridge=injected)
+        self.assertIs(va._bridge, injected)
+        # default(未注入) → 新建 Fundbridge(向后兼容)
+        va2 = VA(asr=_noop_asr, tts=_noop_tts,
+                 responder=AssistantResponder(context=_ctx(self.db, self.snap, self.vision)))
+        self.assertIsInstance(va2._bridge, AgentBridge)
+
+    # 9. communication channel 由 env 决定(缺省 mock)
+    def test_comm_channel_from_env(self):
+        from src.assistant import agent_bridge as ab
+        with patch.dict(os.environ, {"COMMUNICATION_CHANNEL": "dingtalk"}, clear=False):
+            self.assertEqual(ab._agent_config()["communication"]["channel"], "dingtalk")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("COMMUNICATION_CHANNEL", None)
+            self.assertEqual(ab._agent_config()["communication"]["channel"], "mock")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
