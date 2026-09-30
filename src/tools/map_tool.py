@@ -196,16 +196,52 @@ class MapTool(Tool):
                         "error": f"{_MAP_API_KEY_ENV} / {_MAP_ROUTE_URL_ENV} 未配置"}
             import requests  # 惰性加载
 
-            o = str(origin or "现场")
-            d = str(destination or "最近救援点")
+            o_text = str(origin or "现场")
+            d_text = str(destination or "最近救援点")
+            # 高德驾车 API 要求 origin/destination 为坐标(lng,lat); 地名先 geocode 转坐标
+            o = self._resolve_coord(o_text)
+            d = self._resolve_coord(d_text)
+            if not o or not d:
+                return {"ok": False, "action": "rescue_route",
+                        "error": f"未能解析起终点坐标: origin={o_text!r}, destination={d_text!r}"}
             resp = requests.get(url, params={"key": key, "origin": o, "destination": d}, timeout=10)
             resp.raise_for_status()
-            route = self._norm_route(resp.json(), o, d)
+            # summary 用原始地名/坐标展示(更可读)
+            route = self._norm_route(resp.json(), o_text, d_text)
             if route is None:
                 return {"ok": False, "action": "rescue_route", "error": "地图服务未返回有效路线"}
             return {"ok": True, "route": route, "provider": self.provider}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "action": "rescue_route", "error": str(exc)}
+
+    # ------------------------------------------------------------ 坐标解析辅助
+    @staticmethod
+    def _is_coordinate(value: Any) -> bool:
+        """形如 "lng,lat" 的坐标字符串。"""
+        if not isinstance(value, str):
+            return False
+        parts = value.split(",")
+        if len(parts) != 2:
+            return False
+        try:
+            float(parts[0].strip())
+            float(parts[1].strip())
+            return True
+        except (TypeError, ValueError):
+            return False
+
+    def _resolve_coord(self, text: Any) -> Optional[str]:
+        """把文本解析为坐标字符串: 已是坐标→原样; 地名→geocode→"lng,lat"。失败返回 None。"""
+        s = str(text or "").strip()
+        if self._is_coordinate(s):
+            return s
+        res = self.geocode(s)
+        if isinstance(res, dict) and res.get("ok"):
+            loc = res.get("location") or {}
+            lat, lng = loc.get("lat"), loc.get("lng")
+            if lat is not None and lng is not None:
+                return f"{lng},{lat}"
+        return None
 
     # ------------------------------------------------------------ 归一化(AMap 适配尽力而为)
     @staticmethod
