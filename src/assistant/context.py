@@ -46,10 +46,12 @@ class AssistantContext:
         route_origin: Optional[str] = None,
         route_destination: Optional[str] = None,
         vision_path: Optional[str] = None,
+        warning_provider: Optional[callable] = None,
     ):
         self.db_path = db_path or _DEFAULT_DB
         self.snapshot_dir = snapshot_dir or _DEFAULT_SNAPSHOT_DIR
         self._weather_provider = weather_provider
+        self._warning_provider = warning_provider
         self._location = location or {}
         self._map_provider = map_provider
         self._place = place
@@ -119,6 +121,22 @@ class AssistantContext:
         except Exception:
             return None
 
+    def _warning(self) -> Optional[list]:
+        """有 warning_provider 时查询天气预警; 无/失败返回 None。"""
+        if self._warning_provider is None:
+            return None
+        try:
+            res = self._warning_provider(
+                lat=self._location.get("lat"),
+                lng=self._location.get("lng"),
+            )
+            if isinstance(res, dict) and res.get("ok"):
+                w = res.get("warning")
+                return w if isinstance(w, list) else None
+            return None
+        except Exception:
+            return None
+
     def _map_location(self) -> Dict[str, Any]:
         """有 map_provider 且给定 place 时定位; 否则空。"""
         if self._map_provider is None or not self._place:
@@ -164,6 +182,7 @@ class AssistantContext:
         scene = self._scene(latest_task)
         snapshot = self._latest_snapshot()
         weather = self._weather()
+        warning = self._warning()
         map_location = self._map_location()
         map_route = self._map_route()
         vision = self._vision()
@@ -173,6 +192,7 @@ class AssistantContext:
             "latest_task": latest_task,
             "snapshot": snapshot,
             "weather": weather,
+            "warning": warning,
             "location": map_location,
             "map": {"route": map_route} if map_route else {},
             "vision": vision,

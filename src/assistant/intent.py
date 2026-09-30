@@ -11,12 +11,14 @@ INTENT_PEOPLE = "scene_people"      # 询问现场人员/人数/谁倒地
 INTENT_RISK = "risk_query"          # 询问风险/危险
 INTENT_SNAPSHOT = "snapshot_query"  # 询问现场图片/快照
 INTENT_WEATHER = "weather_query"    # 询问天气/温度/降雨
+INTENT_WARNING = "warning_query"    # 询问天气预警/警报
 INTENT_LOCATION = "location_query"  # 询问位置/地点
 INTENT_ROUTE = "route_query"        # 询问路线/怎么过去
 INTENT_GENERAL = "general_query"    # 其它
 
 # (intent, 关键词元组) —— 顺序即优先级。
 _PATTERNS = [
+    (INTENT_WARNING, ("预警", "天气预警", "警报", "暴雨", "台风", "大风")),
     (INTENT_WEATHER, ("天气", "下雨", "温度", "多少度", "晴", "雨", "风力", "weather")),
     (INTENT_PEOPLE, ("几个人", "多少人", "谁倒了", "倒地", "有多少人", "人数",
                      "人员状态", "谁风险", "有没有人", "人员情况", "人员信息")),

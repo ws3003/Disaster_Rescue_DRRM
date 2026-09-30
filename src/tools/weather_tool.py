@@ -25,6 +25,7 @@ from src.tools.base import Tool
 _WEATHER_PROVIDER_ENV = "WEATHER_PROVIDER"
 _WEATHER_API_KEY_ENV = "WEATHER_API_KEY"
 _WEATHER_BASE_URL_ENV = "WEATHER_BASE_URL"
+_WEATHER_WARNING_BASE_URL_ENV = "WEATHER_WARNING_BASE_URL"
 
 
 class WeatherTool(Tool):
@@ -70,6 +71,11 @@ class WeatherTool(Tool):
                 lat=kwargs.get("lat"),
                 lng=kwargs.get("lng"),
             )
+        if action == "get_warning":
+            return self.get_warning(
+                lat=kwargs.get("lat"),
+                lng=kwargs.get("lng"),
+            )
         return {"ok": False, "action": action or "?",
                 "error": f"Unsupported weather action: {action}"}
 
@@ -78,6 +84,60 @@ class WeatherTool(Tool):
         if self.provider == "live":
             return self._get_live(lat, lng)
         return self._get_mock(lat, lng)
+
+    # ------------------------------------------------------------ 预警 (QWeather /v7/warning/now)
+    def get_warning(self, lat: Optional[Any] = None, lng: Optional[Any] = None) -> Dict[str, Any]:
+        """天气预警查询: {ok, warning:[{title,type,level}]}。信息类, 不触发动作。"""
+        if self.provider == "live":
+            return self._get_warning_live(lat, lng)
+        return self._get_warning_mock(lat, lng)
+
+    def _get_warning_mock(self, lat: Optional[Any] = None, lng: Optional[Any] = None) -> Dict[str, Any]:
+        return {"ok": True, "warning": [], "provider": self.provider}
+
+    def _get_warning_live(self, lat: Optional[Any] = None, lng: Optional[Any] = None) -> Dict[str, Any]:
+        try:
+            key = os.environ.get(_WEATHER_API_KEY_ENV, "").strip()
+            base = os.environ.get(_WEATHER_WARNING_BASE_URL_ENV, "").strip()
+            if not base:  # 缺省由 WEATHER_BASE_URL 派生 /warning/now
+                base = os.environ.get(_WEATHER_BASE_URL_ENV, "").strip().replace(
+                    "/weather/now", "/warning/now")
+            if not key or not base:
+                return {"ok": False, "action": "get_warning",
+                        "error": f"{_WEATHER_API_KEY_ENV} / (WEATHER_WARNING_BASE_URL 或 WEATHER_BASE_URL) 未配置"}
+            import requests  # 惰性加载, 不影响 mock / 启动
+
+            params: Dict[str, Any] = {"key": key}
+            if lat is not None and lng is not None:
+                params["location"] = f"{lng},{lat}"  # 经度在前
+            resp = requests.get(base, params=params, timeout=10)
+            try:
+                data = resp.json()
+            except Exception:  # noqa: BLE001
+                data = {}
+            if resp.status_code != 200:
+                return {"ok": False, "action": "get_warning",
+                        "error": f"QWeather warning API error: status={resp.status_code}, body={data}"}
+            return {"ok": True, "warning": self._normalize_warning(data),
+                    "provider": self.provider}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "action": "get_warning", "error": str(exc)}
+
+    @staticmethod
+    def _normalize_warning(data: Dict[str, Any]) -> list:
+        warnings = data.get("warning") if isinstance(data, dict) else None
+        if not isinstance(warnings, list):
+            return []
+        out = []
+        for w in warnings:
+            if not isinstance(w, dict):
+                continue
+            out.append({
+                "title": w.get("title"),
+                "type": w.get("typeName"),
+                "level": w.get("level"),
+            })
+        return out
 
     # ------------------------------------------------------------ mock
     def _get_mock(self, lat: Optional[Any] = None, lng: Optional[Any] = None) -> Dict[str, Any]:

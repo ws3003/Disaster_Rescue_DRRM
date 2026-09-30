@@ -99,6 +99,23 @@ class AssistantResponder:
             ans = "当前未接入实时天气服务，天气信息暂不可用。"
         return {"answer": ans, "sources": sources}
 
+    def _answer_warning(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        wlist = ctx.get("warning")
+        sources: list[Dict[str, Any]] = []
+        if isinstance(wlist, list) and wlist:
+            sources.append({"type": "weather_warning", "count": len(wlist)})
+            parts = ["当前存在以下天气预警："]
+            for w in wlist:
+                if not isinstance(w, dict):
+                    continue
+                level = w.get("level") or ""
+                type_ = w.get("type") or w.get("title") or ""
+                parts.append(f"- {type_}{level}预警")
+            ans = "\n".join(parts) + " 请注意防范。"
+        else:
+            ans = "当前暂无天气预警。"
+        return {"answer": ans, "sources": sources}
+
     def _answer_location(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         loc = ctx.get("location") or {}
         sources: list[Dict[str, Any]] = []
@@ -167,6 +184,8 @@ class AssistantResponder:
             out = self._answer_snapshot(ctx)
         elif intent == intent_mod.INTENT_WEATHER:
             out = self._answer_weather(ctx)
+        elif intent == intent_mod.INTENT_WARNING:
+            out = self._answer_warning(ctx)
         elif intent == intent_mod.INTENT_LOCATION:
             out = self._answer_location(ctx)
         elif intent == intent_mod.INTENT_ROUTE:
