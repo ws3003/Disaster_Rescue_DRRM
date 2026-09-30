@@ -145,6 +145,37 @@ class AssistantResponder:
             ans = "当前未连接地图服务，暂无法提供路线建议。"
         return {"answer": ans, "sources": sources}
 
+    # 附近设施/医院/消防站/避难所等关键词(优先于 location("哪里"))
+    _NEARBY_KEYWORDS = ("消防站", "避难所", "避难", "加油站", "医院")
+
+    def _answer_nearby(self, ctx: Dict[str, Any], question: str) -> Dict[str, Any]:
+        keyword = None
+        if isinstance(question, str):
+            q = question.strip()
+            for kw in self._NEARBY_KEYWORDS:
+                if kw in q:
+                    keyword = kw
+                    break
+        keyword = keyword or "医院"
+        try:
+            # query_nearby 是 AssistantContext 实例方法(非 collect() 的 dict)
+            poi = self._ctx.query_nearby(keyword)
+        except Exception:  # noqa: BLE001
+            poi = None
+        sources: list[Dict[str, Any]] = []
+        if not poi:
+            return {"answer": "当前暂无周边设施信息。", "sources": sources}
+        sources.append({"type": "map", "nearby_keyword": keyword, "count": len(poi)})
+        lines = [f"附近找到以下{keyword}设施："]
+        for i, p in enumerate(poi, 1):
+            if not isinstance(p, dict):
+                continue
+            name = p.get("name") or "—"
+            dist = p.get("distance") or "距离未知"
+            t = p.get("type") or keyword
+            lines.append(f"{i}. {name}\n    类型：{t}\n    距离：{dist}")
+        return {"answer": "\n".join(lines), "sources": sources}
+
     def _answer_people(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         v = ctx.get("vision") if isinstance(ctx.get("vision"), dict) else {}
         persons = v.get("persons") or []
@@ -190,6 +221,8 @@ class AssistantResponder:
             out = self._answer_location(ctx)
         elif intent == intent_mod.INTENT_ROUTE:
             out = self._answer_route(ctx)
+        elif intent == intent_mod.INTENT_NEARBY:
+            out = self._answer_nearby(ctx, question)
         else:
             out = self._answer_general(ctx)
         return {"answer": out["answer"], "sources": out["sources"], "intent": intent}

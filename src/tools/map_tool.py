@@ -29,6 +29,8 @@ _MAP_PROVIDER_ENV = "MAP_PROVIDER"
 _MAP_API_KEY_ENV = "MAP_API_KEY"
 _MAP_GEOCODE_URL_ENV = "MAP_GEOCODE_URL"
 _MAP_ROUTE_URL_ENV = "MAP_ROUTE_URL"
+_MAP_NEARBY_URL_ENV = "MAP_NEARBY_URL"
+_MAP_NEARBY_DEFAULT_URL = "https://restapi.amap.com/v3/place/around"
 
 
 class MapTool(Tool):
@@ -60,7 +62,7 @@ class MapTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["geocode", "rescue_route"]},
+                "action": {"type": "string", "enum": ["geocode", "rescue_route", "nearby"]},
                 "address": {"type": ["string"], "description": "geocode: 地址/地点"},
                 "origin": {"type": ["string"], "description": "rescue_route: 起点(坐标 或 地点)"},
                 "destination": {"type": ["string"], "description": "rescue_route: 终点(坐标 或 地点)"},
@@ -77,6 +79,11 @@ class MapTool(Tool):
                 origin=kwargs.get("origin"),
                 destination=kwargs.get("destination"),
             )
+        if action == "nearby":
+            return self.nearby(
+                keyword=kwargs.get("keywords", kwargs.get("keyword")),
+                location=kwargs.get("location"),
+            )
         return {"ok": False, "action": action or "?", "error": f"Unsupported map action: {action}"}
 
     # ------------------------------------------------------------ 对外入口(接口不变)
@@ -90,6 +97,52 @@ class MapTool(Tool):
         if self.provider == "live":
             return self._route_live(origin, destination)
         return self._route_mock(origin, destination)
+
+    def nearby(self, keyword: Optional[str] = None,
+               location: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """周边设施 POI 查询（高德 /v3/place/around）。仅信息呈现, 不派单。"""
+        if self.provider == "live":
+            return self._nearby_live(keyword, location)
+        return self._nearby_mock(keyword, location)
+
+    # ------------------------------------------------------------ mock
+    def _nearby_mock(self, keyword: Optional[str] = None,
+                     location: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        try:
+            kw = str(keyword or "医院")
+            loc = location or {}
+            poi = [
+                {"name": f"模拟{kw}点A", "type": kw, "distance": "800米",
+                 "address": "模拟地址1"},
+                {"name": f"模拟{kw}点B", "type": kw, "distance": "1.2公里",
+                 "address": "模拟地址2"},
+            ]
+            return {"ok": True, "poi": poi, "provider": self.provider}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "action": "nearby", "error": str(exc)}
+
+    # ------------------------------------------------------------ live (AMap /v3/place/around)
+    def _nearby_live(self, keyword: Optional[str] = None,
+                     location: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        try:
+            key = os.environ.get(_MAP_API_KEY_ENV, "").strip()
+            url = os.environ.get(_MAP_NEARBY_URL_ENV, "").strip() or _MAP_NEARBY_DEFAULT_URL
+            if not key:
+                return {"ok": False, "action": "nearby",
+                        "error": f"{_MAP_API_KEY_ENV} 未配置"}
+            loc = location or {}
+            lat, lng = loc.get("lat"), loc.get("lng")
+            if lat is None or lng is None:
+                return {"ok": False, "action": "nearby", "error": "缺少 location{lat,lng}"}
+            import requests  # 惰性加载
+
+            params = {"key": key, "location": f"{lng},{lat}", "keywords": str(keyword or "")}
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            poi = self._norm_poi(resp.json())
+            return {"ok": True, "poi": poi, "provider": self.provider}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "action": "nearby", "error": str(exc)}
 
     # ------------------------------------------------------------ mock
     def _geocode_mock(self, address: Optional[str] = None) -> Dict[str, Any]:
@@ -198,6 +251,29 @@ class MapTool(Tool):
         summary = strategy or f"{origin} → {destination}"
         return {"distance_km": distance_km, "duration_min": duration_min,
                 "summary": str(summary)}
+
+    @staticmethod
+    def _norm_poi(data: Dict[str, Any]) -> list:
+        pois = data.get("pois") or []
+        out = []
+        for p in pois:
+            if not isinstance(p, dict):
+                continue
+            name = p.get("name") or ""
+            distance = p.get("distance")
+            if distance is not None:  # 米 → 可读
+                try:
+                    d = float(distance)
+                    distance = f"{int(d)}米" if d < 1000 else f"{round(d/1000, 1)}公里"
+                except (TypeError, ValueError):
+                    pass
+            out.append({
+                "name": name,
+                "type": p.get("type"),
+                "distance": distance,
+                "address": p.get("address"),
+            })
+        return out
 
 
 if __name__ == "__main__":

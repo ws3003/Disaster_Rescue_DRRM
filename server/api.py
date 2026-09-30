@@ -369,15 +369,18 @@ def _build_responder_with_weather() -> AssistantResponder:
     """
     from src.assistant.context import AssistantContext
     from src.tools.weather_tool import WeatherTool
+    from src.tools.map_tool import MapTool
     try:
         lat = float(os.environ.get("WEATHER_LAT", "32.0603"))
         lng = float(os.environ.get("WEATHER_LNG", "118.7969"))
     except (TypeError, ValueError):  # noqa: BLE001
         lat, lng = 32.0603, 118.7969
-    wt = WeatherTool()  # 复用同一实例, 注入晴天/预警
+    wt = WeatherTool()   # 复用一个实例: 天气 + 预警
+    mt = MapTool()       # 地图: geocode / rescue_route / nearby
     ctx = AssistantContext(
         weather_provider=wt.get_current,
         warning_provider=wt.get_warning,
+        map_provider=mt,
         location={"lat": lat, "lng": lng},
     )
     return AssistantResponder(context=ctx)

@@ -13,6 +13,7 @@ INTENT_SNAPSHOT = "snapshot_query"  # 询问现场图片/快照
 INTENT_WEATHER = "weather_query"    # 询问天气/温度/降雨
 INTENT_WARNING = "warning_query"    # 询问天气预警/警报
 INTENT_LOCATION = "location_query"  # 询问位置/地点
+INTENT_NEARBY = "nearby_query"      # 询问附近设施/医院/消防站/避难所
 INTENT_ROUTE = "route_query"        # 询问路线/怎么过去
 INTENT_GENERAL = "general_query"    # 其它
 
@@ -23,6 +24,7 @@ _PATTERNS = [
     (INTENT_PEOPLE, ("几个人", "多少人", "谁倒了", "倒地", "有多少人", "人数",
                      "人员状态", "谁风险", "有没有人", "人员情况", "人员信息")),
     (INTENT_SNAPSHOT, ("图片", "照片", "快照", "图在", "现场图", "snapshot", "pic")),
+    (INTENT_NEARBY, ("附近", "周边", "医院", "消防站", "避难所", "避难", "加油站", "哪里有")),
     (INTENT_LOCATION, ("在哪里", "位置", "地点", "在哪", "位于", "where", "定位")),
     (INTENT_ROUTE, ("路线", "怎么过去", "路径", "怎么到达", "路线规划", "怎么走", "路程")),
     (INTENT_SCENE, ("现场", "怎么样", "怎样", "状态", "情况", "目前")),

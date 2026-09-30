@@ -57,7 +57,12 @@ class AssistantTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def _new_responder(self):
-        return AssistantResponder(db_path=self.db, snapshot_dir=self.snap_dir)
+        # 隔离: 用临时空 vision 文件, 避免 AssistantResponder 读取真实 data/vision_persons.json
+        vision_path = os.path.join(self._tmp.name, "vision_persons.json")
+        Path(vision_path).write_text("{}", encoding="utf-8")
+        ctx = AssistantContext(db_path=self.db, snapshot_dir=self.snap_dir,
+                               vision_path=vision_path)
+        return AssistantResponder(context=ctx)
 
     # ---- 1 / 2 / 3: 意图与回答 -------------------------------------------------
     def test_intent_classification(self):

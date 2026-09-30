@@ -164,6 +164,25 @@ class AssistantContext:
         except Exception:
             return {}
 
+    def query_nearby(self, keyword: str) -> Optional[list]:
+        """按关键词查询周边设施(POI)。keyword 来自用户问题, 由 responder 调用。
+
+        依赖注入, 不 import MapTool; 无 map_provider / 失败返回 None。
+        """
+        if self._map_provider is None:
+            return None
+        try:
+            res = self._map_provider.nearby(
+                keyword=keyword,
+                location=self._location,
+            )
+            if isinstance(res, dict) and res.get("ok"):
+                poi = res.get("poi")
+                return poi if isinstance(poi, list) else None
+            return None
+        except Exception:
+            return None
+
     def _vision(self) -> Dict[str, Any]:
         """读取最新视况人员快照; 无/损坏返回 {}。"""
         try:
