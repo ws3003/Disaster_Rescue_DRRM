@@ -368,11 +368,16 @@ def assistant_ask(payload: sch.AssistantAskRequest) -> sch.AssistantAskResponse:
     """
     responder = AssistantResponder()
     out = responder.answer(payload.question)
-    return sch.AssistantAskResponse(
-        ok=True,
-        answer=out.get("answer", ""),
-        intent=out.get("intent", ""),
-        sources=out.get("sources", []),
+    # 显式 UTF-8 charset, 兼容 PowerShell 等按 Content-Type 解码的中文客户端;
+    # 字段与 AssistantAskResponse 完全一致, 不改变 API 契约。
+    return JSONResponse(
+        content={
+            "ok": True,
+            "answer": out.get("answer", ""),
+            "intent": out.get("intent", ""),
+            "sources": out.get("sources", []),
+        },
+        media_type="application/json; charset=utf-8",
     )
 
 
