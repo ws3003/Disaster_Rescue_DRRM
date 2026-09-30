@@ -384,8 +384,20 @@ def run(config_path: str | Path, input_path: str | Path | None = None,
                 for p in (payload.get("persons", []) or []) if p.get("id") is not None
             ]
             _r = _feed_agent(agent_runner, vision_tool, _person_events)
-            print(f"[agent] 已接入 {len(_person_events)} 人员 -> "
-                  f"{len(_r)} 结果, task={(len(_r[0].get('results')) if _r and isinstance(_r[0], dict) else 0)}")
+            # 兼容两种 Executor 返回: 旧格式含 results:list; 新格式为 {ok,action,task_id,..}。
+            _n = len(_person_events)
+            _result_count = 0
+            _task = None
+            if _r and isinstance(_r[0], dict):
+                _res = _r[0].get("results")
+                if isinstance(_res, list):
+                    _result_count = len(_res)
+                    _task = (_res[0].get("task_id")
+                             if _res and isinstance(_res[0], dict) else None)
+                else:
+                    _result_count = 1
+                    _task = _r[0].get("task_id")
+            print(f"[agent] 已接入 {_n} 人员 -> {_result_count} 结果, task={_task}")
         annotated_name = cfg["output"]["annotated_image"] if is_single else f"{img_path.stem}.jpg"
         annotated_path = out_dir / annotated_name
         cv2.imwrite(str(annotated_path), annot)
