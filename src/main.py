@@ -380,7 +380,9 @@ def run(config_path: str | Path, input_path: str | Path | None = None,
         if agent_runner is not None:
             _person_events = [
                 {"person_id": p.get("id"), "state": p.get("state"),
-                 "risk_score": p.get("risk_score"), "priority": p.get("priority")}
+                 "risk_score": p.get("risk_score"), "priority": p.get("priority"),
+                 # 传递现场图片路径, 供 Planner -> communication_tool -> upload_snapshot(OSS) 报警带图
+                 "image_path": str(img_path)}
                 for p in (payload.get("persons", []) or []) if p.get("id") is not None
             ]
             _r = _feed_agent(agent_runner, vision_tool, _person_events)
