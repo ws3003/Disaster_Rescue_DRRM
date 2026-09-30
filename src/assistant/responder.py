@@ -134,9 +134,20 @@ class AssistantResponder:
         # 优先: 从问题提取目的地 → 动态查询路线("现场" → 目标设施)
         dest = self._extract_destination(question)
         if dest:
-            route = self._ctx.query_route(origin="现场", destination=dest)
+            target = dest
+            prefix = f"现场 → {dest}"
+            # 设施泛称(医院/消防站/避难所/加油站): 先查最近真实 POI 名作 destination,
+            # 避免高德无法 geocode 泛称。
+            poi_list = self._ctx.query_nearby(dest)
+            if isinstance(poi_list, list) and poi_list:
+                first = poi_list[0] if isinstance(poi_list[0], dict) else {}
+                name = first.get("name")
+                if name:
+                    target = name
+                    prefix = f"现场 → {dest}({name})"
+            route = self._ctx.query_route(origin="现场", destination=target)
             if route:
-                return self._format_route(route, prefix=f"现场 → {dest}")
+                return self._format_route(route, prefix=prefix)
         # 兜底: 保持旧逻辑 —— 读取 context 固定 route
         m = ctx.get("map") or {}
         route = m.get("route") or {}

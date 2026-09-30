@@ -133,14 +133,28 @@ class AssistantTest(unittest.TestCase):
         self.assertIn("路线", out["answer"])
         self.assertIn("距离", out["answer"])
 
+    def test_route_uses_nearby_poi_name(self):
+        # 泛称"医院" → 先 query_nearby 取真实 POI 名 → query_route(现场, POI名)
+        fm = _FakeMap(poi=[{"name": "南京市中心医院", "type": "医院", "distance": "800米"}])
+        vision_path = os.path.join(self._tmp.name, "vision_persons3.json")
+        Path(vision_path).write_text("{}", encoding="utf-8")
+        ctx = AssistantContext(db_path=self.db, snapshot_dir=self.snap_dir,
+                               map_provider=fm, vision_path=vision_path)
+        r = AssistantResponder(context=ctx)
+        out = r.answer("附近医院怎么走")
+        self.assertEqual(out["intent"], "route_query")
+        self.assertIn(("现场", "南京市中心医院"), fm.route_calls)
+        self.assertIn("南京市中心医院", out["answer"])
+
 
 class _FakeMap:
     """隔离用的 mock map provider(不依赖真实高德)。"""
-    def __init__(self):
+    def __init__(self, poi=None):
         self.route_calls = []
+        self._poi = poi or []
 
     def nearby(self, keyword=None, location=None):
-        return {"ok": True, "poi": []}
+        return {"ok": True, "poi": self._poi}
 
     def rescue_route(self, origin=None, destination=None):
         self.route_calls.append((origin, destination))

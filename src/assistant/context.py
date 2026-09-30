@@ -186,13 +186,21 @@ class AssistantContext:
     def query_route(self, origin: str, destination: str) -> Optional[Dict[str, Any]]:
         """按起终点动态查询路线。origin/destination 来自用户问题, 由 responder 调用。
 
-        依赖注入, 不 import MapTool; 无 map_provider / 失败返回 None。
+        若 origin == "现场" 且本 context 有 _location(lat,lng)，则将其转成高德坐标
+        "<经度>,<纬度>"（origin 用灾害现场坐标）。依赖注入, 不 import MapTool;
+        无 map_provider / 失败返回 None。
         """
         if self._map_provider is None:
             return None
+        _origin = origin
+        if isinstance(origin, str) and str(origin).strip() == "现场":
+            lat = self._location.get("lat")
+            lng = self._location.get("lng")
+            if lat is not None and lng is not None:
+                _origin = f"{lng},{lat}"  # 高德: 经度,纬度
         try:
             res = self._map_provider.rescue_route(
-                origin=origin,
+                origin=_origin,
                 destination=destination,
             )
             if isinstance(res, dict) and res.get("ok") and res.get("route"):

@@ -51,7 +51,7 @@ class MapTest(unittest.TestCase):
 
     # 2. map_tool mock 返回
     def test_map_tool_mock(self):
-        t = MapTool()
+        t = MapTool(provider="mock")
         g = t.run(action="geocode", address="上海中心")
         self.assertTrue(g["ok"])
         for k in ("lat", "lng", "place"):
@@ -106,7 +106,7 @@ class MapTest(unittest.TestCase):
     # helpers
     def _mk_ctx(self, map_):
         from src.assistant.context import AssistantContext
-        m = MapTool() if map_ else None
+        m = MapTool(provider="mock") if map_ else None
         return AssistantContext(
             db_path=self.db,
             snapshot_dir=self.snap_dir,

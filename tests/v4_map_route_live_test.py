@@ -15,13 +15,17 @@ if str(ROOT) not in sys.path:
 
 from src.tools.map_tool import MapTool  # noqa: E402
 
-_LIVE = os.environ.get("MAP_PROVIDER", "").strip().lower() == "live" \
+_LIVE = (
+    os.environ.get("MAP_PROVIDER", "").strip().lower() == "live"
     and bool(os.environ.get("MAP_API_KEY", "").strip())
+    and bool(os.environ.get("MAP_GEOCODE_URL", "").strip())
+    and bool(os.environ.get("MAP_ROUTE_URL", "").strip())
+)
 
 
 class MapRouteMockTest(unittest.TestCase):
     def test_mock_route_still_works(self):
-        m = MapTool()  # provider 默认 mock(无 MAP_PROVIDER)
+        m = MapTool(provider="mock")  # 显式 mock, 不依赖系统环境变量
         r = m.run(action="rescue_route", origin="现场", destination="医院")
         self.assertTrue(r["ok"])
         self.assertIn("distance_km", r["route"])
@@ -32,7 +36,7 @@ class MapRouteMockTest(unittest.TestCase):
         self.assertFalse(MapTool._is_coordinate("南京市第一医院"))
 
 
-@unittest.skipUnless(_LIVE, "需 MAP_PROVIDER=live + MAP_API_KEY")
+@unittest.skipUnless(_LIVE, "需 MAP_PROVIDER=live + MAP_API_KEY + MAP_GEOCODE_URL + MAP_ROUTE_URL")
 class MapRouteLiveTest(unittest.TestCase):
     def test_live_route_coordinates(self):
         m = MapTool(provider="live")
