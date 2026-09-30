@@ -119,6 +119,19 @@ def encode_jpeg(frame, quality: int = 90) -> bytes:
 # ----------------------------------------------------------------------
 # HTTP 上传
 # ----------------------------------------------------------------------
+
+def _build_vision_client(cfg: Dict[str, Any]) -> Optional[Any]:
+    """按 config.assistant.vision_snapshot_url 构建 VisionClient; 空则返回 None(关闭同步)。"""
+    try:
+        from src.vision_client import VisionClient
+        url = str(((cfg or {}).get("assistant") or {}).get("vision_snapshot_url") or "").strip()
+        if not url:
+            return None
+        return VisionClient(snapshot_url=url)
+    except Exception:  # noqa: BLE001 — 构建失败仅关闭该旁路, 不影响主流程
+        return None
+
+
 class EdgeUploader:
     """单次把 JPEG + person_events 以 multipart 上传到 Gateway。
 
@@ -278,6 +291,7 @@ def run_loop(
     agent: Optional[Any] = None,
     observation: Optional[Dict[str, Any]] = None,
     flush_state: Optional[Dict[str, Any]] = None,
+    vision_client: Optional[Any] = None,
 ) -> int:
     """周期性 采集→(感知)→编码→上传→打印; preview 时叠加显示相机帧。
 
@@ -345,6 +359,14 @@ def run_loop(
             print(ts)
             print("perception analyze failed")
             person_events = []
+
+        # ── Vision Snapshot 旁路同步 (Phase7.3): 把最新 person_events 推送 server vision API。
+        #    在此处: 数据最新/未经后续处理; 独立旁路, 失败绝不影响 camera/感知/Agent/上传/云端分析。
+        if vision_client is not None:
+            try:
+                vision_client.upload(person_events)
+            except Exception:  # noqa: BLE001 — 同步失败静默, 不阻断主 pipeline
+                pass
 
         # 调试可观测性: 发送前打印本地感知结果 (不改变上传协议/数据结构)
         if perception is not None:
@@ -615,6 +637,7 @@ def main(argv: Optional[list] = None) -> int:
                 "flush_every": flush_every,
                 "caller": flush_caller,
             },
+            vision_client=_build_vision_client(cfg),
         )
     finally:
         cam.close()
