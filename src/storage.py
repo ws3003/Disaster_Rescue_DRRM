@@ -141,11 +141,16 @@ class OSSStorageProvider(StorageProvider):
                 headers["Content-Type"] = "audio/wav"
                 headers["Content-Disposition"] = "inline"
             bucket.put_object_from_file(object_key, path, headers=headers or None)
-            # 输出: https://{bucket}.{endpoint}/{object_key}  (endpoint 去掉协议前缀)
-            ep = str(endpoint).rstrip("/")
-            if "://" in ep:
-                ep = ep.split("://", 1)[1]
-            url = f"https://{bucket_name}.{ep}/{object_key}"
+            # 输出 URL:
+            #   audio: 用签名 URL(GET, 3600s), 无需桶公共读, 供 DashScope ASR 拉取;
+            #   图片/快照: 沿用公网 https://{bucket}.{endpoint}/{object_key} 行为。
+            if prefix == "audio":
+                url = bucket.sign_url("GET", object_key, expires=3600)
+            else:
+                ep = str(endpoint).rstrip("/")
+                if "://" in ep:
+                    ep = ep.split("://", 1)[1]
+                url = f"https://{bucket_name}.{ep}/{object_key}"
             return {"ok": True, "url": url, "provider": self.name}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
