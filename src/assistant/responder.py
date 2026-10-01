@@ -28,6 +28,11 @@ class AssistantResponder:
 
     # ---------------------------------------------------------------- 模板
     def _answer_scene(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        # V4.3 优先实时视觉状态; 无 vision 人员时回退历史任务信息
+        v = ctx.get("vision") if isinstance(ctx.get("vision"), dict) else {}
+        persons = v.get("persons") or []
+        if persons:
+            return self._summarize_scene_persons(persons, v.get("ts"))
         task = ctx.get("latest_task") or {}
         scene = ctx.get("scene") or {}
         summary = scene.get("summary") or task.get("trigger_event")
@@ -42,6 +47,33 @@ class AssistantResponder:
         else:
             ans = "当前暂未获取到现场状态数据。"
         return {"answer": ans, "sources": sources}
+
+    _STATE_ZH = {"Fall": "倒地", "Lying": "躺地", "Help-Waving": "呼救",
+                 "Sitting": "坐", "Standing": "站立"}
+
+    def _summarize_scene_persons(self, persons: list, ts: Optional[Any] = None) -> Dict[str, Any]:
+        """由 vision persons 生成现场人员状态自然语言总结。"""
+        sources: list[Dict[str, Any]] = [{"type": "vision", "ts": ts, "count": len(persons)}]
+        lines = [f"当前检测到 {len(persons)} 名人员。"]
+        high = []
+        for p in persons:
+            pid = p.get("id")
+            state = str(p.get("state") or "Unknown")
+            st_zh = self._STATE_ZH.get(state, state)
+            risk = p.get("risk") or p.get("priority") or "未知"
+            risk_score = p.get("risk_score")
+            line = f"人员{pid}：状态 {state}（{st_zh}），风险等级 {risk}。"
+            if risk_score is not None:
+                line += f"风险分数 {risk_score}。"
+            lines.append(line)
+            if str(risk).upper() == "HIGH" or (isinstance(risk_score, (int, float))
+                                               and risk_score >= 0.6):
+                high.append(pid)
+        if high:
+            lines.append("建议立即优先处置高风险人员（系统仅提供信息辅助，不自动执行救援）。")
+        else:
+            lines.append("暂无高风险人员，请持续观察现场。")
+        return {"answer": "\n".join(lines), "sources": sources}
 
     def _answer_risk(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         task = ctx.get("latest_task") or {}

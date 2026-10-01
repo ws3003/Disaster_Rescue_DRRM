@@ -94,7 +94,7 @@ class VisionTool(Tool):
             return {"ok": False, "error": f"Unsupported vision action: {action}",
                     "action": action}
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "action": action}
+            return {"ok": False, "audio_url": "", "error": str(exc)}
 
     # ------------------------------------------------------------------
     # 最近帧缓冲 (append-only JSONL)

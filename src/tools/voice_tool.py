@@ -35,6 +35,7 @@ _ASR_MODEL_ENV = "ASR_MODEL"
 _ASR_DEFAULT_MODEL = "paraformer-realtime-v2"
 _TTS_API_KEY_ENV = "TTS_API_KEY"
 _TTS_BASE_URL_ENV = "TTS_BASE_URL"
+_TTS_PROVIDER_ENV = "TTS_PROVIDER"
 _TTS_MODEL_ENV = "TTS_MODEL"
 _TTS_DEFAULT_MODEL = "qwen-audio-3.1-tts-flash"
 _TTS_VOICE_ENV = "TTS_VOICE"
@@ -225,10 +226,45 @@ class VoiceTool(Tool):
         return str(data)
 
     # ------------------------------------------------------------ TTS
+    def _tts_mode(self) -> str:
+        """返回 TTS provider: mock | live(DashScope/旧) | edge(默认, 本地 edge-tts)。
+
+        默认 edge: 只有显式设置 TTS_PROVIDER 或 VOICE_TTS_PROVIDER 才切换;
+        不随 VOICE_PROVIDER(ASR)或 self.provider 变(避免默认落入 mock/live)。
+        """
+        p = (os.environ.get(_TTS_PROVIDER_ENV, "")
+             or os.environ.get(_VOICE_TTS_PROVIDER_ENV, "")).strip().lower()
+        if p in ("mock", "live", "edge"):
+            return p
+        return "edge"
+
     def text_to_audio(self, text: Optional[str] = None) -> Dict[str, Any]:
-        if self._tts_is_live():
+        mode = self._tts_mode()
+        if mode == "edge":
+            return self._tts_edge(text)
+        if mode == "live":
             return self._tts_live(text)
         return self._tts_mock(text)
+
+    def _tts_edge(self, text: Optional[str] = None) -> Dict[str, Any]:
+        """本地 edge-tts(微软): text -> data/audio/response.mp3, 返回音频路径。"""
+        try:
+            import asyncio
+            from edge_tts import Communicate
+            from pathlib import Path
+            out_path = "data/audio/response.mp3"
+            Path("data/audio").mkdir(parents=True, exist_ok=True)
+
+            async def _gen():
+                c = Communicate(str(text or ""), "zh-CN-XiaoxiaoNeural")
+                await c.save(out_path)
+
+            asyncio.run(_gen())
+            if not os.path.exists(out_path):
+                return {"ok": False, "error": "edge-tts produced no file"}
+            return {"ok": True, "audio_path": out_path, "provider": "edge"}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"edge-tts unavailable: {exc}"}
 
     def _tts_mock(self, text: Optional[str] = None) -> Dict[str, Any]:
         try:
@@ -239,63 +275,31 @@ class VoiceTool(Tool):
             return {"ok": False, "audio_url": "", "error": str(exc)}
 
     def _tts_live(self, text: Optional[str] = None) -> Dict[str, Any]:
-        """百炼 Qwen-Audio-3.1-TTS(multimodal-generation)。input.text; voice 仅 env 显式设置才加。"""
+        """百炼 Qwen-Audio-3.1-TTS(DashScope SDK SpeechSynthesizer)。"""
         try:
             key = os.environ.get(_TTS_API_KEY_ENV, "").strip()
-            url = os.environ.get(_TTS_BASE_URL_ENV, "").strip() or (
-                "https://dashscope.aliyuncs.com/api/v1/services/"
-                "aigc/multimodal-generation/generation")
             model = os.environ.get(_TTS_MODEL_ENV, "").strip() or _TTS_DEFAULT_MODEL
-            voice = os.environ.get(_TTS_VOICE_ENV, "").strip()  # 不默认写死 voice
+            voice = os.environ.get(_TTS_VOICE_ENV, "").strip() or "Cherry"
             if not key:
                 return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
-            import requests  # 惰性加载
+            import dashscope  # 惰性加载
+            from dashscope.audio.tts import SpeechSynthesizer
 
-            _input = {"text": str(text or "")}
-            if voice:  # 仅显式配置才带 voice
-                _input["voice"] = voice
-            payload = {"model": model, "input": _input}
-            headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
-            if resp.status_code != 200:
+            dashscope.api_key = key
+            result = SpeechSynthesizer.call(
+                model=model,
+                text=str(text or ""),
+                voice=voice,
+            )
+            if not result or result.get_status_code() != 200:
                 return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
-            try:
-                data = resp.json()
-            except Exception:  # noqa: BLE001
-                data = {}
-            abytes = self._extract_audio_bytes(data)
-            if not abytes:
+            audio_bytes = result.get_audio_data()
+            if not audio_bytes:
                 return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
-            return {"ok": True, "audio_url": self._save_audio(abytes, "mp3"),
+            return {"ok": True, "audio_url": self._save_audio(audio_bytes, "mp3"),
                     "provider": "aliyun"}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
-
-    @staticmethod
-    def _extract_audio_bytes(data: Dict[str, Any]) -> Optional[bytes]:
-        """从 multimodal-generation 响应取音频字节: output.audio_url / audio.audio_url / audio(base64)。"""
-        import base64
-        if not isinstance(data, dict):
-            return None
-        out = data.get("output") if isinstance(data.get("output"), dict) else {}
-        if not out:
-            return None
-        audio_url = out.get("audio_url")
-        audio = out.get("audio")
-        if not audio_url and isinstance(audio, dict):
-            audio_url = audio.get("audio_url")
-        if audio_url:
-            import requests
-            try:
-                return requests.get(audio_url, timeout=60).content
-            except Exception:  # noqa: BLE001
-                return None
-        if isinstance(audio, str):
-            try:
-                return base64.b64decode(audio)
-            except Exception:  # noqa: BLE001
-                return None
-        return None
 
     def _save_audio(self, data: bytes, ext: str) -> str:
         """把音频字节保存到 data/voice/<ts>.<ext>, 返回绝对路径。"""
