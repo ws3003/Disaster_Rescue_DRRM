@@ -8,7 +8,7 @@ server:
 # V4.1 Assistant 边缘人员快照同步 (Phase7.3)
 # 填 server 的 vision snapshot 地址则启用; 空则关闭 vision 同步(不影响旧配置启动)。
 assistant:
-  vision_snapshot_url: ""
+  vision_snapshot_url: "http://192.168.43.206:8000/api/v1/vision/snapshot"
 
 camera:
   width: 1280
