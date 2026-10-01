@@ -1,7 +1,9 @@
-"""src/voice/voice_agent.py — 按钮→录音→ASR→AssistantResponder 回答。
+"""src/voice/voice_agent.py — 语音问答与自动播报。
 
-复用: src/voice/{button,recorder,asr} 与 src/assistant/responder(既有文本→灾害回答层)。
-不新建 Agent/LLM/VLM/DB/Comm; 不在这里做 TTS(预留 audio=None)。
+复用: src/voice/{button,recorder,asr,speaker} 与 src/assistant/responder、src/tools/voice_tool。
+- run():      按钮→录音→ASR→AssistantResponder→TTS→Speaker 完整交互闭环。
+- broadcast(): 纯文本→TTS→Speaker 自动播报入口(可被任意文本源调用, 如已生成的回答)。
+不新建 Agent/LLM/VLM/DB/Comm; 不改变 VoiceTool/Speaker API。
 """
 
 from __future__ import annotations
@@ -62,14 +64,30 @@ class VoiceAgent:
         answer = (out or {}).get("answer", "")
         print("[ASSISTANT] answer:", answer)
 
-        # TTS Output: answer -> mp3 -> Speaker
-        audio = None
-        tts_res = self._tts.text_to_audio(answer) if answer else {}
-        if tts_res.get("ok"):
-            audio = tts_res.get("audio_path") or tts_res.get("audio_url")
-            print("[TTS] audio:", audio)
-            self._speaker.play(audio)
-        else:
-            print("[TTS] skip/unavailable:", tts_res.get("error"))
+        # TTS Output: answer -> mp3 -> Speaker (失败保护, 不阻塞主流程)
+        bar = self.broadcast(answer)
+        audio = bar.get("audio")
 
         return {"text": text, "answer": answer, "audio": audio}
+
+    def broadcast(self, text: Optional[str] = None) -> dict:
+        """自动播报闭环: 文本 → VoiceTool.text_to_audio → audio_path → Speaker.play。
+
+        TTS/播放失败仅打印, 不抛异常, 不影响调用方。
+        返回 {ok, audio, error}; audio 为音频路径(成功时)。
+        """
+        if not text:
+            return {"ok": False, "audio": None, "error": "no text to speak"}
+
+        tts_res = self._tts.text_to_audio(text)
+        if not tts_res.get("ok"):
+            print("[TTS] unavailable:", tts_res.get("error"))
+            return {"ok": False, "audio": None, "error": tts_res.get("error")}
+
+        audio = tts_res.get("audio_path") or tts_res.get("audio_url")
+        print("[TTS] audio:", audio)
+        try:
+            self._speaker.play(audio)
+        except Exception as exc:  # noqa: BLE001 — 播放失败不中断
+            print("[TTS] play failed:", exc)
+        return {"ok": True, "audio": audio}
