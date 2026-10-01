@@ -174,16 +174,23 @@ class VoiceTool(Tool):
             headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
             try:
                 resp = requests.post(url, json=payload, headers=headers, timeout=30)
+                # ==== TEMP DEBUG (定位 DashScope 400 根因, 定位后移除) ====
+                print(f"[ASR-DEBUG] status={resp.status_code}")
+                print(f"[ASR-DEBUG] body={resp.text[:1200]}")
                 resp.raise_for_status()
             except Exception as exc:  # noqa: BLE001
+                print("[ASR-DEBUG] exception:", exc)
                 print("[ASR] DashScope request failed:", exc)
                 return {"ok": False, "text": "", "error": "ASR service unavailable"}
             text = self._extract_asr_text(resp.json())
             if not text:
+                # ==== TEMP DEBUG (定位 DashScope 400 根因, 定位后移除) ====
+                print(f"[ASR-DEBUG] no text; status={resp.status_code} body={resp.text[:1200]}")
                 print("[ASR] DashScope no text in response")
                 return {"ok": False, "text": "", "error": "ASR service unavailable"}
             return {"ok": True, "text": text, "provider": "aliyun"}
         except Exception as exc:  # noqa: BLE001 — 真实服务失败不冒泡
+            print("[ASR-DEBUG] exception:", exc)
             print("[ASR] exception:", exc)
             return {"ok": False, "text": "", "error": "ASR service unavailable"}
 
