@@ -263,6 +263,59 @@ class VoiceTool(Tool):
                         return str(r["text"])
         if data.get("text"):
             return str(data["text"])
+
+        # 旧结构无文本 -> 尝试 paraformer-v2 异步结果里的 transcription_url
+        tu = self._find_transcription_url(data)
+        if tu:
+            # ==== TEMP DEBUG (定位后移除) ====
+            print("[ASR-TRANSCRIPTION] url=", tu)
+            try:
+                import requests  # 惰性加载
+                r = requests.get(tu, timeout=30)
+                r.raise_for_status()
+                t = self._parse_transcripts(r.json())
+            except Exception as exc:  # noqa: BLE001
+                print("[ASR] transcription fetch failed:", exc)
+                t = ""
+            if t:
+                # ==== TEMP DEBUG (定位后移除) ====
+                print("[ASR-TRANSCRIPTION] text=", t)
+                return t
+        return ""
+
+    @classmethod
+    def _find_transcription_url(cls, obj: Any) -> str:
+        """深度优先查找首个 transcription_url(paraformer-v2 异步结果)。"""
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if k == "transcription_url" and isinstance(v, str) and v:
+                    return v
+                found = cls._find_transcription_url(v)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for item in obj:
+                found = cls._find_transcription_url(item)
+                if found:
+                    return found
+        return ""
+
+    @classmethod
+    def _parse_transcripts(cls, data: Any) -> str:
+        """解析 DashScope 返回 JSON: transcripts[] / sentences[] / text, 空格拼接。"""
+        if not isinstance(data, dict):
+            return ""
+        for key in ("transcripts", "sentences", "sentence", "paragraphs", "results"):
+            segs = data.get(key)
+            if isinstance(segs, list):
+                parts = []
+                for s in segs:
+                    if isinstance(s, dict) and s.get("text"):
+                        parts.append(str(s["text"]))
+                if parts:
+                    return " ".join(parts)
+        if data.get("text"):
+            return str(data["text"])
         return ""
 
     @staticmethod
