@@ -179,9 +179,6 @@ class VoiceTool(Tool):
                 # 固化格式/采样率, 减少 DashScope 对 URL/音频格式的解析歧义
                 "parameters": {"format": "wav", "sample_rate": 16000},
             }
-            # ==== TEMP DEBUG (阶段1: 打印真实运行时变量, 定位后移除) ====
-            print("[DEBUG] ASR URL:", file_url)
-            print("[DEBUG] payload:", payload)
 
             # step1: 提交异步文件转写任务 paraformer-v2 -> /asr/transcription
             try:
@@ -229,7 +226,7 @@ class VoiceTool(Tool):
                 return {"ok": False, "text": "", "error": "ASR service unavailable"}
             return {"ok": True, "text": text, "provider": "aliyun"}
         except Exception as exc:  # noqa: BLE001 — 真实服务失败不冒泡
-            print("[ASR-DEBUG] exception:", exc)
+            print("[ASR-ERROR] exception:", exc)
             print("[ASR] exception:", exc)
             return {"ok": False, "text": "", "error": "ASR service unavailable"}
 
