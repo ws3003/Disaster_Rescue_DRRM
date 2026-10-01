@@ -145,13 +145,11 @@ class OSSStorageProvider(StorageProvider):
             #   audio: 用签名 URL(GET, 3600s), 无需桶公共读, 供 DashScope ASR 拉取;
             #   图片/快照: 沿用公网 https://{bucket}.{endpoint}/{object_key} 行为。
             if prefix == "audio":
-                url = bucket.sign_url("GET", object_key, expires=3600)
-                # oss2 会把路径中 "/" 编码为 %2F(audio%2Fxxx.wav), 导致 OSS
-                # SignatureDoesNotMatch; 仅还原 path 段 %2F→/, query(含
-                # OSSAccessKeyId/Expires/Signature)保持原样, 不做整体 URL decode。
-                if "?" in url:
-                    _path, _, _query = url.partition("?")
-                    url = _path.replace("%2F", "/") + "?" + _query
+                # slash_safe=True: sign_url 生成 URL 时保留 path 中的 "/"(audio/key),
+                # 与对象真实 key 的斜杠层级一致; 若用默认(slash_safe=False)会把 "/"
+                # 编成 %2F, OSS 按单段对象重建资源, 与签名不匹配 → SignatureDoesNotMatch。
+                # 签名本就按斜杠形式计算, 故只在 URL path 层用 slash_safe, 不事后改 URL。
+                url = bucket.sign_url("GET", object_key, expires=3600, slash_safe=True)
             else:
                 ep = str(endpoint).rstrip("/")
                 if "://" in ep:
