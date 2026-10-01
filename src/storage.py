@@ -146,6 +146,12 @@ class OSSStorageProvider(StorageProvider):
             #   图片/快照: 沿用公网 https://{bucket}.{endpoint}/{object_key} 行为。
             if prefix == "audio":
                 url = bucket.sign_url("GET", object_key, expires=3600)
+                # oss2 会把路径中 "/" 编码为 %2F(audio%2Fxxx.wav), 导致 OSS
+                # SignatureDoesNotMatch; 仅还原 path 段 %2F→/, query(含
+                # OSSAccessKeyId/Expires/Signature)保持原样, 不做整体 URL decode。
+                if "?" in url:
+                    _path, _, _query = url.partition("?")
+                    url = _path.replace("%2F", "/") + "?" + _query
             else:
                 ep = str(endpoint).rstrip("/")
                 if "://" in ep:
