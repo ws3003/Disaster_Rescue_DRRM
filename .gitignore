@@ -54,3 +54,9 @@ data/
 
 # backup files
 *.before*
+# Raspberry Pi local virtual environment
+tts_env/
+
+# TTS generated audio files
+*.mp3
+*.wav
