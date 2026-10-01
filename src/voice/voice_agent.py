@@ -1,9 +1,11 @@
 """src/voice/voice_agent.py — 语音问答与自动播报。
 
-复用: src/voice/{button,recorder,asr,speaker} 与 src/assistant/responder、src/tools/voice_tool。
-- run():      按钮→录音→ASR→AssistantResponder→TTS→Speaker 完整交互闭环。
+复用: src/voice/{button,recorder,asr,speaker} 与 src/assistant/voice(VoiceAssistant)、
+      src/tools/voice_tool。
+- run():      按钮→录音→ASR→VoiceAssistant.handle(info/action 路由)→broadcast→Speaker。
+              action 命令经 AgentBridge→Agent/LLM; info 命令走 responder 模板。
 - broadcast(): 纯文本→TTS→Speaker 自动播报入口(可被任意文本源调用, 如已生成的回答)。
-不新建 Agent/LLM/VLM/DB/Comm; 不改变 VoiceTool/Speaker API。
+不新建 Agent/LLM/VLM/DB/Comm; 不改变 VoiceTool/Speaker/Responder/Agent API。
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from src.voice.button import VoiceButton  # Button 别名
 from src.voice.recorder import record
 from src.voice.asr import ASR
 from src.voice.speaker import Speaker
-from src.assistant.responder import AssistantResponder
+from src.assistant.voice import VoiceAssistant
 from src.tools.voice_tool import VoiceTool
 
 _OUT_WAV = "data/audio/input.wav"
@@ -25,13 +27,20 @@ class VoiceAgent:
         self,
         button: Optional[Any] = None,
         asr: Optional[ASR] = None,
-        responder: Optional[AssistantResponder] = None,
+        responder: Optional[Any] = None,
         tts: Optional[VoiceTool] = None,
         speaker: Optional[Any] = None,
+        voice_assistant: Optional[VoiceAssistant] = None,
     ):
         self._button = button or VoiceButton()
         self._asr = asr or ASR()
-        self._responder = responder or AssistantResponder()
+        # responder 参数保留兼容; 未显式给 voice_assistant 时用它包裹 VoiceAssistant。
+        self._responder = responder
+        # 屏蔽 handle 内置 TTS: 真正播放由本地 broadcast() 完成, 避免二次合成网络请求。
+        self._voice_assistant = voice_assistant or VoiceAssistant(
+            responder=self._responder,
+            tts=lambda _txt: {"ok": False, "audio_url": ""},
+        )
         self._tts = tts or VoiceTool()
         self._speaker = speaker or Speaker
 
@@ -39,7 +48,7 @@ class VoiceAgent:
         return record(duration=seconds, out_path=_OUT_WAV)
 
     def run(self, seconds: float = 5.0) -> dict:
-        """等待按键→录音→ASR→AssistantResponder→TTS(edge/mock)→Speaker.play。
+        """等待按键→录音→ASR→VoiceAssistant.handle(info/action)→broadcast→Speaker.play。
 
         返回 {text, answer, audio}。
         """
@@ -60,7 +69,13 @@ class VoiceAgent:
         text = asr_res.get("text", "")
         print("[ASR] text:", text)
 
-        out = self._responder.answer(text)
+        # ASR 文本 → VoiceAssistant.handle: info 模板 / action 经 AgentBridge→Agent/LLM
+        try:
+            out = self._voice_assistant.handle(text=text)
+        except Exception as exc:  # noqa: BLE001 — 处理失败不中断主流程
+            print("[ASSISTANT] error:", exc)
+            return {"text": text, "answer": "", "audio": None,
+                    "error": f"assistant handle error: {exc}"}
         answer = (out or {}).get("answer", "")
         print("[ASSISTANT] answer:", answer)
 
