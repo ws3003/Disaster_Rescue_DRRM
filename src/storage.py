@@ -61,7 +61,7 @@ class StorageProvider:
 
     name = "abstract"
 
-    def upload(self, path: str) -> Dict:
+    def upload(self, path: str, prefix: str = "snapshots") -> Dict:
         raise NotImplementedError
 
     @staticmethod
@@ -81,7 +81,7 @@ class LocalStorageProvider(StorageProvider):
     def __init__(self, base_url: str = "http://localhost:8000"):
         self.base_url = str(base_url).rstrip("/")
 
-    def upload(self, path: str) -> Dict:
+    def upload(self, path: str, prefix: str = "snapshots") -> Dict:
         try:
             if not path or not Path(path).exists():
                 return {"ok": False, "error": f"snapshot not found: {path}"}
@@ -107,16 +107,18 @@ class OSSStorageProvider(StorageProvider):
     def __init__(self, config: StorageConfig):
         self.config = config
 
-    def upload(self, path: str) -> Dict:
-        """把本地快照上传到阿里云 OSS, 返回可公网访问的 picURL。
+    def upload(self, path: str, prefix: str = "snapshots") -> Dict:
+        """把本地文件上传到阿里云 OSS, 返回可公网访问的 URL。
 
+        默认对象前缀 snapshots/(图片/快照); prefix 可传 "audio" 等供 ASR 音频复用,
+        不改变已有图片上传(bucket/URL 组装不变)。
         AK/SK 仅从环境变量读取(绝不写入 yaml / 不写死代码):
           OSS_ACCESS_KEY / OSS_ACCESS_SECRET (必填, env-only)
           OSS_BUCKET / OSS_ENDPOINT (env 优先, 缺失回退 config 非机密字段)
         """
         try:
             if not path or not Path(path).exists():
-                return {"ok": False, "error": f"snapshot not found: {path}"}
+                return {"ok": False, "error": f"file not found: {path}"}
             # 机密仅来自 env, 不回退 config
             access_key = os.environ.get("OSS_ACCESS_KEY")
             access_secret = os.environ.get("OSS_ACCESS_SECRET")
@@ -130,7 +132,7 @@ class OSSStorageProvider(StorageProvider):
             auth = oss2.Auth(access_key, access_secret)
             bucket = oss2.Bucket(auth, endpoint, bucket_name)
             filename = Path(path).name
-            object_key = f"snapshots/{filename}"
+            object_key = f"{prefix or 'snapshots'}/{filename}"
             bucket.put_object_from_file(object_key, path)
             # 输出: https://{bucket}.{endpoint}/{object_key}  (endpoint 去掉协议前缀)
             ep = str(endpoint).rstrip("/")
@@ -152,10 +154,14 @@ def create_storage(config_path: str = "config/storage.yaml") -> StorageProvider:
     return LocalStorageProvider(base_url=cfg.base_url)
 
 
-def upload_snapshot(image_path: str, config_path: str = "config/storage.yaml") -> Dict:
-    """便捷入口: 上传 snapshot, 返回 {ok, url?, error?}。"""
+def upload_snapshot(image_path: str, config_path: str = "config/storage.yaml",
+                    prefix: str = "snapshots") -> Dict:
+    """便捷入口: 上传文件, 返回 {ok, url?, error?}。
+
+    prefix 默认 snapshots(维持图片/快照行为); ASR 音频可传 prefix="audio"。
+    """
     provider = create_storage(config_path)
-    return provider.upload(image_path)
+    return provider.upload(image_path, prefix=prefix)
 
 
 if __name__ == "__main__":

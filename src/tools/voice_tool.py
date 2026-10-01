@@ -144,24 +144,25 @@ class VoiceTool(Tool):
             return {"ok": False, "text": "", "error": "ASR service unavailable"}
 
     def _asr_aliyun(self, audio_path: Optional[str] = None) -> Dict[str, Any]:
-        """阿里云 DashScope 一句话识别(Paraformer)。音频先落 data/audio 供静态 URL, 再 POST asr。"""
+        """阿里云 DashScope 一句话识别(Paraformer)。
+
+        音频 wav 先上传 OSS(复用 src.storage.upload_snapshot) 拿公网 URL,
+        再交 DashScope file_urls 拉取识别。不再依赖局域网 STORAGE_BASE_URL。
+        """
         try:
             key = os.environ.get(_ASR_API_KEY_ENV, "").strip()
-            base = os.environ.get("STORAGE_BASE_URL", "").strip()
             model = os.environ.get(_ASR_MODEL_ENV, "").strip() or _ASR_DEFAULT_MODEL
-            if not key or not base:
+            if not key:
                 return {"ok": False, "text": "", "error": "ASR service unavailable"}
             if not audio_path or not os.path.exists(audio_path):
                 return {"ok": False, "text": "", "error": "audio file not found"}
-            # 拷入 data/audio 以生成可访问 URL(供 DashScope 拉取)
-            from pathlib import Path
-            from datetime import datetime
-            adir = Path(_VOICE_AUDIO_DIR)
-            adir.mkdir(parents=True, exist_ok=True)
-            name = f"asr_{datetime.now().strftime('%Y%m%d%H%M%S')}.wav"
-            dest = adir / name
-            dest.write_bytes(Path(audio_path).read_bytes())
-            file_url = f"{base.rstrip('/')}/api/v1/assistant/audio/{name}"
+            # 上传 wav 到 OSS(图片已复用同一 OSS; 音频对象前缀 audio/)
+            from src.storage import upload_snapshot
+            up = upload_snapshot(audio_path, prefix="audio")
+            if not up.get("ok"):
+                print("[ASR] OSS upload failed:", up.get("error"))
+                return {"ok": False, "text": "", "error": "ASR service unavailable"}
+            file_url = up.get("url")
 
             import requests  # 惰性加载
 
@@ -171,13 +172,19 @@ class VoiceTool(Tool):
                 "input": {"file_urls": [file_url]},
             }
             headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-            resp = requests.post(url, json=payload, headers=headers, timeout=30)
-            resp.raise_for_status()
+            try:
+                resp = requests.post(url, json=payload, headers=headers, timeout=30)
+                resp.raise_for_status()
+            except Exception as exc:  # noqa: BLE001
+                print("[ASR] DashScope request failed:", exc)
+                return {"ok": False, "text": "", "error": "ASR service unavailable"}
             text = self._extract_asr_text(resp.json())
             if not text:
+                print("[ASR] DashScope no text in response")
                 return {"ok": False, "text": "", "error": "ASR service unavailable"}
             return {"ok": True, "text": text, "provider": "aliyun"}
         except Exception as exc:  # noqa: BLE001 — 真实服务失败不冒泡
+            print("[ASR] exception:", exc)
             return {"ok": False, "text": "", "error": "ASR service unavailable"}
 
     @staticmethod
