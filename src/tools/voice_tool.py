@@ -32,7 +32,7 @@ _VOICE_TTS_PROVIDER_ENV = "VOICE_TTS_PROVIDER"
 _ASR_API_KEY_ENV = "ASR_API_KEY"
 _ASR_BASE_URL_ENV = "ASR_BASE_URL"
 _ASR_MODEL_ENV = "ASR_MODEL"
-_ASR_DEFAULT_MODEL = "paraformer-realtime-v2"
+_ASR_DEFAULT_MODEL = "paraformer-v2"
 _TTS_API_KEY_ENV = "TTS_API_KEY"
 _TTS_BASE_URL_ENV = "TTS_BASE_URL"
 _TTS_PROVIDER_ENV = "TTS_PROVIDER"
@@ -170,6 +170,8 @@ class VoiceTool(Tool):
             payload = {
                 "model": model,
                 "input": {"file_urls": [file_url]},
+                # 固化格式/采样率, 减少 DashScope 对 URL/音频格式的解析歧义
+                "parameters": {"format": "wav", "sample_rate": 16000},
             }
             headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
             try:
@@ -194,15 +196,21 @@ class VoiceTool(Tool):
             print("[ASR] exception:", exc)
             return {"ok": False, "text": "", "error": "ASR service unavailable"}
 
-    @staticmethod
-    def _extract_asr_text(data: Any) -> str:
+    def _extract_asr_text(self, data: Any) -> str:
         """从 DashScope 一句话识别响应取 text(尽力尝试多字段)。"""
         if not isinstance(data, dict):
             return ""
         # 常见: {"output": {"text": ...}} / {"result": [{"transcription": {"text": ...}}]}
         out = data.get("output")
-        if isinstance(out, dict) and out.get("text"):
-            return str(out["text"])
+        if isinstance(out, dict):
+            if out.get("text"):
+                return str(out["text"])
+            # paraformer-v2: text 在 output.sentence[].text / output.paragraphs[].text
+            if out.get("sentences") or out.get("sentence"):
+                segs = out.get("sentences") or out.get("sentence")
+                return self._join(segs)
+            if out.get("paragraphs"):
+                return self._join(out.get("paragraphs"))
         result = data.get("result")
         if isinstance(result, dict) and isinstance(result.get("transcription"), dict):
             t = result["transcription"].get("text")
@@ -219,6 +227,18 @@ class VoiceTool(Tool):
         if data.get("text"):
             return str(data["text"])
         return ""
+
+    @staticmethod
+    def _join(segs: Any) -> str:
+        """拼接 segment 列表的 text 字段(供 paraformer sentence/paragraph)。"""
+        parts = []
+        for s in (segs or []):
+            if not isinstance(s, dict):
+                continue
+            t = s.get("text")
+            if t:
+                parts.append(str(t))
+        return "".join(parts).strip()
 
     @staticmethod
     def _extract_text(resp: Any) -> str:
