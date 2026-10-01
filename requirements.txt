@@ -55,3 +55,6 @@ urllib3==2.7.0
 fastapi==0.141.1
 uvicorn==0.53.0
 python-multipart==0.0.32
+
+# V4.2 Voice (Alibaba DashScope Qwen TTS)
+dashscope==1.27.7
