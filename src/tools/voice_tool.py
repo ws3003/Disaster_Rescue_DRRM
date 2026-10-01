@@ -35,7 +35,12 @@ _ASR_MODEL_ENV = "ASR_MODEL"
 _ASR_DEFAULT_MODEL = "paraformer-realtime-v2"
 _TTS_API_KEY_ENV = "TTS_API_KEY"
 _TTS_BASE_URL_ENV = "TTS_BASE_URL"
+_TTS_MODEL_ENV = "TTS_MODEL"
+_TTS_DEFAULT_MODEL = "qwen-audio-3.1-tts-flash"
+_TTS_VOICE_ENV = "TTS_VOICE"
+_TTS_DEFAULT_VOICE = "Cherry"
 _VOICE_AUDIO_DIR = "data/audio"
+_TTS_OUT_DIR = "data/voice"
 
 _DEFAULT_ASR_TEXT = "现场情况怎么样"
 _VOICE_OUT_DIR = "data/voice"
@@ -234,23 +239,74 @@ class VoiceTool(Tool):
             return {"ok": False, "audio_url": "", "error": str(exc)}
 
     def _tts_live(self, text: Optional[str] = None) -> Dict[str, Any]:
+        """百炼 Qwen-Audio-3.1-TTS(multimodal-generation)。input.text; voice 仅 env 显式设置才加。"""
         try:
             key = os.environ.get(_TTS_API_KEY_ENV, "").strip()
-            url = os.environ.get(_TTS_BASE_URL_ENV, "").strip()
-            if not key or not url:
+            url = os.environ.get(_TTS_BASE_URL_ENV, "").strip() or (
+                "https://dashscope.aliyuncs.com/api/v1/services/"
+                "aigc/multimodal-generation/generation")
+            model = os.environ.get(_TTS_MODEL_ENV, "").strip() or _TTS_DEFAULT_MODEL
+            voice = os.environ.get(_TTS_VOICE_ENV, "").strip()  # 不默认写死 voice
+            if not key:
                 return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
             import requests  # 惰性加载
 
-            headers = {"Authorization": f"Bearer {key}"}
-            resp = requests.post(url, params={"text": str(text or "")},
-                                 headers=headers, timeout=20)
-            resp.raise_for_status()
-            audio_url = self._resolve_audio_url(resp, str(text or ""))
-            if not audio_url:
+            _input = {"text": str(text or "")}
+            if voice:  # 仅显式配置才带 voice
+                _input["voice"] = voice
+            payload = {"model": model, "input": _input}
+            headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            if resp.status_code != 200:
                 return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
-            return {"ok": True, "audio_url": audio_url, "provider": "live"}
+            try:
+                data = resp.json()
+            except Exception:  # noqa: BLE001
+                data = {}
+            abytes = self._extract_audio_bytes(data)
+            if not abytes:
+                return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
+            return {"ok": True, "audio_url": self._save_audio(abytes, "mp3"),
+                    "provider": "aliyun"}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
+
+    @staticmethod
+    def _extract_audio_bytes(data: Dict[str, Any]) -> Optional[bytes]:
+        """从 multimodal-generation 响应取音频字节: output.audio_url / audio.audio_url / audio(base64)。"""
+        import base64
+        if not isinstance(data, dict):
+            return None
+        out = data.get("output") if isinstance(data.get("output"), dict) else {}
+        if not out:
+            return None
+        audio_url = out.get("audio_url")
+        audio = out.get("audio")
+        if not audio_url and isinstance(audio, dict):
+            audio_url = audio.get("audio_url")
+        if audio_url:
+            import requests
+            try:
+                return requests.get(audio_url, timeout=60).content
+            except Exception:  # noqa: BLE001
+                return None
+        if isinstance(audio, str):
+            try:
+                return base64.b64decode(audio)
+            except Exception:  # noqa: BLE001
+                return None
+        return None
+
+    def _save_audio(self, data: bytes, ext: str) -> str:
+        """把音频字节保存到 data/voice/<ts>.<ext>, 返回绝对路径。"""
+        from pathlib import Path
+        from datetime import datetime
+        out_dir = Path(_TTS_OUT_DIR)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        name = f"tts_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.{ext}"
+        path = out_dir / name
+        path.write_bytes(data)
+        return str(path)
 
     def _resolve_audio_url(self, resp: Any, text: str) -> str:
         """优先取响应 JSON 中的 audio_url/url; 否则若是音频二进制则落盘本地返回路径。"""
