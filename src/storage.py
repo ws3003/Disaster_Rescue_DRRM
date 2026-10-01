@@ -133,7 +133,12 @@ class OSSStorageProvider(StorageProvider):
             bucket = oss2.Bucket(auth, endpoint, bucket_name)
             filename = Path(path).name
             object_key = f"{prefix or 'snapshots'}/{filename}"
-            bucket.put_object_from_file(object_key, path)
+            # 上传头: 音频对象固定 Content-Type=audio/wav, 供 DashScope ASR 识别 URL;
+            # 图片/快照沿用 oss2 按扩展名推断, 保留既有行为。
+            headers = {}
+            if prefix == "audio":
+                headers["Content-Type"] = "audio/wav"
+            bucket.put_object_from_file(object_key, path, headers=headers or None)
             # 输出: https://{bucket}.{endpoint}/{object_key}  (endpoint 去掉协议前缀)
             ep = str(endpoint).rstrip("/")
             if "://" in ep:
