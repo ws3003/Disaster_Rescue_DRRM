@@ -247,24 +247,37 @@ class VoiceTool(Tool):
         return self._tts_mock(text)
 
     def _tts_edge(self, text: Optional[str] = None) -> Dict[str, Any]:
-        """本地 edge-tts(微软): text -> data/audio/response.mp3, 返回音频路径。"""
+        """本地 edge-tts(微软) CLI: text -> data/audio/response.mp3, 返回音频路径。
+
+        树莓派实测: edge-tts Python API(Communicate.save) 连不上
+        speech.platform.bing.com:443 (Connection reset by peer), 而系统
+        edge-tts CLI 可正常输出; 故走 subprocess 调用 CLI。
+        文本过长经 stdin 传入, 避免 argv 长度/转义问题。
+        """
+        import shutil
+        import subprocess
+
+        out_path = "data/audio/response.mp3"
+        os.makedirs("data/audio", exist_ok=True)
+
+        cli = shutil.which("edge-tts")
+        if not cli:
+            return {"ok": False, "error": "edge-tts CLI not found (pip install edge-tts)"}
         try:
-            import asyncio
-            from edge_tts import Communicate
-            from pathlib import Path
-            out_path = "data/audio/response.mp3"
-            Path("data/audio").mkdir(parents=True, exist_ok=True)
-
-            async def _gen():
-                c = Communicate(str(text or ""), "zh-CN-XiaoxiaoNeural")
-                await c.save(out_path)
-
-            asyncio.run(_gen())
-            if not os.path.exists(out_path):
-                return {"ok": False, "error": "edge-tts produced no file"}
-            return {"ok": True, "audio_path": out_path, "provider": "edge"}
-        except Exception as exc:  # noqa: BLE001
+            # -f - 从 stdin 读文本(util.py: -f 为 - /dev/stdin 时读取 stdin),
+            # 避免 --text 在 argv 传长文/中文转义问题, 也符合 user 已验证的 CLI 用法。
+            args = [cli, "-f", "-", "--voice", "zh-CN-XiaoxiaoNeural",
+                    "--write-media", out_path]
+            env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+            proc = subprocess.run(
+                args, input=str(text or "").encode("utf-8"), capture_output=True,
+                timeout=60, env=env)
+        except Exception as exc:  # noqa: BLE001 — CLI 缺失/超时/编码
             return {"ok": False, "error": f"edge-tts unavailable: {exc}"}
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            msg = proc.stderr.decode("utf-8", "replace").strip() or "edge-tts produced no file"
+            return {"ok": False, "error": msg}
+        return {"ok": True, "audio_path": out_path, "provider": "edge"}
 
     def _tts_mock(self, text: Optional[str] = None) -> Dict[str, Any]:
         try:
