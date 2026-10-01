@@ -144,10 +144,10 @@ class VoiceTool(Tool):
             return {"ok": False, "text": "", "error": "ASR service unavailable"}
 
     def _asr_aliyun(self, audio_path: Optional[str] = None) -> Dict[str, Any]:
-        """阿里云 DashScope 一句话识别(Paraformer)。
+        """阿里云 DashScope Paraformer-v2 异步文件转写(paraformer-v2 -> /asr/transcription)。
 
         音频 wav 先上传 OSS(复用 src.storage.upload_snapshot) 拿公网 URL,
-        再交 DashScope file_urls 拉取识别。不再依赖局域网 STORAGE_BASE_URL。
+        提交异步任务拿 task_id, 轮询 /tasks/{task_id} 至 SUCCEEDED, 再解析文本。
         """
         try:
             key = os.environ.get(_ASR_API_KEY_ENV, "").strip()
@@ -165,30 +165,67 @@ class VoiceTool(Tool):
             file_url = up.get("url")
 
             import requests  # 惰性加载
+            import time
 
-            url = "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/recognition"
+            base = "https://dashscope.aliyuncs.com/api/v1"
+            headers = {
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "X-DashScope-Async": "enable",
+            }
             payload = {
                 "model": model,
                 "input": {"file_urls": [file_url]},
                 # 固化格式/采样率, 减少 DashScope 对 URL/音频格式的解析歧义
                 "parameters": {"format": "wav", "sample_rate": 16000},
             }
-            headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+            # ==== TEMP DEBUG (阶段1: 打印真实运行时变量, 定位后移除) ====
+            print("[DEBUG] ASR URL:", file_url)
+            print("[DEBUG] payload:", payload)
+
+            # step1: 提交异步文件转写任务 paraformer-v2 -> /asr/transcription
             try:
-                resp = requests.post(url, json=payload, headers=headers, timeout=30)
-                # ==== TEMP DEBUG (定位 DashScope 400 根因, 定位后移除) ====
-                print(f"[ASR-DEBUG] status={resp.status_code}")
-                print(f"[ASR-DEBUG] body={resp.text[:1200]}")
+                resp = requests.post(f"{base}/services/audio/asr/transcription",
+                                     json=payload, headers=headers, timeout=30)
                 resp.raise_for_status()
             except Exception as exc:  # noqa: BLE001
-                print("[ASR-DEBUG] exception:", exc)
-                print("[ASR] DashScope request failed:", exc)
+                print("[ASR] DashScope submit failed:", exc)
                 return {"ok": False, "text": "", "error": "ASR service unavailable"}
-            text = self._extract_asr_text(resp.json())
+            data = resp.json()
+            task_id = (data.get("output") or {}).get("task_id")
+            if not task_id:
+                print(f"[ASR] no task_id in submit: {resp.text[:1200]}")
+                return {"ok": False, "text": "", "error": "ASR service unavailable"}
+            print(f"[ASR-TASK] task_id={task_id} status={(data.get('output') or {}).get('task_status')}")
+
+            # step2: 轮询任务状态(最多 30 次, 间隔 1s)
+            task_url = f"{base}/tasks/{task_id}"
+            status, result = "PENDING", None
+            for _ in range(30):
+                try:
+                    gr = requests.get(task_url, headers=headers, timeout=30)
+                    gr.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    print("[ASR] DashScope poll failed:", exc)
+                    return {"ok": False, "text": "", "error": "ASR service unavailable"}
+                gd = gr.json()
+                status = (gd.get("output") or {}).get("task_status", "PENDING")
+                print(f"[ASR-TASK] task_id={task_id} status={status}")
+                if status == "SUCCEEDED":
+                    result = gd
+                    break
+                if status == "FAILED":
+                    print(f"[ASR] task failed body={gr.text[:1200]}")
+                    return {"ok": False, "text": "", "error": "ASR service unavailable"}
+                time.sleep(1)
+            if status != "SUCCEEDED":
+                print(f"[ASR] task timed out status={status}")
+                return {"ok": False, "text": "", "error": "ASR service unavailable"}
+
+            # step3: 解析文本
+            text = self._extract_asr_text(result)
             if not text:
-                # ==== TEMP DEBUG (定位 DashScope 400 根因, 定位后移除) ====
-                print(f"[ASR-DEBUG] no text; status={resp.status_code} body={resp.text[:1200]}")
-                print("[ASR] DashScope no text in response")
+                print(f"[ASR] no text in result body={str(result)[:1200]}")
                 return {"ok": False, "text": "", "error": "ASR service unavailable"}
             return {"ok": True, "text": text, "provider": "aliyun"}
         except Exception as exc:  # noqa: BLE001 — 真实服务失败不冒泡
