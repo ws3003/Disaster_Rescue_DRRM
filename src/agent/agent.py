@@ -1137,6 +1137,14 @@ class Agent:
                 "external_context"
             ] = context
 
+        # V4.4: 注入统一现场上下文(供 Planner 推理读取); 异常时 scene_context={}, 不阻断 Agent。
+        try:
+            from src.agent.context_provider import ContextProvider
+            sc = ContextProvider.get_scene_context()
+            base_context["scene_context"] = sc.get("scene_context") or {}
+        except Exception:  # noqa: BLE001
+            base_context["scene_context"] = {}
+
         return base_context
 
     # ============================================================
