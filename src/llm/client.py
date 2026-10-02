@@ -28,7 +28,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
-from .prompts import SYSTEM_PROMPT, TASK_PROPOSAL_VOCAB, build_advice_prompt
+from .prompts import (
+    CHAT_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    TASK_PROPOSAL_VOCAB,
+    build_advice_prompt,
+    build_chat_prompt,
+)
 
 
 class UnsupportedProviderError(ValueError):
@@ -112,6 +118,90 @@ class LLMClient:
         """
         prompt = build_advice_prompt(vlm_output, person_events)
         return self._dispatch(prompt, vlm_output, person_events)
+
+    # ------------------------------------------------------------------
+    # 语音助手对话 (chat) —— 独立于 infer 决策链
+    # ------------------------------------------------------------------
+    def ask(self, user_text: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """给定用户文本提问, 返回自然语言回答。
+
+        复用同一套 provider(qwen/mock)与配置; 不影响 infer() 决策链。
+        mock: 确定性回答, 零网络; qwen: OpenAI 兼容 /chat/completions。
+        错误语义与 infer 一致: LLMProviderError / LLMConfigError。
+        """
+        prompt = build_chat_prompt(user_text, context)
+        if self.provider == "mock":
+            return self._chat_mock(user_text, context)
+        if self.provider == "qwen":
+            return self._chat_qwen(prompt)
+        # __init__ 已挡住未知 provider, 此处仅防御
+        raise UnsupportedProviderError(f"未支持的 LLM provider: {self.provider!r}")
+
+    def _chat_mock(self, user_text: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """Mock chat: 依据可选 context 生成确定性的自然语言回答(零网络)。"""
+        persons = (context or {}).get("persons") if isinstance(context, dict) else None
+        n = len([p for p in persons if isinstance(p, dict)]) if isinstance(persons, list) else 0
+        scene = (context or {}).get("scene") if isinstance(context, dict) else None
+        ctx = f"当前检测到 {n} 名人员。" if n else "当前未检测到人员。"
+        scene_txt = f" 场景: {scene}。" if scene else ""
+        return (
+            f"{ctx}{scene_txt} 已收到你的提问“{user_text}”。"
+            "(系统仅提供信息辅助, 不自动执行救援。)[mock]"
+        )
+
+    def _chat_qwen(self, prompt: str) -> str:
+        """Qwen chat: OpenAI 兼容 /chat/completions, 返回模型文本回答。"""
+        cfg = self._llm_config
+        if not cfg["api_key"]:
+            raise LLMConfigError(
+                "缺少 LLM_API_KEY 环境变量 (qwen provider 必需, 见 .env.example)"
+            )
+        payload = {
+            "model": cfg["model"],
+            "messages": [
+                {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        headers = {
+            "Authorization": f"Bearer {cfg['api_key']}",
+            "Content-Type": "application/json",
+        }
+        return self._completions(f"{cfg['base_url']}/chat/completions",
+                                  payload, headers, cfg["timeout"])
+
+    def _completions(self, url: str, payload: dict, headers: dict, timeout: float) -> str:
+        """OpenAI 兼容 chat/completions 的 HTTP 往返 + 内容提取。
+
+        供 infer 的 _call_qwen 与 ask 的 _chat_qwen 共用; 行为与错误语义一致。
+        """
+        try:
+            resp = self._transport(url, json=payload, headers=headers, timeout=timeout)
+        except requests.Timeout as exc:
+            raise LLMProviderError(f"LLM 请求超时({timeout}s): {exc}") from exc
+        except requests.RequestException as exc:
+            raise LLMProviderError(f"LLM 网络请求失败: {exc}") from exc
+
+        status = getattr(resp, "status_code", None)
+        if status != 200:
+            snippet = str(getattr(resp, "text", ""))[:200]
+            raise LLMProviderError(f"LLM API 返回 HTTP {status}: {snippet}")
+
+        try:
+            body = resp.json()
+        except (ValueError, TypeError) as exc:
+            raise LLMProviderError(f"LLM API 响应体不是合法 JSON: {exc}") from exc
+
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMProviderError(
+                f"LLM API 响应缺少 choices/message/content: {str(body)[:200]}"
+            ) from exc
+
+        if not isinstance(content, str) or not content.strip():
+            raise LLMProviderError("LLM 模型返回内容为空")
+        return content
 
     # ------------------------------------------------------------------
     # provider 分发

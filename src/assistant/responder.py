@@ -23,8 +23,15 @@ class AssistantResponder:
         db_path: Optional[str] = None,
         snapshot_dir: Optional[str] = None,
         context: Optional[AssistantContext] = None,
+        llm: Optional[Any] = None,
     ):
         self._ctx = context or AssistantContext(db_path=db_path, snapshot_dir=snapshot_dir)
+        # 语音助手 Chat LLM: 用于自然语言(general)问题; 未注入则默认 provider(mock, 离线)。
+        if llm is not None:
+            self._llm = llm
+        else:
+            from src.llm.client import LLMClient  # 惰性导入, 避免决策链加载成本
+            self._llm = LLMClient()
 
     # ---------------------------------------------------------------- 模板
     def _answer_scene(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -458,5 +465,16 @@ class AssistantResponder:
         elif intent == intent_mod.INTENT_RESCUE_ROUTE:
             out = self._answer_rescue_route_priority(ctx)
         else:
-            out = self._answer_general(ctx)
+            out = self._answer_general_llm(question, ctx)
         return {"answer": out["answer"], "sources": out["sources"], "intent": intent}
+
+    def _answer_general_llm(self, question: str, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """自然语言(general)问题: 优先 LLMClient.ask(), 失败/为空回退模板。"""
+        try:
+            ans = self._llm.ask(question, context=None)  # context 暂不接入, 保持 None
+        except Exception:  # noqa: BLE001 — LLM 失败不阻塞, 回退模板
+            ans = ""
+        if ans and str(ans).strip():
+            return {"answer": str(ans).strip(),
+                    "sources": [{"type": "llm", "provider": getattr(self._llm, "provider", None)}]}
+        return self._answer_general(ctx)

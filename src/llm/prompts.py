@@ -12,7 +12,7 @@ LLM prompts — 参谋 system prompt 模板 (P0)
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 # LLM 可提议的动作词表 —— 解决 task_proposals.action 与 Agent actions/tool 的映射。
@@ -89,3 +89,36 @@ def build_advice_prompt(vlm_output: Dict[str, Any], person_events: List[Dict[str
         "按 System 中的字段定义输出一个符合要求的 JSON, "
         "包含事件总结、人员风险解释、救援建议与任务候选。"
     )
+
+
+# ---------------------------------------------------------------------------
+# 语音助手对话 (chat) —— 独立于决策链 build_advice_prompt
+# ---------------------------------------------------------------------------
+CHAT_SYSTEM_PROMPT = (
+    "你是一名灾害现场信息辅助助手, 面向现场指挥或救援人员以语音/文本方式提问。"
+    "你的职责是给出简洁、自然语言的中文回答。\n"
+    "职责边界:\n"
+    "- 你仅提供信息与分析建议, 供人工决策参考; 你绝不自动执行救援、不代替人作最终处置。\n"
+    "- 若提及风险/人员, 仅陈述系统观测到的状态与风险, 不作超出证据的断言。\n"
+    "- 直接回答提问, 不要输出 JSON, 不要使用 Markdown 代码块, 控制在 1~3 句。"
+)
+
+
+def build_chat_prompt(user_text: str, context: Optional[Dict[str, Any]] = None) -> str:
+    """构造对话型 LLM 的用户侧消息。
+
+    参数:
+        user_text: 用户提问文本(如 "现场怎么样？")。
+        context: 可选现场上下文(如 {"scene": ..., "persons": [...]}), 注入给模型参考。
+
+    返回:
+        用户侧 prompt 文本。
+    """
+    if context:
+        ctx_json = json.dumps(context, ensure_ascii=False, indent=2)
+        return (
+            "以下是当前现场可选的观测上下文, 如与问题相关可据此回答, 否则忽略:\n"
+            f"{ctx_json}\n\n"
+            f"用户提问: {user_text}"
+        )
+    return f"用户提问: {user_text}"
