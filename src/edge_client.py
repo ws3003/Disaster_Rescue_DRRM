@@ -37,6 +37,99 @@ _ROOT_DIR = os.path.dirname(_SRC_DIR)
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
+# 灾害事件语音播报(可选组件; 导入/运行异常绝不影响视觉主循环)
+try:
+    from src.voice.voice_agent import VoiceAgent
+except Exception:  # noqa: BLE001 — 无语音组件也允许运行视觉检测
+    VoiceAgent = None
+
+_VOICE = None  # 惰性缓存的播报器(VoiceAgent 构造较重, 复用实例)
+# 播报去重: text_hash -> 上次播报时间戳(epoch); 同一文本 60s 内只播一次
+_announced_alert_cache: Dict[int, float] = {}
+_ANNOUNCE_TTL = 60.0
+_HIGH_STATES = ("fall", "help-waving", "static lying", "lying")
+_ALERT_RISK_THRESHOLD = 0.8
+# event_summary 兜底允许播报的关键词(仅在包含以下词时才播)
+_EVENT_KEYWORDS = ("跌倒", "倒地", "受伤", "被困", "危险", "Fall", "Help", "Lying", "救援")
+
+
+def _is_high_risk(args: Any, message: str) -> bool:
+    """send_alert 是否高危: 优先看 args 的 priority/state/risk_score, 再兜底匹配 message 文本。"""
+    if isinstance(args, dict):
+        if str(args.get("priority") or "").upper() == "HIGH":
+            return True
+        if str(args.get("state") or "").lower() in _HIGH_STATES:
+            return True
+        rs = args.get("risk_score")
+        if isinstance(rs, (int, float)) and not isinstance(rs, bool) and rs >= _ALERT_RISK_THRESHOLD:
+            return True
+    low = message.lower()
+    return ("priority: high" in low
+            or any(f"state: {s}" in low for s in _HIGH_STATES)
+            or f"risk: {_ALERT_RISK_THRESHOLD}" in low
+            or f"risk: 0.9" in low)
+
+
+def _announce_agent_result(result: Any) -> None:
+    """从 Agent 返回结果中提取需播报的高风险灾害文本并语音播报。
+
+    仅播报高危 send_alert(message 或 args 满足 Priority:HIGH / 高危 State / Risk>=0.8),
+    或含高危关键词的 event_summary 兜底; 同一文本 60s 内去重。
+    任何 TTS/解析失败仅跳过, 绝不影响视觉检测主流程。
+    """
+    global _VOICE
+    try:
+        entries = result if isinstance(result, list) else [result]
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            task = entry.get("task")
+            root = task if isinstance(task, dict) else entry
+            if not isinstance(root, dict):
+                continue
+            # 1) 仅播报满足高危条件的 send_alert message
+            text = ""
+            actions = root.get("actions")
+            for a in (actions if isinstance(actions, list) else []):
+                if not isinstance(a, dict) or a.get("tool") != "communication_tool":
+                    continue
+                args = a.get("args") or {}
+                if (isinstance(args, dict) and args.get("action") == "send_alert"
+                        and args.get("message")):
+                    msg = str(args["message"])
+                    if _is_high_risk(args, msg):
+                        text = msg
+                    break
+            # 2) 无高危 alert → event_summary 兜底(仅含高危关键词才播)
+            if not text:
+                summary = str(root.get("event_summary") or "")
+                if any(k in summary for k in _EVENT_KEYWORDS):
+                    text = summary
+            if not text or not str(text).strip():
+                continue
+
+            # 3) 去重: 同一文本 _ANNOUNCE_TTL 秒内只播一次
+            now = time.time()
+            h = hash(text)
+            if len(_announced_alert_cache) > 128:
+                _announced_alert_cache = {
+                    k: v for k, v in _announced_alert_cache.items()
+                    if now - v < _ANNOUNCE_TTL
+                }
+            last = _announced_alert_cache.get(h)
+            if last is not None and now - last < _ANNOUNCE_TTL:
+                continue
+            _announced_alert_cache[h] = now
+
+            print("[VOICE] announce:", str(text).strip())
+            if VoiceAgent is None:
+                continue
+            if _VOICE is None:
+                _VOICE = VoiceAgent()
+            _VOICE.broadcast(str(text).strip())
+    except Exception:  # noqa: BLE001 — 播报失败不阻断视觉主循环
+        pass
+
 # 默认配置文件 (repo 根/config/edge.yaml)
 CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "edge.yaml"
@@ -411,10 +504,11 @@ def run_loop(
                     _events,
                     timestamp=ts,
                 )
-                agent.process_frame(
+                _pa_result = agent.process_frame(
                     frame_record,
                     context={"task_id": iter_task_id},
                 )
+                _announce_agent_result(_pa_result)
             except Exception as exc:  # noqa: BLE001
                 print("[EdgeClient]")
                 print(ts)
@@ -498,6 +592,7 @@ def run_loop(
                             "[LLM->Agent] result:",
                             result,
                         )
+                        _announce_agent_result(result)
                     except Exception as exc:  # noqa: BLE001
                         print("[EdgeClient]")
                         print(ts)
