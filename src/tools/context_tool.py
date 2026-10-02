@@ -92,6 +92,62 @@ def _latest_alert(db: Any) -> Optional[dict]:
         return None
 
 
+_ALERT_EVENT_TYPES = ("memory_alert", "high_risk_alert")
+
+
+def _persons_from_events(db: Any, hours: int = 24) -> List[dict]:
+    """persons 表为空时, 从 events(memory_alert/high_risk_alert)恢复人员。
+
+    每个 person_id 取最近一次事件, 从 payload 恢复 state/risk_score/priority。
+    """
+    import json
+    person_rows: Dict[tuple, dict] = {}  # person_id -> {state,risk,priority}
+    try:
+        conn = db._connect()
+        try:
+            rows = conn.execute(
+                "SELECT event_id, ts, type, severity, person_id, payload "
+                "FROM events WHERE type IN (?, ?) ORDER BY ts DESC",
+                (_ALERT_EVENT_TYPES[0], _ALERT_EVENT_TYPES[1]),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — 表缺失/空
+        return []
+
+    for row in rows:
+        pid = row["person_id"]
+        if pid is None or pid in person_rows:
+            continue
+        payload = row["payload"]
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        state = payload.get("state")
+        risk = payload.get("risk_score")
+        priority = payload.get("priority")
+        if state is None and risk is None:
+            continue  # 无可用人员证据
+        person_rows[pid] = {
+            "state": state,
+            "risk_score": risk,
+            "priority": priority,
+        }
+    out: List[dict] = []
+    for pid, info in person_rows.items():
+        out.append({
+            "person_id": pid,
+            "state": info["state"],
+            "risk_score": info["risk_score"],
+            "priority": info["priority"],
+        })
+    return out
+
+
 def get_current_scene_context(
     db_path: Optional[str] = None,
     db: Optional[Any] = None,
@@ -126,6 +182,10 @@ def get_current_scene_context(
             })
     except Exception:  # noqa: BLE001 — 表缺失等
         persons = []
+
+    # persons 表为空 → fallback 从 events 恢复人员(memory_alert / high_risk_alert)
+    if not persons:
+        persons = _persons_from_events(db)
 
     return {
         "persons": persons,
