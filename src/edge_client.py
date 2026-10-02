@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import time
+import threading
 import traceback
 import uuid
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -42,6 +43,9 @@ try:
     from src.voice.voice_agent import VoiceAgent
 except Exception:  # noqa: BLE001 — 无语音组件也允许运行视觉检测
     VoiceAgent = None
+# 按钮语音交互开关(增量接入, 不改视觉逻辑):
+#   VOICE_ENABLED=0  关闭按钮语音(默认)
+#   VOICE_ENABLED=1  开启按钮语音(后台线程跑 VoiceAgent.run)
 
 _VOICE = None  # 惰性缓存的播报器(VoiceAgent 构造较重, 复用实例)
 # 播报去重: text_hash -> 上次播报时间戳(epoch); 同一文本 60s 内只播一次
@@ -129,6 +133,30 @@ def _announce_agent_result(result: Any) -> None:
             _VOICE.broadcast(str(text).strip())
     except Exception:  # noqa: BLE001 — 播报失败不阻断视觉主循环
         pass
+
+
+def _voice_enabled() -> bool:
+    """VOICE_ENABLED=1 时开启按钮语音交互线程。"""
+    return os.environ.get("VOICE_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
+def start_voice_thread() -> None:
+    """后台启动按钮语音闭环 (VoiceAgent.run), 不阻塞视觉主循环。
+
+    复用 _VOICE 单例(与视觉报警播报共用); 线程 daemon, 异常仅打印不影响视觉。
+    """
+    global _VOICE
+    try:
+        if VoiceAgent is None:
+            print("[VOICE] thread failed: VoiceAgent 不可用")
+            return
+        if _VOICE is None:
+            _VOICE = VoiceAgent()
+        th = threading.Thread(target=_VOICE.run, name="voice-agent", daemon=True)
+        th.start()
+        print("[VOICE] Voice thread started")
+    except Exception as exc:  # noqa: BLE001 — 语音线程失败不影响视觉
+        print("[VOICE] thread failed:", exc)
 
 # 默认配置文件 (repo 根/config/edge.yaml)
 CONFIG_PATH = os.path.join(
@@ -715,6 +743,10 @@ def main(argv: Optional[list] = None) -> int:
                   "(pending recovery disabled):")
             traceback.print_exc()
             flush_caller = None
+
+    # ── V4.4: 按钮语音交互(可选, 后台线程, 视觉程序初始化完成后启动, 不阻塞视觉) ──
+    if _voice_enabled():
+        start_voice_thread()
 
     try:
         run_loop(
