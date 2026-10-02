@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 import json
+import os
 import sys
 
 
@@ -707,9 +708,13 @@ class Memory:
 
         # ------------------------------------------------------
         # Cooldown is active.
-        # Check risk escalation.
+        # DRRM_ALERT_FORCE=1: 测试模式, 允许重复 HIGH 报警(不删除冷却, 仅旁路本次判断)
         # ------------------------------------------------------
+        if os.environ.get("DRRM_ALERT_FORCE", "").strip() == "1":
+            print("[ALERT_MEMORY] force enabled (DRRM_ALERT_FORCE=1) — allow repeat alert")
+            return True
 
+        # Check risk escalation.
         if self.should_break_cooldown(
             person_id=person_id,
             state=state,
@@ -717,6 +722,7 @@ class Memory:
         ):
             return True
 
+        print("[ALERT_MEMORY] cooldown blocked")
         return False
 
     # ==========================================================

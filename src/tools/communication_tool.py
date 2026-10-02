@@ -330,6 +330,71 @@ class CommunicationTool(Tool):
     # ------------------------------------------------------------------
     # send_alert
     # ------------------------------------------------------------------
+    def _resolve_public_image(self, img_path: str) -> str:
+        """把 image_path 解析为「公网 HTTPS OSS URL」(钉钉可访问)。
+
+        - 本地文件(data/snapshots/xxx.jpg): 上传 OSS → 公开 URL
+        - 私网/非HTTPS URL(localhost/192.168.x/127.0.0.1): 映射到本地 snap 文件再上传 OSS
+        - 已是公网 HTTPS(如 OSS): 原样返回
+        禁止把私网 URL 发给钉钉。返回 "" 表示无法得到公网 URL。
+        """
+        if not img_path:
+            return ""
+        s = str(img_path).strip()
+        if s.startswith(("http://", "https://")):
+            if self._is_public_https(s):
+                return s
+            local = self._url_to_local_snap(s)
+            if not local:
+                print("[IMAGE] 私网 URL 无法映射到本地文件, path=", s)
+                return ""
+            return self._upload_snap_image(local)
+        # 本地文件路径
+        if os.path.exists(s):
+            return self._upload_snap_image(s)
+        # 相对路径 → 相对仓库根
+        cand = str(PROJECT_ROOT / s)
+        if os.path.exists(cand):
+            return self._upload_snap_image(cand)
+        print("[IMAGE] 本地文件不存在, path=", s)
+        return ""
+
+    @staticmethod
+    def _is_public_https(url: str) -> bool:
+        """是否为公网 HTTPS 且非私网主机(含 OSS URL)。"""
+        if not url.lower().startswith("https://"):
+            return False
+        host = url.lower().split("://", 1)[1].split("/", 1)[0]
+        if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            return False
+        if host.startswith("192.168.") or host.startswith("10.") \
+                or host.startswith("172."):
+            return False
+        return True
+
+    @classmethod
+    def _url_to_local_snap(cls, url: str) -> str:
+        """把 server /snapshots/<file> URL 映射到本地 snap 文件路径; 无法映射返回 "". """
+        if "/snapshots/" not in url:
+            return ""
+        filename = url.rsplit("/snapshots/", 1)[1].split("?", 1)[0]
+        if not filename:
+            return ""
+        local = Path(PROJECT_ROOT) / "data" / "snapshots" / filename
+        return str(local) if local.is_file() else ""
+
+    @staticmethod
+    def _upload_snap_image(local_path: str) -> str:
+        """上传本地图片到 OSS, 返回公网 HTTPS URL; 失败返回 "". """
+        from src.storage import upload_snapshot
+        print("[IMAGE] local_path=", local_path)
+        up = upload_snapshot(local_path)
+        if up.get("ok") and up.get("url"):
+            print("[OSS] uploaded_url=", up["url"])
+            return up["url"]
+        print("[OSS] upload failed:", up.get("error"))
+        return ""
+
     def _send_alert(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         alert = self._build_alert(kwargs)
         channel = self._channel()
@@ -350,42 +415,29 @@ class CommunicationTool(Tool):
         res = self._send_with_retry(channel, "markdown", content, {"alert": alert})
 
         if res.get("ok"):
-            # 现场图片证据: 优先用 server 返回的远程 snapshot_url; 否则上传本地快照
+            # 现场图片证据: 统一解析为「公网 HTTPS OSS URL」(钉钉可访问), 不走私网 URL
             img_path = alert.get("image_path")
             img_ok = None
             image_url = None
             image_error = None
             if img_path:
                 try:
-                    _is_url = str(img_path).startswith(("http://", "https://"))
-                    if _is_url:
-                        # 已是可访问 URL (server snapshot_url): 直接发送, 不重复上传
-                        image_url = img_path
+                    image_url = self._resolve_public_image(img_path)
+                    if image_url:
+                        print("[DINGTALK] send image url=", image_url)
                         img_res = self._send_with_retry(
                             channel, "image", image_url,
-                            {"alert": alert, "source": "snapshot_url"},
+                            {"alert": alert, "source": "oss"},
                         )
                         img_ok = bool(img_res and img_res.get("ok"))
                         if not img_ok:
                             image_error = (img_res or {}).get("error")
                     else:
-                        from src.storage import upload_snapshot
-                        up = upload_snapshot(img_path)
-                        if up.get("ok") and up.get("url"):
-                            image_url = up["url"]
-                            img_res = self._send_with_retry(
-                                channel, "image", image_url,
-                                {"alert": alert, "source": "snapshot"},
-                            )
-                            img_ok = bool(img_res and img_res.get("ok"))
-                            if not img_ok:
-                                image_error = (img_res or {}).get("error")
-                        else:
-                            img_ok = False
-                            image_error = up.get("error", "upload failed")
+                        img_ok = False
+                        image_error = "no public image url (OSS upload failed or path missing)"
                 except Exception as exc:  # noqa: BLE001
                     img_ok = False
-                    image_error = f"upload exception: {exc}"
+                    image_error = f"image resolve exception: {exc}"
                 if not img_ok:
                     self._append_log({
                         **alert, "status": "IMAGE_FAILED", "channel": channel.name,
