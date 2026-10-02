@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 from src.voice.button import VoiceButton  # Button 别名
@@ -86,10 +87,10 @@ class VoiceAgent:
         return {"text": text, "answer": answer, "audio": audio}
 
     def broadcast(self, text: Optional[str] = None) -> dict:
-        """自动播报闭环: 文本 → VoiceTool.text_to_audio → audio_path → Speaker.play。
+        """自动播报闭环: 文本 → VoiceTool.text_to_audio → 本地音频 → Speaker.play。
 
         TTS/播放失败仅打印, 不抛异常, 不影响调用方。
-        返回 {ok, audio, error}; audio 为音频路径(成功时)。
+        返回 {ok, audio, error}; audio 为最终本地播放文件路径(成功时)。
         """
         if not text:
             return {"ok": False, "audio": None, "error": "no text to speak"}
@@ -99,10 +100,54 @@ class VoiceAgent:
             print("[TTS] unavailable:", tts_res.get("error"))
             return {"ok": False, "audio": None, "error": tts_res.get("error")}
 
-        audio = tts_res.get("audio_path") or tts_res.get("audio_url")
-        print("[TTS] audio:", audio)
+        local = self._resolve_audio_path(tts_res)
+        if local is None:
+            return {"ok": False, "audio": None,
+                    "error": "audio unavailable (no local file and download failed)"}
+
+        print("[TTS] play:", local)
         try:
-            self._speaker.play(audio)
+            self._speaker.play(local)
         except Exception as exc:  # noqa: BLE001 — 播放失败不中断
             print("[TTS] play failed:", exc)
-        return {"ok": True, "audio": audio}
+        return {"ok": True, "audio": local}
+
+    def _resolve_audio_path(self, tts_res: dict) -> Optional[str]:
+        """把 tts 结果解析为本地可播放文件路径。
+
+        - audio_path 存在 → 直接用;
+        - 仅 audio_url(Qwen 返回 OSS URL) → 下载到 data/voice/ 再返回本地路径;
+        - 否则 None。
+        """
+        audio_path = tts_res.get("audio_path")
+        if audio_path and os.path.exists(str(audio_path)):
+            return str(audio_path)
+        url = tts_res.get("audio_url")
+        if url:
+            print("[TTS] remote url:", url)
+            return self._download_audio(str(url))
+        return None
+
+    @staticmethod
+    def _download_audio(url: str) -> Optional[str]:
+        """下载远程音频(wav)到 data/voice/<ts>.wav, 返回本地路径; 失败返回 None。"""
+        try:
+            import requests  # 惰性加载
+            from datetime import datetime
+            from pathlib import Path
+
+            out_dir = Path("data/voice")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            name = f"tts_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.wav"
+            out = out_dir / name
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            out.write_bytes(resp.content)
+            if not out.exists() or out.stat().st_size == 0:
+                print("[TTS] download empty")
+                return None
+            print("[TTS] downloaded:", str(out))
+            return str(out)
+        except Exception as exc:  # noqa: BLE001 — 下载失败返回 None
+            print("[TTS] download failed:", exc)
+            return None
