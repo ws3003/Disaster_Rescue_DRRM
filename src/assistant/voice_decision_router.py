@@ -1,14 +1,16 @@
 """src/assistant/voice_decision_router.py — V4.3 语音智能路由层。
 
-定位: 依据用户问题关键词, 决定走"简单现场查询(scene)"还是"救援决策(agent)"。
+定位: 依据用户问题关键词, 决定走 现场查询(scene) / 风险分析(risk) /
+      救援建议(agent) 或交给命令路由(None)。
 
-  route(text) -> "scene" | "agent" | None
-    - "scene": 灾害现场事实查询(现场人员/情况/任务/状态/数量)
-    - "agent": 风险分析/救援决策(危险/风险/为什么/怎么办/建议/是否→去"是否")
+  route(text) -> "scene" | "risk" | "agent" | None
+    - "scene": 灾害现场事实查询(人员/情况/任务/状态/数量)
+    - "risk" : 风险分析/评估(危险吗/风险怎么样/最高风险/严重吗)
+    - "agent": 救援建议/处理方案(怎么办/怎么处理/下一步/怎么救援)
     - None  : 非决策类问题(天气/医院/报警等), 交给上层既有命令路由, 不误判
 
-刻意避免宽泛词: 不使用裸"有没有""是否"(会劫持 附近有没有医院 / WiFi 等),
-scene 词必须是灾害现场明确表达; pure 规则, 不调用 LLM / Agent / 数据库。
+刻意避免宽泛词: 不使用裸"有没有""是否"(会劫持 附近有没有医院 / WiFi 等)。
+纯规则分类, 不调用 LLM / Agent / 数据库。
 """
 
 from __future__ import annotations
@@ -23,24 +25,33 @@ _SCENE_KEYWORDS = (
     "伤员", "人员", "几个人", "多少人",                       # 人员/数量
 )
 
-# agent(风险分析/救援决策)关键词
+# risk(风险分析/评估)关键词
+_RISK_KEYWORDS = (
+    "危险吗", "有危险吗", "风险吗", "风险怎么样", "最高风险",
+    "严重吗", "现在危险", "情况严重吗",
+)
+
+# agent(救援建议/原因分析/决策辅助)关键词
 _AGENT_KEYWORDS = (
-    "危险", "风险", "为什么", "怎么办", "建议",
-    "原因", "分析", "能不能", "适合", "进入", "处理",
-    "评估", "判断", "先救", "要不要",
+    "建议", "怎么办", "怎么处理", "如何处理", "原因",
+    "分析", "下一步", "怎么救援", "为什么",
 )
 
 
 class VoiceDecisionRouter:
-    """按关键词把用户问题路由到 scene / agent 模式。"""
+    """按关键词把用户问题路由到 scene / risk / agent 模式。"""
 
     @staticmethod
     def route(text: str) -> Optional[str]:
-        """返回 "scene" / "agent" / None(不命中则交给上层命令路由)。"""
+        """返回 "scene" / "risk" / "agent" / None(不命中则交给上层命令路由)。
+
+        判定顺序固定: 1)scene  2)risk  3)agent  4)None。
+        """
         t = text or ""
-        # 优先 scene(灾害现场事实); 命中即返回
         if any(kw in t for kw in _SCENE_KEYWORDS):
             return "scene"
+        if any(kw in t for kw in _RISK_KEYWORDS):
+            return "risk"
         if any(kw in t for kw in _AGENT_KEYWORDS):
             return "agent"
         return None
