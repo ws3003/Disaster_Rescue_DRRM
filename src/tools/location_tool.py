@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Dict
 
 
@@ -25,22 +26,44 @@ class LocationTool:
 
     name = "location_tool"
 
-    # mock 坐标/地址(南京三江学院附近, 示例)
-    _MOCK = {
-        "latitude": 32.0617,
-        "longitude": 118.7778,
-        "address": "三江学院附近",
-        "source": "mock",
-    }
+    def __init__(
+        self,
+        latitude: float = 32.0617,
+        longitude: float = 118.7778,
+        address: str = "三江学院附近",
+    ):
+        # mock 坐标/地址(南京三江学院附近, 示例)
+        self._MOCK = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "address": address,
+            "source": "mock",
+        }
 
     def get_current_location(self) -> Dict[str, object]:
         """返回当前设备位置。
 
         结构:
             {"latitude", "longitude", "address", "source"}
-        source 标识来源: mock(当前)。
+        source: mock(兜底) / amap(高德逆地理富化)。
+
+        V4.6: 若配置 AMAP_API_KEY, 尝试用 amap 逆地理把地址富化为真实地址;
+        失败/无 key → 保持 mock 兜底。所有异常被吞掉, 不影响主流程。
         """
-        return dict(self._MOCK)
+        base = dict(self._MOCK)
+        amap_key = os.environ.get("AMAP_API_KEY", "").strip()
+        if not amap_key:
+            return base
+        try:
+            from src.tools.amap_provider import AmapProvider
+            addr = AmapProvider.regeo(
+                base["latitude"], base["longitude"], key=amap_key)
+        except Exception:  # noqa: BLE001 — 逆地理失败回退 mock
+            addr = ""
+        if addr:
+            base["address"] = addr
+            base["source"] = "amap"
+        return base
 
 
 if __name__ == "__main__":
