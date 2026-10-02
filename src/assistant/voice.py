@@ -57,6 +57,12 @@ class VoiceAssistant:
                     "intent": "unknown", "require_confirm": False, "confirmed": False,
                     "error": "no audio or text provided, or ASR 失败"}
 
+        # 救援现场查询分支(V4.4, 只读 SQLite, 不进 Agent/不调用永续 LLM):
+        # 命中现场/伤员/人员/风险/任务/救援等关键词 → context_tool 生成中文回答。
+        # 天气/医院/路线/发送报警等不含这些关键词, 仍走原命令路由, 不回归。
+        if self._is_rescue_query(text):
+            return self._answer_scene_context(text)
+
         # 命令路由
         cmd = command_router.classify(text)
         intent = cmd.get("intent", "unknown")
@@ -96,6 +102,51 @@ class VoiceAssistant:
         if res.get("ok"):
             return f"已通过调度执行 {intent}。"
         return f"{intent} 未能执行。"
+
+    # ------------------------------------------------------------
+    # 救援现场查询(V4.4)——只读 SQLite, 不进 Agent / 非万能聊天
+    # ------------------------------------------------------------
+    _RESCUE_KEYWORDS = ("现场", "情况", "伤员", "人员", "风险", "任务", "救援", "受困")
+
+    @classmethod
+    def _is_rescue_query(cls, text: str) -> bool:
+        """是否请求"现场/伤员/任务"类救援上下文(不含天气/医院/路线/报警)。"""
+        t = text or ""
+        return any(kw in t for kw in cls._RESCUE_KEYWORDS)
+
+    def _answer_scene_context(self, question: str) -> Dict[str, Any]:
+        """用 context_tool 查 SQLite → 生成中文现场回答(复用本类 TTS 链路)。"""
+        from ..tools.context_tool import get_current_scene_context
+        ctx = get_current_scene_context()
+        persons = ctx.get("persons") or []
+        latest_task = ctx.get("latest_task")
+        answer = self._render_scene_answer(persons, latest_task)
+        intent = "scene_context"
+        audio_url = None
+        if answer:
+            tts_res = self._tts(answer)
+            audio_url = (tts_res or {}).get("audio_url") if (tts_res or {}).get("ok") else None
+        return {"question": question, "answer": answer, "audio_url": audio_url,
+                "intent": intent, "require_confirm": False, "confirmed": False}
+
+    @staticmethod
+    def _render_scene_answer(persons: list, latest_task: dict) -> str:
+        """由 persons/latest_task 生成中文现场总结。"""
+        if not persons:
+            base = "当前没有检测到受困人员。"
+        else:
+            n = len(persons)
+            parts = [f"当前发现{n}名人员。"]
+            for p in persons:
+                state = p.get("state")
+                prior = p.get("priority") or "未知"
+                parts.append(f"人员{p.get('person_id')}: 状态{state}，风险等级{prior}。")
+            base = "".join(parts)
+        if latest_task:
+            task_id = latest_task.get("task_id")
+            status = latest_task.get("status")
+            base += f"已生成救援任务{task_id}（状态{status}）。"
+        return base
 
     def ask_text(self, question: str) -> Dict[str, Any]:
         """文本问答(跳过 ASR, 仅做回答 + TTS)。"""
