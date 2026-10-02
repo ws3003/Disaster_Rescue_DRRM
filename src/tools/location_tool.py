@@ -41,29 +41,49 @@ class LocationTool:
         }
 
     def get_current_location(self) -> Dict[str, object]:
-        """返回当前设备位置。
+        """返回当前设备位置(接口不变)。
 
         结构:
             {"latitude", "longitude", "address", "source"}
-        source: mock(兜底) / amap(高德逆地理富化)。
+        source: gps(GPS 坐标) / amap(仅高德富化地址 / GPS失败+mock坐标) / mock(兜底)。
 
-        V4.6: 若配置 AMAP_API_KEY, 尝试用 amap 逆地理把地址富化为真实地址;
-        失败/无 key → 保持 mock 兜底。所有异常被吞掉, 不影响主流程。
+        V4.7 优先真实 GPS(GPSProvider); GPS 失败回退 mock 坐标; 地址均由 Amap 富化,
+        失败则保留 mock 地址。所有异常被吞掉, 不影响主流程。
         """
+        lat, lng, gps_ok = self._coordinates()
+        addr = self._amap_address(lat, lng)
+        if gps_ok:
+            return {"latitude": lat, "longitude": lng,
+                    "address": addr, "source": "gps"}
         base = dict(self._MOCK)
-        amap_key = os.environ.get("AMAP_API_KEY", "").strip()
-        if not amap_key:
-            return base
-        try:
-            from src.tools.amap_provider import AmapProvider
-            addr = AmapProvider.regeo(
-                base["latitude"], base["longitude"], key=amap_key)
-        except Exception:  # noqa: BLE001 — 逆地理失败回退 mock
-            addr = ""
         if addr:
             base["address"] = addr
             base["source"] = "amap"
         return base
+
+    def _coordinates(self):
+        """坐标来源: GPSProvider → {lat,lng,gps_ok} | mock 回退。"""
+        try:
+            from src.tools.gps_provider import GPSProvider
+            g = GPSProvider().get_location()
+            if isinstance(g, dict) and g.get("latitude") is not None \
+                    and g.get("longitude") is not None:
+                return g["latitude"], g["longitude"], True
+        except Exception:  # noqa: BLE001
+            pass
+        return (self._MOCK["latitude"], self._MOCK["longitude"], False)
+
+    @staticmethod
+    def _amap_address(lat: float, lng: float) -> str:
+        """高德逆地理富化地址; 无 key/失败 → ""。"""
+        amap_key = os.environ.get("AMAP_API_KEY", "").strip()
+        if not amap_key:
+            return ""
+        try:
+            from src.tools.amap_provider import AmapProvider
+            return AmapProvider.regeo(lat, lng, key=amap_key)
+        except Exception:  # noqa: BLE001
+            return ""
 
 
 if __name__ == "__main__":
