@@ -36,6 +36,15 @@ class ContextProvider:
             }
         }
 
+    @staticmethod
+    def get_location() -> Dict[str, Any]:
+        """返回设备当前位置(抽象层); LocationTool 失败 → {} 不阻断 Agent。"""
+        try:
+            from src.tools.location_tool import LocationTool
+            return LocationTool().get_current_location() or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
 
 if __name__ == "__main__":
     import json as _json

@@ -568,6 +568,14 @@ class Agent:
                     f"[Agent] scene_context 注入失败({exc}), 使用空 scene_context")
                 context["scene_context"] = {}
 
+        # V4.5.1: 注入设备位置(location); LocationTool 异常 → {}, 不阻断 Agent。
+        if "location" not in context:
+            try:
+                from src.agent.context_provider import ContextProvider as _CP
+                context["location"] = _CP.get_location() or {}
+            except Exception:  # noqa: BLE001
+                context["location"] = {}
+
         # Phase1 权威观测: (error, persons_map|None, observation|None)
         auth_error, persons_map, _obs = self.extract_authoritative_observation(llm_output)
         if auth_error:
@@ -1157,6 +1165,13 @@ class Agent:
             base_context["scene_context"] = sc.get("scene_context") or {}
         except Exception:  # noqa: BLE001
             base_context["scene_context"] = {}
+
+        # V4.5.1: 注入设备位置(location); LocationTool 异常 → {}, 不阻断 Agent。
+        try:
+            from src.agent.context_provider import ContextProvider as _CP2
+            base_context["location"] = _CP2.get_location() or {}
+        except Exception:  # noqa: BLE001
+            base_context["location"] = {}
 
         return base_context
 
