@@ -692,6 +692,19 @@ class Agent:
                         vargs["image_url"] = img_url
                         print(f"[LLM->Agent] image injected into vision_tool action: {img_url}")
 
+        # ── V4.5.2: 设备位置注入(最小补丁) —— 把 context.location 接到 send_alert。
+        #    仅当 location 为非空 dict 且 action 尚无 location 才注入; 不覆盖、不影响 image_path。
+        loc = (context or {}).get("location")
+        if isinstance(loc, dict) and loc:
+            for act in filtered:
+                if isinstance(act, dict) and act.get("tool") == "communication_tool" \
+                        and (act.get("args") or {}).get("action") == "send_alert":
+                    args = act.get("args")
+                    if isinstance(args, dict) and "location" not in args:
+                        args["location"] = loc
+                        print(f"[LLM->Agent] location injected into communication_tool "
+                              f"action: {loc.get('address')}")
+
         execution_results: list[dict[str, Any]] = []
         if filtered:
             exec_task = dict(task)
