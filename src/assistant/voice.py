@@ -42,6 +42,9 @@ class VoiceAssistant:
         # 现场中文回答层(纯文本生成, 不调 LLM/TTS)
         from .scene_responder import SceneResponder
         self.scene_responder = SceneResponder()
+        # 智能路由(决策: scene=现场查询 / agent=救援决策 / None=交给命令路由)
+        from .voice_decision_router import VoiceDecisionRouter
+        self._decision_router = VoiceDecisionRouter()
 
     def handle(
         self,
@@ -60,11 +63,13 @@ class VoiceAssistant:
                     "intent": "unknown", "require_confirm": False, "confirmed": False,
                     "error": "no audio or text provided, or ASR 失败"}
 
-        # 救援现场查询分支(V4.4, 只读 SQLite, 不进 Agent/不调用永续 LLM):
-        # 命中现场/伤员/人员/风险/任务/救援等关键词 → context_tool 生成中文回答。
-        # 天气/医院/路线/发送报警等不含这些关键词, 仍走原命令路由, 不回归。
-        if self._is_rescue_query(text):
+        # 智能路由(V4.3): scene=现场查询(context_tool+SceneResponder) / agent=救援决策(AgentBridge)。
+        # 其余(None)仍走既有命令路由(天气/医院/路线/发送报警), 不回归。
+        _route = self._decision_router.route(text)
+        if _route == "scene":
             return self._answer_scene_context(text)
+        if _route == "agent":
+            return self._answer_agent(text)
 
         # 命令路由
         cmd = command_router.classify(text)
@@ -129,6 +134,30 @@ class VoiceAssistant:
             audio_url = (tts_res or {}).get("audio_url") if (tts_res or {}).get("ok") else None
         return {"question": question, "answer": answer, "audio_url": audio_url,
                 "intent": intent, "require_confirm": False, "confirmed": False}
+
+    def _answer_agent(self, question: str) -> Dict[str, Any]:
+        """救援决策问题 → 现有 AgentBridge(白名单 action), 不重新实现 Agent。
+
+        优先用 command_router 判出的 action intent; 否则落到只读救援分析 needs_rescue。
+        """
+        cmd = command_router.classify(question)
+        intent = cmd.get("intent")
+        if cmd.get("category") != "action" or intent not in ("needs_rescue", "max_risk",
+                                                             "send_alert", "notify_rescue"):
+            intent = "needs_rescue"
+        need_confirm = intent in command_router.DANGEROUS
+        bridge = self._bridge
+        res = bridge.handle(intent, confirmed=(not need_confirm))
+        answer = res.get("confirm_message") if (need_confirm and not res.get("confirmed")) \
+            else self._summarize_action(res, intent)
+        audio_url = None
+        if answer:
+            tts_res = self._tts(answer)
+            audio_url = (tts_res or {}).get("audio_url") if (tts_res or {}).get("ok") else None
+        return {"question": question, "answer": answer, "audio_url": audio_url,
+                "intent": f"decide_{intent}",
+                "require_confirm": bool(need_confirm),
+                "confirmed": bool(res.get("confirmed"))}
 
     def ask_text(self, question: str) -> Dict[str, Any]:
         """文本问答(跳过 ASR, 仅做回答 + TTS)。"""
