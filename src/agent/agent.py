@@ -555,6 +555,19 @@ class Agent:
         """
         context = context or {}
 
+        # V4.4: LLM→Agent 推理路径注入统一现场上下文(供 Planner 推理读取)。
+        # 保留原有字段(image_url/task_id), 新增 scene_context; 异常兜底{}+warning, 不阻断 Agent。
+        if "scene_context" not in context:
+            try:
+                from src.agent.context_provider import ContextProvider
+                sc = ContextProvider.get_scene_context()
+                context["scene_context"] = sc.get("scene_context") or {}
+            except Exception as exc:  # noqa: BLE001
+                import warnings
+                warnings.warn(
+                    f"[Agent] scene_context 注入失败({exc}), 使用空 scene_context")
+                context["scene_context"] = {}
+
         # Phase1 权威观测: (error, persons_map|None, observation|None)
         auth_error, persons_map, _obs = self.extract_authoritative_observation(llm_output)
         if auth_error:
