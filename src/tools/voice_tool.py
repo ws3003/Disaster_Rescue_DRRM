@@ -37,7 +37,7 @@ _TTS_API_KEY_ENV = "TTS_API_KEY"
 _TTS_BASE_URL_ENV = "TTS_BASE_URL"
 _TTS_PROVIDER_ENV = "TTS_PROVIDER"
 _TTS_MODEL_ENV = "TTS_MODEL"
-_TTS_DEFAULT_MODEL = "qwen-audio-3.1-tts-flash"
+_TTS_DEFAULT_MODEL = "qwen-tts"
 _TTS_VOICE_ENV = "TTS_VOICE"
 _TTS_DEFAULT_VOICE = "Cherry"
 _VOICE_AUDIO_DIR = "data/audio"
@@ -409,15 +409,22 @@ class VoiceTool(Tool):
             return {"ok": False, "audio_url": "", "error": str(exc)}
 
     def _tts_live(self, text: Optional[str] = None) -> Dict[str, Any]:
-        """百炼 Qwen-Audio-3.1-TTS(DashScope SDK SpeechSynthesizer)。"""
+        """百炼 Qwen TTS —— 走 dashscope.audio.qwen_tts (aigc/multimodal-generation)。
+
+        注: qwen-audio 系 TTS 模型不能在 cosyvoice 的 WebSocket 入口(dashscope.audio.tts)
+        调用(会 411); qwen_tts 入口返回 output.audio.url, 不再本地落盘。
+        """
         try:
             key = os.environ.get(_TTS_API_KEY_ENV, "").strip()
             model = os.environ.get(_TTS_MODEL_ENV, "").strip() or _TTS_DEFAULT_MODEL
-            voice = os.environ.get(_TTS_VOICE_ENV, "").strip() or "Cherry"
+            # 兼容旧环境变量: qwen-audio-3.1-tts-flash 需走 qwen_tts 入口, 自动映射
+            if model == "qwen-audio-3.1-tts-flash":
+                model = _TTS_DEFAULT_MODEL
+            voice = os.environ.get(_TTS_VOICE_ENV, "").strip() or _TTS_DEFAULT_VOICE
             if not key:
                 return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
             import dashscope  # 惰性加载
-            from dashscope.audio.tts import SpeechSynthesizer
+            from dashscope.audio.qwen_tts import SpeechSynthesizer
 
             dashscope.api_key = key
             result = SpeechSynthesizer.call(
@@ -425,15 +432,29 @@ class VoiceTool(Tool):
                 text=str(text or ""),
                 voice=voice,
             )
-            if not result or result.get_status_code() != 200:
+            url = self._extract_tts_url(result)
+            if not url:
                 return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
-            audio_bytes = result.get_audio_data()
-            if not audio_bytes:
-                return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
-            return {"ok": True, "audio_url": self._save_audio(audio_bytes, "mp3"),
-                    "provider": "aliyun"}
+            return {"ok": True, "audio_url": url, "provider": "qwen-tts"}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "audio_url": "", "error": "TTS service unavailable"}
+
+    @staticmethod
+    def _extract_tts_url(result: Any) -> str:
+        """从 qwen_tts 返回中取 output.audio.url(尽力兼容 dict/属性访问)。"""
+        try:
+            if result is None:
+                return ""
+            if isinstance(result, dict):
+                out = result.get("output") or {}
+                audio = out.get("audio") or {}
+                return str(audio.get("url") or "") if isinstance(audio, dict) else str(out.get("url") or "")
+            # 对象形态: result.output.audio.url
+            out = getattr(result, "output", None) or {}
+            audio = out.get("audio") or {}
+            return str(audio.get("url") or "") if isinstance(audio, dict) else str(out.get("url") or "")
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _save_audio(self, data: bytes, ext: str) -> str:
         """把音频字节保存到 data/voice/<ts>.<ext>, 返回绝对路径。"""
