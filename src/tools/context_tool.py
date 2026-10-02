@@ -50,21 +50,42 @@ def _recent_priority_map(db: Any, hours: int = 24) -> Dict[str, str]:
     return out
 
 
-def _latest_task(db: Any) -> Optional[dict]:
+def _latest_task(db: Any, window_minutes: int = 6) -> Optional[dict]:
+    """返回最近 window_minutes(默认6)分钟内创建的最新任务; 超时/无 → None。
+
+    在 Python 侧做时间比较(兼容 db 写入的无时区 ISO 'YYYY-MM-DDTHH:MM:SS'),
+    避免历史测试任务被当作"当前任务"返回。
+    """
+    from datetime import datetime, timedelta
+
     try:
         conn = db._connect()
         try:
             rows = conn.execute(
                 "SELECT task_id, trigger_event, plan_trace, status, created, finished "
-                "FROM tasks ORDER BY created DESC LIMIT 1"
+                "FROM tasks ORDER BY created DESC LIMIT ?",
+                (200,),
             ).fetchall()
         finally:
             conn.close()
-        if not rows:
-            return None
-        return dict(rows[0])
     except Exception:  # noqa: BLE001 — 表缺失/空库
         return None
+
+    cutoff = datetime.now() - timedelta(minutes=window_minutes)
+    for row in rows:
+        d = dict(row)
+        created = d.get("created")
+        if not created:
+            continue
+        try:
+            ts = datetime.fromisoformat(created)
+        except (TypeError, ValueError):
+            continue
+        if ts.tzinfo is not None:
+            ts = ts.replace(tzinfo=None)
+        if ts >= cutoff:
+            return d
+    return None
 
 
 def _latest_alert(db: Any) -> Optional[dict]:
