@@ -184,6 +184,7 @@ class CommunicationTool(Tool):
             "event_id": kwargs.get("event_id"),
             "task_id": kwargs.get("task_id"),
             "image_path": kwargs.get("image_path"),
+            "location": kwargs.get("location") if isinstance(kwargs.get("location"), dict) else None,
             "extra": extra,
         }
 
@@ -197,6 +198,11 @@ class CommunicationTool(Tool):
             lines.append(f"**事件**: {alert['event_id']}")
         if alert.get("task_id"):
             lines.append(f"**task**: {alert['task_id']}")
+        loc = alert.get("location")
+        if isinstance(loc, dict) and (loc.get("latitude") is not None
+                                      or loc.get("address")):
+            lines.append(f"**位置**: {loc.get('address') or '-'} "
+                         f"({loc.get('latitude')}, {loc.get('longitude')})")
         return "\n".join(lines)
 
     @staticmethod
@@ -236,6 +242,15 @@ class CommunicationTool(Tool):
             "来源:",
             "Raspberry Pi Edge AI",
         ]
+        loc = alert.get("location")
+        if isinstance(loc, dict) and (loc.get("latitude") is not None
+                                      or loc.get("address")):
+            lines += [
+                "",
+                "位置:",
+                f"{loc.get('address') or '-'}",
+                f"坐标: {loc.get('latitude')}, {loc.get('longitude')}",
+            ]
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
