@@ -174,7 +174,8 @@ def get_current_scene_context(
     db: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """返回当前灾害现场上下文(只读 SQLite)。任何异常 → 空健康兜底。"""
-    empty = {"persons": [], "latest_task": None, "latest_alert": None}
+    empty = {"persons": [], "latest_task": None, "latest_alert": None,
+             "latest_event": None, "snapshot_url": None, "risk_summary": {}}
     if db is None:
         try:
             from src.database.db import Database
@@ -212,7 +213,84 @@ def get_current_scene_context(
         "persons": persons,
         "latest_task": _latest_task(db),
         "latest_alert": _latest_alert(db),
+        "latest_event": _latest_event(db),
+        "snapshot_url": _latest_snapshot_url(db),
+        "risk_summary": _risk_summary(persons),
     }
+
+
+def _latest_event(db: Any) -> Optional[dict]:
+    """最近一条决策事件(memory_alert / high_risk_alert / llm_proposal)。"""
+    import json
+    try:
+        conn = db._connect()
+        try:
+            rows = conn.execute(
+                "SELECT event_id, ts, type, severity, person_id, payload "
+                "FROM events WHERE type IN ('memory_alert','high_risk_alert','llm_proposal') "
+                "ORDER BY ts DESC LIMIT 1"
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — 表缺失/空
+        return None
+    if not rows:
+        return None
+    row = dict(rows[0])
+    payload = row.get("payload")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = {}
+    return {
+        "type": row.get("type"),
+        "person_id": row.get("person_id"),
+        "severity": row.get("severity"),
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+
+
+def _risk_summary(persons: List[dict]) -> Dict[str, int]:
+    """按 priority 统计人员 HIGH/MEDIUM/LOW(缺失优先级按 LOW 记)。"""
+    summary = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for p in persons:
+        pri = str((p or {}).get("priority") or "LOW").upper()
+        if pri not in summary:
+            pri = "LOW"
+        summary[pri] += 1
+    return summary
+
+
+_SNAP_KEYS = ("image_url", "snapshot", "url")
+
+
+def _latest_snapshot_url(db: Any) -> Optional[str]:
+    """从最近事件 payload(image_url/snapshot/url)找最近一个有效公网 URL。"""
+    import json
+    try:
+        conn = db._connect()
+        try:
+            rows = conn.execute(
+                "SELECT payload FROM events ORDER BY ts DESC LIMIT 200"
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        return None
+    for (payload,) in rows:
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                payload = {}
+        if not isinstance(payload, dict):
+            continue
+        for k in _SNAP_KEYS:
+            v = payload.get(k)
+            if isinstance(v, str) and v.startswith(("http://", "https://")):
+                return v
+    return None
 
 
 if __name__ == "__main__":

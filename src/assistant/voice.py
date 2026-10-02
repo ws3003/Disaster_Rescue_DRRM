@@ -39,6 +39,9 @@ class VoiceAssistant:
         self._tts = tts or _vt.text_to_audio
         self._responder = responder or AssistantResponder()
         self._bridge = bridge or AgentBridge()
+        # 现场中文回答层(纯文本生成, 不调 LLM/TTS)
+        from .scene_responder import SceneResponder
+        self.scene_responder = SceneResponder()
 
     def handle(
         self,
@@ -115,12 +118,10 @@ class VoiceAssistant:
         return any(kw in t for kw in cls._RESCUE_KEYWORDS)
 
     def _answer_scene_context(self, question: str) -> Dict[str, Any]:
-        """用 context_tool 查 SQLite → 生成中文现场回答(复用本类 TTS 链路)。"""
+        """用 context_tool 查 SQLite → SceneResponder 生成中文现场回答(复用本类 TTS 链路)。"""
         from ..tools.context_tool import get_current_scene_context
         ctx = get_current_scene_context()
-        persons = ctx.get("persons") or []
-        latest_task = ctx.get("latest_task")
-        answer = self._render_scene_answer(persons, latest_task)
+        answer = self.scene_responder.answer_scene(ctx)
         intent = "scene_context"
         audio_url = None
         if answer:
@@ -128,25 +129,6 @@ class VoiceAssistant:
             audio_url = (tts_res or {}).get("audio_url") if (tts_res or {}).get("ok") else None
         return {"question": question, "answer": answer, "audio_url": audio_url,
                 "intent": intent, "require_confirm": False, "confirmed": False}
-
-    @staticmethod
-    def _render_scene_answer(persons: list, latest_task: dict) -> str:
-        """由 persons/latest_task 生成中文现场总结。"""
-        if not persons:
-            base = "当前没有检测到受困人员。"
-        else:
-            n = len(persons)
-            parts = [f"当前发现{n}名人员。"]
-            for p in persons:
-                state = p.get("state")
-                prior = p.get("priority") or "未知"
-                parts.append(f"人员{p.get('person_id')}: 状态{state}，风险等级{prior}。")
-            base = "".join(parts)
-        if latest_task:
-            task_id = latest_task.get("task_id")
-            status = latest_task.get("status")
-            base += f"已生成救援任务{task_id}（状态{status}）。"
-        return base
 
     def ask_text(self, question: str) -> Dict[str, Any]:
         """文本问答(跳过 ASR, 仅做回答 + TTS)。"""
