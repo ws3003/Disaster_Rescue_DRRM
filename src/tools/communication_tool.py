@@ -346,7 +346,10 @@ class CommunicationTool(Tool):
                 return s
             local = self._url_to_local_snap(s)
             if not local:
-                print("[IMAGE] 私网 URL 无法映射到本地文件, path=", s)
+                # 私网 URL 对应本地文件不存在 → 尝试下载到本地再传 OSS(V4.7)
+                local = self._download_snap_image(s)
+            if not local:
+                print("[IMAGE] 私网 URL 无法映射/下载到本地, path=", s)
                 return ""
             return self._upload_snap_image(local)
         # 本地文件路径
@@ -382,6 +385,34 @@ class CommunicationTool(Tool):
             return ""
         local = Path(PROJECT_ROOT) / "data" / "snapshots" / filename
         return str(local) if local.is_file() else ""
+
+    @classmethod
+    def _download_snap_image(cls, url: str) -> str:
+        """下载私网 /snapshots/ 图片到本地 data/snapshots/(仅供随后 OSS 上传); 失败返回 ""。
+
+        filename 取 basename 防路径穿越; 下载失败/坏图/空一律回退 ""。
+        """
+        if "/snapshots/" not in url:
+            return ""
+        filename = Path(url.rsplit("/snapshots/", 1)[1].split("?", 1)[0]).name
+        if not filename:
+            return ""
+        snap_dir = Path(PROJECT_ROOT) / "data" / "snapshots"
+        try:
+            import requests  # 惰性加载
+
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            snap_dir.mkdir(parents=True, exist_ok=True)
+            dest = snap_dir / filename
+            dest.write_bytes(resp.content)
+            print(f"[IMAGE] downloaded private url -> {dest}")
+            if dest.is_file() and dest.stat().st_size > 0:
+                return str(dest)
+            return ""
+        except Exception as exc:  # noqa: BLE001
+            print(f"[IMAGE] download failed ({url}): {exc}")
+            return ""
 
     @staticmethod
     def _upload_snap_image(local_path: str) -> str:
