@@ -211,12 +211,17 @@ class CommunicationTool(Tool):
         extra = alert.get("extra") or {}
         person = alert.get("person_id")
         state = alert.get("state") or extra.get("state") or "-"
-        priority = alert.get("priority") or alert.get("severity") or extra.get("priority") or "-"
+        # 环境危险等级(severity) 与 人员风险等级(priority) 独立, 禁止互相顶替。
+        severity = str(alert.get("severity") or extra.get("severity") or "HIGH")
+        priority = alert.get("priority") or extra.get("priority") or "-"
         risk = extra.get("risk_score") if extra.get("risk_score") is not None else (
             alert.get("risk_score") if alert.get("risk_score") is not None else "-"
         )
         lines = [
             "## 🚨 灾害报警",
+            "",
+            "环境危险等级:",
+            str(severity),
             "",
             "人员ID:",
             str(person if person is not None else "-"),
@@ -224,7 +229,7 @@ class CommunicationTool(Tool):
             "状态:",
             str(state),
             "",
-            "风险等级:",
+            "人员风险等级:",
             str(priority),
             "",
             "风险分数:",

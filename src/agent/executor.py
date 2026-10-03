@@ -703,13 +703,10 @@ class Executor:
             == "send_alert"
         ):
             # Planner -> CommunicationTool
+            # 场景危险等级(severity) 独立于 人员风险等级(priority):
+            # severity 缺省取场景档 HIGH, 绝不由 priority 顶替; priority 保留透传。
             if "severity" not in normalized:
-                normalized[
-                    "severity"
-                ] = normalized.get(
-                    "priority",
-                    "HIGH",
-                )
+                normalized["severity"] = "HIGH"
 
             # Preserve state and risk information.
             extra = dict(
