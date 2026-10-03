@@ -671,6 +671,12 @@ class Agent:
                         vargs["image_url"] = img_url
                         print(f"[LLM->Agent] image injected into vision_tool action: {img_url}")
 
+        # ── V4.3 报警融合门: person(Edge) 与 环境(env) 双维; 在送 Executor 前改写 send_alert。
+        try:
+            self._apply_alarm_fusion(filtered, context)
+        except Exception:  # noqa: BLE001 — 融合门失败不改写(保守保留), 不阻断 Agent
+            pass
+
         execution_results: list[dict[str, Any]] = []
         if filtered:
             exec_task = dict(task)
@@ -699,6 +705,37 @@ class Agent:
             "task": task, "execution": execution_results,
             "suppressed": len(suppressed), "rejected": len(rejected),
         }]
+
+    def _apply_alarm_fusion(self, actions: list, context: dict | None) -> None:
+        """报警融合门: person_priority 与 环境(environment_severity) 双维。
+
+        person_priority==HIGH                        → 保留 send_alert
+        environment_severity==HIGH                   → 保留 send_alert
+        person!=HIGH 且 env∈{LOW,MEDIUM}             → 降级 save_event(uncertain=false)
+        person!=HIGH 且 env==UNKNOWN(含缺失)          → 降级 save_event(uncertain=true, warning)
+
+        仅处理 send_alert; 不改写 severity/priority/risk_score 字段(DingTalk 三字段独立)。
+        """
+        context = context or {}
+        env_sev = str(context.get("environment_severity", "unknown")).upper()
+        for act in actions:
+            if not isinstance(act, dict) or act.get("tool") != "communication_tool":
+                continue
+            args = act.get("args") or {}
+            if args.get("action") != "send_alert":
+                continue
+            person_pri = str(args.get("priority") or "unknown").upper()
+            if person_pri == "HIGH" or env_sev == "HIGH":
+                continue  # 保留 send_alert
+            uncertain = (env_sev not in ("LOW", "MEDIUM"))  # UNKNOWN 或其它 → uncertain
+            act["tool"] = "database_tool"
+            act["args"] = dict(args)
+            act["args"]["action"] = "save_event"
+            act["args"]["uncertain"] = uncertain
+            if uncertain:
+                import warnings
+                warnings.warn(
+                    f"[AlarmFusion] person={person_pri} env={env_sev} → save_event(uncertain)")
 
     # ============================================================
     # Frame processing

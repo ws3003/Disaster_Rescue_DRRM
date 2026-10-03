@@ -358,7 +358,8 @@ def analyze(
         _cleanup_temp(temp_path)
 
     return sch.ok(vlm_output, llm_output,
-                  snapshot_url=snap_url if snap_url else _snapshot_url(request, snap_filename))
+                  snapshot_url=snap_url if snap_url else _snapshot_url(request, snap_filename),
+                  environment_severity=vlm_output.get("overall_severity", "unknown"))
 
 
 # ======================================================================

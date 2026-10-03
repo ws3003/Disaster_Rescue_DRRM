@@ -42,6 +42,9 @@ class AnalyzeResponse(BaseModel):
     snapshot_url: Optional[str] = Field(
         None, description="本次分析上传图片的 snapshot 可访问 URL (成功且已保存时非空)"
     )
+    environment_severity: Optional[str] = Field(
+        None, description="VLM 环境危险等级(透传 overall_severity); 缺失为 unknown; 仅供 Agent 融合门, 不覆盖 severity/priority"
+    )
 
 
 # ---- A→B authoritative observation Contract (Phase 2-B) ----
@@ -82,10 +85,12 @@ class AuthoritativeLLMOutput(BaseModel):
 
 # 便利构造器, 供 api.py 与测试复用
 def ok(vlm_output: Dict[str, Any], llm_output: Dict[str, Any],
-       snapshot_url: Optional[str] = None) -> AnalyzeResponse:
+       snapshot_url: Optional[str] = None,
+       environment_severity: Optional[str] = None) -> AnalyzeResponse:
     """成功响应; snapshot_url 为分析上传图片的可访问 URL (可空)。"""
     return AnalyzeResponse(success=True, vlm_output=vlm_output, llm_output=llm_output,
-                           error=None, snapshot_url=snapshot_url)
+                           error=None, snapshot_url=snapshot_url,
+                           environment_severity=environment_severity)
 
 
 def fail(message: str, status_code: Optional[int] = None) -> AnalyzeResponse:

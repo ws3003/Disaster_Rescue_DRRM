@@ -614,6 +614,9 @@ def run_loop(
                                     body.get("snapshot_url")
                                     or getattr(uploader, "last_snapshot_url", None),
                                 "task_id": iter_task_id,
+                                # V4.3 报警融合门: 环境危险等级(server 透传 VLM overall_severity)
+                                "environment_severity":
+                                    body.get("environment_severity") or "unknown",
                             },
                         )
                         print(
