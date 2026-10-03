@@ -719,6 +719,8 @@ class Agent:
         """
         context = context or {}
         env_sev = str(context.get("environment_severity", "unknown")).upper()
+        # 环境危险等级可信值(LOW/MEDIUM/HIGH) → 覆盖 args.severity; 否则(UNKNOWN)不动。
+        env_sev_valid = env_sev in ("LOW", "MEDIUM", "HIGH")
 
         person_exists = False
         person_high_exists = False
@@ -735,6 +737,14 @@ class Agent:
                     and str(args.get("action") or "") == "send_alert"
                     and str(args.get("priority") or "unknown").upper() == "HIGH"):
                 person_high_exists = True
+        # ▸ severity 去污染: 环境档可信时写回 args.severity(仅通信 send_alert), 不改 priority/risk/state。
+        if env_sev_valid:
+            for act in actions or []:
+                if not isinstance(act, dict) or act.get("tool") != "communication_tool":
+                    continue
+                args = act.get("args") or {}
+                if str(args.get("action") or "") == "send_alert":
+                    args["severity"] = env_sev
 
         # 1) 既有人员 send_alert 降级(仅处理非 HIGH 人员, 且环境非 HIGH 时降到 save_event)
         for act in actions or []:

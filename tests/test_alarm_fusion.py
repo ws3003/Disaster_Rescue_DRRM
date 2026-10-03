@@ -136,6 +136,31 @@ class AlarmFusionTest(unittest.TestCase):
         self.assertEqual(len(snd), 1)
         self.assertEqual(snd[0]["args"]["priority"], "HIGH")
 
+    def test_case13_env_low_person_high_severity_overridden(self):
+        a = _MyAgent()
+        actions = [_send_alert(priority="HIGH", severity="HIGH")]
+        a._apply_alarm_fusion(actions, {"environment_severity": "LOW"})
+        snd = self._snd(actions)
+        self.assertEqual(snd[0]["args"]["severity"], "LOW")     # 环境档覆盖
+        self.assertEqual(snd[0]["args"]["priority"], "HIGH")    # 人员档保留
+
+    def test_case14_env_medium_person_high_severity_overridden(self):
+        a = _MyAgent()
+        actions = [_send_alert(priority="HIGH")]
+        a._apply_alarm_fusion(actions, {"environment_severity": "MEDIUM"})
+        snd = self._snd(actions)
+        self.assertEqual(snd[0]["args"]["severity"], "MEDIUM")
+        self.assertEqual(snd[0]["args"]["priority"], "HIGH")
+
+    def test_case15_env_high_person_high_no_duplicate_env(self):
+        a = _MyAgent()
+        actions = [_send_alert(priority="HIGH", severity="HIGH")]
+        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
+        snd = self._snd(actions)
+        self.assertEqual(len(snd), 1)                     # 仅人员报警, 不重复环境
+        self.assertEqual(snd[0]["args"]["severity"], "HIGH")
+        self.assertEqual(snd[0]["args"]["priority"], "HIGH")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
