@@ -1,4 +1,4 @@
-"""V4.3 DingTalk 报警格式测试: 人员报警/环境报警分流。"""
+"""V4.3 DingTalk 报警格式测试: alert_type 驱动(人员/环境 模板分离)。"""
 import sys
 import unittest
 from pathlib import Path
@@ -15,48 +15,32 @@ def _md(alert):
 
 
 class DingtalkFormatTest(unittest.TestCase):
-    def test_person_alert_shows_fields(self):
-        md = _md({"timestamp": "t", "severity": "HIGH", "person_id": 1,
-                  "priority": "HIGH", "state": "Fall",
-                  "extra": {"risk_score": 0.92}})
-        self.assertIn("环境等级:", md)          # 人员报警用"环境等级", 不再用"环境危险等级"
-        self.assertIn("HIGH", md)
+    def test_person_alert_no_environment_fields(self):
+        md = _md({"alert_type": "person", "person_id": 1, "state": "Fall",
+                  "person_priority": "HIGH", "risk_score": 0.6})
+        self.assertIn("人员ID:", md)
+        self.assertIn("状态:", md)
+        self.assertIn("人员风险等级:", md)
+        self.assertIn("风险分数:", md)
+        # 禁环境字段
+        for banned in ("环境危险等级", "环境等级", "environment_severity", "环境高风险报警"):
+            self.assertNotIn(banned, md)
+
+    def test_environment_alert_no_person_fields(self):
+        md = _md({"alert_type": "environment", "environment_severity": "HIGH",
+                  "message": "检测到高危险灾害环境"})
+        self.assertIn("环境高风险报警", md)
+        self.assertIn("环境危险等级:", md)
+        self.assertIn("检测到高危险灾害环境", md)
+        # 禁人员字段
+        for banned in ("人员ID:", "状态:", "人员风险等级:", "风险分数:"):
+            self.assertNotIn(banned, md)
+
+    def test_person_alert_defaults_when_unkown_type(self):
+        # 未知/缺省 alert_type → 按人员模板(person_id 存在时)
+        md = _md({"person_id": 1, "state": "Fall", "person_priority": "HIGH"})
         self.assertIn("人员ID:", md)
         self.assertIn("人员风险等级:", md)
-        seg = md.split("人员风险等级:")[1].split("\n")[1].strip()
-        self.assertEqual(seg, "HIGH")
-        self.assertIn("Fall", md)
-        self.assertIn("0.92", md)
-
-    def test_person_alert_not_show_environment_risk_label(self):
-        # 人员报警不得包含"环境危险等级"标签
-        md = _md({"timestamp": "t", "person_id": 1, "state": "Fall",
-                  "severity": "HIGH", "risk_score": 0.6})
-        self.assertNotIn("环境危险等级", md)
-        self.assertIn("人员风险等级:", md)
-
-    def test_environment_alert_show_environment_risk_label(self):
-        # 环境报警仍显示"环境危险等级"
-        md = _md({"timestamp": "t", "severity": "HIGH",
-                  "message": "检测到高危险灾害环境", "person_id": None})
-        self.assertIn("环境高风险报警", md)
-        self.assertIn("环境危险等级:", md)
-
-    def test_env_alert_hides_person_fields(self):
-        md = _md({"timestamp": "t", "severity": "HIGH",
-                  "message": "检测到高危险灾害环境", "person_id": None})
-        self.assertIn("环境高风险报警", md)
-        self.assertIn("环境危险等级:", md)
-        self.assertNotIn("人员ID:", md)
-        self.assertNotIn("人员风险等级:", md)
-        self.assertNotIn("风险分数:", md)
-        self.assertIn("检测到高危险灾害环境", md)
-
-    def test_missing_fields_no_crash(self):
-        md = _md({})
-        self.assertIsInstance(md, str)
-        self.assertIn("环境高风险报警", md)   # 空 → 环境报警兜底(无人员字段)
-        self.assertIn("环境危险等级:", md)
 
 
 if __name__ == "__main__":

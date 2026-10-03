@@ -723,84 +723,69 @@ class Agent:
         }]
 
     def _apply_alarm_fusion(self, actions: list, context: dict | None) -> None:
-        """报警融合门: 环境风险仅在与"检测到人员"且无人员 HIGH 报警时, 才生成环境报警。
+        """报警融合门(新报警矩阵): person / environment 两类独立。
 
-        - 已存在 person_priority==HIGH 的 send_alert → 保留, 不生成环境报警(人员 HIGH 已覆盖)
-        - 环境 HIGH + 有人员 + 无 person HIGH send_alert → 生成环境级 send_alert
-        - 环境 HIGH + 无人员 → 不生成环境报警(仅记录/保留原动作)
-        - person!=HIGH 且 env∈{LOW,MEDIUM} → 降级 save_event(uncertain=false)
-        - env UNKNOWN(含缺失) → 降级 save_event(uncertain=true, warning)
+        规则:
+          - person alert       ⇔ person_exists 且 person.priority==HIGH
+          - environment alert  ⇔ person_exists 且 environment_severity==HIGH
+          - 二者独立; person HIGH + env HIGH → 同时保留人员 + 生成环境(不再去重)
+          - 无人 + env HIGH → 禁止生成环境报警
+          - 其余 → 不产生通信 send_alert(保留已有非通信动作)
 
-        仅处理 send_alert; 不改写 severity/priority/risk_score 字段(DingTalk 三字段独立)。
+        原地把 actions 规整为"仅保留 person/env 两类 send_alert(打 alert_type)"。
         """
         context = context or {}
         env_sev = str(context.get("environment_severity", "unknown")).upper()
-        # 环境危险等级可信值(LOW/MEDIUM/HIGH) → 覆盖 args.severity; 否则(UNKNOWN)不动。
-        env_sev_valid = env_sev in ("LOW", "MEDIUM", "HIGH")
 
         person_exists = False
-        person_high_exists = False
-        had_send_alert = False
+        person_high = False
+        first_person = None       # 首个带人员信息的 args(供 person alert)
         for act in actions or []:
             if not isinstance(act, dict):
                 continue
             args = act.get("args") or {}
             if (args.get("person_id") is not None
                     or args.get("priority") is not None
-                    or (act.get("tool") == "communication_tool"
-                        and args.get("state") not in (None, ""))):
+                    or args.get("state") not in (None, "")):
+                if not person_exists:
+                    first_person = dict(args)
                 person_exists = True
-            if (act.get("tool") == "communication_tool"
-                    and str(args.get("action") or "") == "send_alert"):
-                had_send_alert = True
                 if str(args.get("priority") or "unknown").upper() == "HIGH":
-                    person_high_exists = True
-        # ▸ severity 去污染: 环境档可信时写回 args.severity(仅通信 send_alert), 不改 priority/risk/state。
-        if env_sev_valid:
-            for act in actions or []:
-                if not isinstance(act, dict) or act.get("tool") != "communication_tool":
-                    continue
-                args = act.get("args") or {}
-                if str(args.get("action") or "") == "send_alert":
-                    args["severity"] = env_sev
+                    person_high = True
 
-        # 1) 既有人员 send_alert 降级(仅处理非 HIGH 人员, 且环境非 HIGH 时降到 save_event)
-        for act in actions or []:
-            if not isinstance(act, dict) or act.get("tool") != "communication_tool":
-                continue
-            args = act.get("args") or {}
-            if str(args.get("action") or "") != "send_alert":
-                continue
-            person_pri = str(args.get("priority") or "unknown").upper()
-            if person_pri == "HIGH" or env_sev == "HIGH":
-                continue  # 保留 send_alert
-            uncertain = (env_sev not in ("LOW", "MEDIUM"))  # UNKNOWN 或其它 → uncertain
-            act["tool"] = "database_tool"
-            act["args"] = dict(args)
-            act["args"]["action"] = "save_event"
-            act["args"]["uncertain"] = uncertain
-            if uncertain:
-                import warnings
-                warnings.warn(
-                    f"[AlarmFusion] person={person_pri} env={env_sev} → save_event(uncertain)")
-
-        # 2) 环境高危险 + 有人员 + 无 person HIGH 报警 且 计划中无任何 send_alert → 生成环境级报警。
-        #    若已有 send_alert(env 已通过 severity 覆写承载), 不追加环境, 避免重复报警。
-        if env_sev == "HIGH" and person_exists and not person_high_exists \
-                and not had_send_alert:
-            actions.append({
+        new_actions: list = []
+        # 1) person 报警(仅人员风险)
+        if person_exists and person_high:
+            pa = dict(first_person or {})
+            pa["action"] = "send_alert"
+            pa["alert_type"] = "person"
+            new_actions.append({"tool": "communication_tool", "args": pa})
+        # 2) environment 报警(仅当检测到人员)
+        if person_exists and env_sev == "HIGH":
+            new_actions.append({
                 "tool": "communication_tool",
                 "args": {
                     "action": "send_alert",
+                    "alert_type": "environment",
                     "person_id": None,
-                    "severity": "HIGH",
-                    "priority": None,
-                    "risk_score": None,
-                    "state": None,
+                    "environment_severity": "HIGH",
                     "title": "环境高风险报警",
                     "message": "检测到高危险灾害环境，请关注现场情况",
                 },
             })
+
+        # 3) 保留非通信(非 send_alert)既有动作; 通信 send_alert 已由上面规整取代
+        for act in actions or []:
+            if not isinstance(act, dict):
+                new_actions.append(act)
+                continue
+            args = act.get("args") or {}
+            if act.get("tool") == "communication_tool" \
+                    and str(args.get("action") or "") == "send_alert":
+                continue
+            new_actions.append(act)
+
+        actions[:] = new_actions
 
     # ============================================================
     # Frame processing

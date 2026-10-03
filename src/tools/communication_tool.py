@@ -204,33 +204,23 @@ class CommunicationTool(Tool):
 
     @staticmethod
     def _build_dingtalk_markdown(alert: dict[str, Any]) -> str:
-        """钉钉 markdown 报警模板。
+        """钉钉 markdown 报警模板(按 alert_type 分流)。
 
         首行必须含"灾害报警/环境报警"(钉钉安全关键词, 否则 errcode 310000 拒绝)。
-        取值优先读 alert 顶层, 再回退 extra(Agent/Executor 可能把
-        state/risk_score/priority 放在 extra 内)。
-        两种展示: 有人员信息 → 人员报警; 无人员信息 → 环境报警(不渲染空人员字段)。
+        Person 报警: 仅人员信息(人员ID/状态/人员风险等级/风险分数/时间/来源), 禁环境字段。
+        Environment 报警: 仅环境信息(环境危险等级/message/时间/来源), 禁人员字段。
         """
         ts = alert.get("timestamp") or datetime.now().isoformat(timespec="seconds")
-        extra = alert.get("extra") or {}
-        person = alert.get("person_id")
-        state = alert.get("state") or extra.get("state") or "-"
-        # 环境危险等级(severity) 与 人员风险等级(priority) 独立, 禁止互相顶替。
-        severity = str(alert.get("severity") or extra.get("severity") or "HIGH")
-        priority = alert.get("priority") or extra.get("priority") or "-"
-        risk = extra.get("risk_score") if extra.get("risk_score") is not None else (
-            alert.get("risk_score") if alert.get("risk_score") is not None else "-"
-        )
-        has_person = (person is not None
-                      or state != "-" or priority != "-" or risk != "-")
+        alert_type = str(alert.get("alert_type") or "").lower()
 
-        if not has_person:
-            # 环境级报警: 不显示空人员字段
+        if alert_type == "environment":
+            env_sev = str(alert.get("environment_severity")
+                          or alert.get("severity") or "HIGH")
             return "\n".join([
                 "## 🚨 环境高风险报警",
                 "",
                 "环境危险等级:",
-                str(severity),
+                env_sev,
                 "",
                 str(alert.get("message") or ""),
                 "",
@@ -241,6 +231,15 @@ class CommunicationTool(Tool):
                 "Raspberry Pi Edge AI",
             ])
 
+        # person 报警(默认走人员信息)
+        extra = alert.get("extra") or {}
+        person = alert.get("person_id")
+        state = alert.get("state") or extra.get("state") or "-"
+        priority = alert.get("person_priority") or alert.get("priority") \
+            or extra.get("priority") or "-"
+        risk = extra.get("risk_score") if extra.get("risk_score") is not None else (
+            alert.get("risk_score") if alert.get("risk_score") is not None else "-"
+        )
         return "\n".join([
             "## 🚨 灾害报警",
             "",
@@ -255,9 +254,6 @@ class CommunicationTool(Tool):
             "",
             "风险分数:",
             str(risk),
-            "",
-            "环境等级:",
-            str(severity),
             "",
             "时间:",
             ts,

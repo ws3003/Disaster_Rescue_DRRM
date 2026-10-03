@@ -1,6 +1,17 @@
-"""V4.3 报警融合门测试: person_priority 与 environment_severity 双维。"""
+"""V4.3 报警融合门测试(新报警矩阵: person/environment 独立)。
+
+|person|priority|env|result|
+|无|-|HIGH|0|
+|无|-|LOW|0|
+|有|LOW|LOW|0|
+|有|HIGH|LOW|person|
+|有|LOW|HIGH|environment|
+|有|HIGH|HIGH|person+environment|
+"""
+import collections
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -11,11 +22,14 @@ if str(ROOT) not in sys.path:
 from src.agent.agent import Agent  # noqa: E402
 
 
-def _send_alert(action="send_alert", priority="LOW", severity="LOW",
-                person_id=1, **kw):
+def _person(priority="LOW", person_id=1, state="Fall"):
     return {"tool": "communication_tool",
-            "args": {"action": action, "person_id": person_id,
-                     "priority": priority, "severity": severity, "message": "m", **kw}}
+            "args": {"action": "send_alert", "person_id": person_id,
+                     "priority": priority, "state": state, "message": "m"}}
+
+
+def _noperson():
+    return {"tool": "database_tool", "args": {"action": "save_event"}}
 
 
 class _MyAgent(Agent):
@@ -23,166 +37,59 @@ class _MyAgent(Agent):
         pass
 
 
-def _run(person_priority, env):
-    a = _MyAgent()
-    actions = [_send_alert(priority=person_priority)]
-    a._apply_alarm_fusion(actions, {"environment_severity": env})
-    return actions
+def _snd(actions, alert_type=None):
+    out = [x for x in actions
+           if x.get("tool") == "communication_tool"
+           and (x.get("args") or {}).get("action") == "send_alert"]
+    if alert_type:
+        out = [x for x in out if (x.get("args") or {}).get("alert_type") == alert_type]
+    return out
 
 
-def _is_send(actions):
-    a = actions[0]
-    return (a.get("tool") == "communication_tool"
-            and (a.get("args") or {}).get("action") == "send_alert")
-
-
-class AlarmFusionTest(unittest.TestCase):
-    def test_case1_low_low_downgrade(self):
-        r = _run("LOW", "LOW")
-        self.assertFalse(_is_send(r))
-        self.assertTrue(r[0]["args"]["action"] == "save_event")
-        self.assertFalse(r[0]["args"]["uncertain"])
-
-    def test_case2_low_high_send(self):
-        self.assertTrue(_is_send(_run("LOW", "HIGH")))
-
-    def test_case3_high_low_send(self):
-        self.assertTrue(_is_send(_run("HIGH", "LOW")))
-
-    def test_case4_high_high_send(self):
-        self.assertTrue(_is_send(_run("HIGH", "HIGH")))
-
-    def test_case5_low_unknown_downgrade_uncertain(self):
-        r = _run("LOW", "unknown")
-        self.assertFalse(_is_send(r))
-        self.assertTrue(r[0]["args"]["action"] == "save_event")
-        self.assertTrue(r[0]["args"]["uncertain"])
-        self.assertTrue(r[0]["tool"] == "database_tool")
-
-    def test_case6_low_medium_downgrade(self):
-        r = _run("LOW", "MEDIUM")
-        self.assertFalse(_is_send(r))
-        self.assertFalse(r[0]["args"]["uncertain"])
-
-    def test_case7_low_high_no_send_generates_env_alert(self):
-        # env HIGH 且计划中无 send_alert(仅 save_event) → Agent 生成环境级 send_alert
+class AlarmFusionMatrixTest(unittest.TestCase):
+    def _run(self, actions, env):
         a = _MyAgent()
-        actions = [_send_alert(action="save_event", priority="LOW")]  # 非 send_alert
-        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
-        snd = [x for x in actions
-               if x.get("tool") == "communication_tool"
-               and (x.get("args") or {}).get("action") == "send_alert"]
-        self.assertEqual(len(snd), 1)
-        self.assertIsNone(snd[0]["args"]["person_id"])
-        self.assertEqual(snd[0]["args"]["severity"], "HIGH")
-        self.assertEqual(snd[0]["args"]["title"], "环境高风险报警")
-
-    def test_case8_low_low_no_send_not_generated(self):
-        # env LOW 且无 send_alert → 不生成报警
-        a = _MyAgent()
-        actions = [_send_alert(action="save_event", priority="LOW")]
-        a._apply_alarm_fusion(actions, {"environment_severity": "LOW"})
-        self.assertFalse(any(
-            x.get("tool") == "communication_tool"
-            and (x.get("args") or {}).get("action") == "send_alert"
-            for x in actions))
-
-    @staticmethod
-    def _run_empty_actions(env):
-        a = _MyAgent()
-        actions = []
         a._apply_alarm_fusion(actions, {"environment_severity": env})
         return actions
 
+    def test_no_person_env_high_zero(self):
+        r = self._run([_noperson()], "HIGH")
+        self.assertEqual(_snd(r), [])
+
+    def test_no_person_env_low_zero(self):
+        r = self._run([_noperson()], "LOW")
+        self.assertEqual(_snd(r), [])
+
+    def test_person_low_env_low_zero(self):
+        r = self._run([_person("LOW")], "LOW")
+        self.assertEqual(_snd(r), [])
+
+    def test_person_low_env_high_env_only(self):
+        r = self._run([_person("LOW")], "HIGH")
+        self.assertEqual(len(_snd(r, "environment")), 1)
+        self.assertEqual(_snd(r, "person"), [])
+
+    def test_person_high_env_low_person_only(self):
+        r = self._run([_person("HIGH")], "LOW")
+        self.assertEqual(len(_snd(r, "person")), 1)
+        self.assertEqual(_snd(r, "environment"), [])
+
+    def test_person_high_env_high_both(self):
+        r = self._run([_person("HIGH")], "HIGH")
+        self.assertEqual(len(_snd(r, "person")), 1)
+        self.assertEqual(len(_snd(r, "environment")), 1)
+
+
+class AlarmFusionRulePathTest(unittest.TestCase):
+    """process_trigger(规则路径) 也经融合门。"""
+
     @staticmethod
-    def _snd(actions):
-        return [x for x in actions
-                if x.get("tool") == "communication_tool"
-                and (x.get("args") or {}).get("action") == "send_alert"]
-
-    def test_case9_env_high_no_person_no_alarm(self):
-        # 无人员信息 + env HIGH → 不生成环境报警
-        a = _MyAgent()
-        actions = [{"tool": "database_tool", "args": {"action": "save_event"}}]
-        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
-        self.assertEqual(self._snd(actions), [])
-
-    def test_case10_person_low_env_high_generates_env(self):
-        # 有人员(LOW) + env HIGH + 无 person HIGH → 生成环境 send_alert
-        a = _MyAgent()
-        actions = [{"tool": "database_tool",
-                    "args": {"action": "save_event", "person_id": 1, "priority": "LOW"}}]
-        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
-        snd = self._snd(actions)
-        self.assertEqual(len(snd), 1)
-        self.assertIsNone(snd[0]["args"]["person_id"])
-        self.assertEqual(snd[0]["args"]["severity"], "HIGH")
-
-    def test_case11_person_high_env_high_no_env_duplicate(self):
-        # 已存在 person HIGH send_alert + env HIGH → 只保留人员报警, 不生成环境报警
-        a = _MyAgent()
-        actions = [_send_alert(priority="HIGH")]
-        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
-        snd = self._snd(actions)
-        self.assertEqual(len(snd), 1)
-        self.assertEqual(snd[0]["args"]["priority"], "HIGH")
-        self.assertEqual(snd[0]["args"]["person_id"], 1)
-
-    def test_case12_person_high_env_low_only_person(self):
-        a = _MyAgent()
-        actions = [_send_alert(priority="HIGH")]
-        a._apply_alarm_fusion(actions, {"environment_severity": "LOW"})
-        snd = self._snd(actions)
-        self.assertEqual(len(snd), 1)
-        self.assertEqual(snd[0]["args"]["priority"], "HIGH")
-
-    def test_case13_env_low_person_high_severity_overridden(self):
-        a = _MyAgent()
-        actions = [_send_alert(priority="HIGH", severity="HIGH")]
-        a._apply_alarm_fusion(actions, {"environment_severity": "LOW"})
-        snd = self._snd(actions)
-        self.assertEqual(snd[0]["args"]["severity"], "LOW")     # 环境档覆盖
-        self.assertEqual(snd[0]["args"]["priority"], "HIGH")    # 人员档保留
-
-    def test_case14_env_medium_person_high_severity_overridden(self):
-        a = _MyAgent()
-        actions = [_send_alert(priority="HIGH")]
-        a._apply_alarm_fusion(actions, {"environment_severity": "MEDIUM"})
-        snd = self._snd(actions)
-        self.assertEqual(snd[0]["args"]["severity"], "MEDIUM")
-        self.assertEqual(snd[0]["args"]["priority"], "HIGH")
-
-    def test_case15_env_high_person_high_no_duplicate_env(self):
-        a = _MyAgent()
-        actions = [_send_alert(priority="HIGH", severity="HIGH")]
-        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
-        snd = self._snd(actions)
-        self.assertEqual(len(snd), 1)                     # 仅人员报警, 不重复环境
-        self.assertEqual(snd[0]["args"]["severity"], "HIGH")
-        self.assertEqual(snd[0]["args"]["priority"], "HIGH")
-
-    def test_case16_env_high_person_low_existing_send_single(self):
-        # env HIGH + person LOW + 已有 person send_alert → 不追加环境, 恰好 1 条 send
-        a = _MyAgent()
-        actions = [_send_alert(priority="LOW")]
-        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
-        snd = self._snd(actions)
-        self.assertEqual(len(snd), 1)                     # 不产生第二条环境报警
-        self.assertEqual(snd[0]["args"]["severity"], "HIGH")   # env 已写入既有 person send
-        self.assertEqual(snd[0]["args"]["person_id"], 1)       # 人员字段保留
-
-    # ---------- 规则路径(process_trigger) 也经融合门 ----------
-    @staticmethod
-    def _rule_agent(actions, plan_extra=None):
-        from datetime import datetime as _dt
-        import collections
+    def _rule_agent(actions):
         a = _MyAgent()
         plan = {"ok": True, "status": "planned", "task_id": "T1",
                 "trigger_type": "HIGH_RISK", "person_id": 1,
                 "priority": "HIGH", "risk_score": 0.9,
-                "actions": actions, "created": _dt.now().isoformat()}
-        if plan_extra:
-            plan.update(plan_extra)
+                "actions": actions, "created": datetime.now().isoformat()}
         a.planner = mock.MagicMock()
         a.planner.plan.return_value = plan
         a.memory = mock.MagicMock()
@@ -195,26 +102,12 @@ class AlarmFusionTest(unittest.TestCase):
         return {"trigger_type": "HIGH_RISK", "person_id": 1,
                 "state": "Fall", "priority": "HIGH", "risk_score": 0.9}
 
-    def test_rule_env_low_person_high_severity_corrected(self):
-        a = self._rule_agent([_send_alert(priority="HIGH", severity="HIGH")])
+    def test_rule_person_high_env_low_person_alert(self):
+        a = self._rule_agent([_person("HIGH")])
         a.process_trigger(self._trigger(), context={"environment_severity": "LOW"})
         plan = a.executor.execute.call_args[0][0]
-        snd = self._snd(plan["actions"])
-        self.assertEqual(snd[0]["args"]["severity"], "LOW")      # 环境 LOW 覆写
-        self.assertEqual(snd[0]["args"]["priority"], "HIGH")     # 人员档保留
-
-    def test_rule_env_high_person_high_no_duplicate(self):
-        a = self._rule_agent([_send_alert(priority="HIGH", severity="HIGH")])
-        a.process_trigger(self._trigger(), context={"environment_severity": "HIGH"})
-        plan = a.executor.execute.call_args[0][0]
-        self.assertEqual(len(self._snd(plan["actions"])), 1)     # 仅人员, 无重复环境
-
-    def test_rule_env_high_no_person_no_alarm(self):
-        a = self._rule_agent([{"tool": "database_tool",
-                               "args": {"action": "save_event"}}])  # 无人员
-        a.process_trigger(self._trigger(), context={"environment_severity": "HIGH"})
-        plan = a.executor.execute.call_args[0][0]
-        self.assertEqual(self._snd(plan["actions"]), [])         # 不生成环境报警
+        self.assertEqual(len(_snd(plan["actions"], "person")), 1)
+        self.assertEqual(_snd(plan["actions"], "environment"), [])
 
 
 if __name__ == "__main__":
