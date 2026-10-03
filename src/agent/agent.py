@@ -707,27 +707,42 @@ class Agent:
         }]
 
     def _apply_alarm_fusion(self, actions: list, context: dict | None) -> None:
-        """报警融合门: person_priority 与 环境(environment_severity) 双维。
+        """报警融合门: 环境风险仅在与"检测到人员"且无人员 HIGH 报警时, 才生成环境报警。
 
-        person_priority==HIGH                        → 保留 send_alert
-        environment_severity==HIGH                   → 保留已有 send_alert;
-                                                    若 actions 无 send_alert → 生成环境级 send_alert
-        person!=HIGH 且 env∈{LOW,MEDIUM}             → 降级 save_event(uncertain=false)
-        person!=HIGH 且 env==UNKNOWN(含缺失)          → 降级 save_event(uncertain=true, warning)
+        - 已存在 person_priority==HIGH 的 send_alert → 保留, 不生成环境报警(人员 HIGH 已覆盖)
+        - 环境 HIGH + 有人员 + 无 person HIGH send_alert → 生成环境级 send_alert
+        - 环境 HIGH + 无人员 → 不生成环境报警(仅记录/保留原动作)
+        - person!=HIGH 且 env∈{LOW,MEDIUM} → 降级 save_event(uncertain=false)
+        - env UNKNOWN(含缺失) → 降级 save_event(uncertain=true, warning)
 
         仅处理 send_alert; 不改写 severity/priority/risk_score 字段(DingTalk 三字段独立)。
         """
         context = context or {}
         env_sev = str(context.get("environment_severity", "unknown")).upper()
 
-        had_send_alert = False
-        for act in actions:
+        person_exists = False
+        person_high_exists = False
+        for act in actions or []:
+            if not isinstance(act, dict):
+                continue
+            args = act.get("args") or {}
+            if (args.get("person_id") is not None
+                    or args.get("priority") is not None
+                    or (act.get("tool") == "communication_tool"
+                        and args.get("state") not in (None, ""))):
+                person_exists = True
+            if (act.get("tool") == "communication_tool"
+                    and str(args.get("action") or "") == "send_alert"
+                    and str(args.get("priority") or "unknown").upper() == "HIGH"):
+                person_high_exists = True
+
+        # 1) 既有人员 send_alert 降级(仅处理非 HIGH 人员, 且环境非 HIGH 时降到 save_event)
+        for act in actions or []:
             if not isinstance(act, dict) or act.get("tool") != "communication_tool":
                 continue
             args = act.get("args") or {}
-            if args.get("action") != "send_alert":
+            if str(args.get("action") or "") != "send_alert":
                 continue
-            had_send_alert = True
             person_pri = str(args.get("priority") or "unknown").upper()
             if person_pri == "HIGH" or env_sev == "HIGH":
                 continue  # 保留 send_alert
@@ -741,9 +756,8 @@ class Agent:
                 warnings.warn(
                     f"[AlarmFusion] person={person_pri} env={env_sev} → save_event(uncertain)")
 
-        # 环境高危险: 若计划中无任何 send_alert, 则在 Agent 决策层生成环境级报警。
-        # 人员档可空(None), DingTalk 显示"人员ID: -"; title/message 满足 communication 必填。
-        if env_sev == "HIGH" and not had_send_alert:
+        # 2) 环境高危险且检测到人员、且无 person HIGH 报警 → 生成环境级报警
+        if env_sev == "HIGH" and person_exists and not person_high_exists:
             actions.append({
                 "tool": "communication_tool",
                 "args": {

@@ -94,6 +94,48 @@ class AlarmFusionTest(unittest.TestCase):
         a._apply_alarm_fusion(actions, {"environment_severity": env})
         return actions
 
+    @staticmethod
+    def _snd(actions):
+        return [x for x in actions
+                if x.get("tool") == "communication_tool"
+                and (x.get("args") or {}).get("action") == "send_alert"]
+
+    def test_case9_env_high_no_person_no_alarm(self):
+        # 无人员信息 + env HIGH → 不生成环境报警
+        a = _MyAgent()
+        actions = [{"tool": "database_tool", "args": {"action": "save_event"}}]
+        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
+        self.assertEqual(self._snd(actions), [])
+
+    def test_case10_person_low_env_high_generates_env(self):
+        # 有人员(LOW) + env HIGH + 无 person HIGH → 生成环境 send_alert
+        a = _MyAgent()
+        actions = [{"tool": "database_tool",
+                    "args": {"action": "save_event", "person_id": 1, "priority": "LOW"}}]
+        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
+        snd = self._snd(actions)
+        self.assertEqual(len(snd), 1)
+        self.assertIsNone(snd[0]["args"]["person_id"])
+        self.assertEqual(snd[0]["args"]["severity"], "HIGH")
+
+    def test_case11_person_high_env_high_no_env_duplicate(self):
+        # 已存在 person HIGH send_alert + env HIGH → 只保留人员报警, 不生成环境报警
+        a = _MyAgent()
+        actions = [_send_alert(priority="HIGH")]
+        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
+        snd = self._snd(actions)
+        self.assertEqual(len(snd), 1)
+        self.assertEqual(snd[0]["args"]["priority"], "HIGH")
+        self.assertEqual(snd[0]["args"]["person_id"], 1)
+
+    def test_case12_person_high_env_low_only_person(self):
+        a = _MyAgent()
+        actions = [_send_alert(priority="HIGH")]
+        a._apply_alarm_fusion(actions, {"environment_severity": "LOW"})
+        snd = self._snd(actions)
+        self.assertEqual(len(snd), 1)
+        self.assertEqual(snd[0]["args"]["priority"], "HIGH")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
