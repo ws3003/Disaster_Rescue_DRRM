@@ -710,7 +710,8 @@ class Agent:
         """报警融合门: person_priority 与 环境(environment_severity) 双维。
 
         person_priority==HIGH                        → 保留 send_alert
-        environment_severity==HIGH                   → 保留 send_alert
+        environment_severity==HIGH                   → 保留已有 send_alert;
+                                                    若 actions 无 send_alert → 生成环境级 send_alert
         person!=HIGH 且 env∈{LOW,MEDIUM}             → 降级 save_event(uncertain=false)
         person!=HIGH 且 env==UNKNOWN(含缺失)          → 降级 save_event(uncertain=true, warning)
 
@@ -718,12 +719,15 @@ class Agent:
         """
         context = context or {}
         env_sev = str(context.get("environment_severity", "unknown")).upper()
+
+        had_send_alert = False
         for act in actions:
             if not isinstance(act, dict) or act.get("tool") != "communication_tool":
                 continue
             args = act.get("args") or {}
             if args.get("action") != "send_alert":
                 continue
+            had_send_alert = True
             person_pri = str(args.get("priority") or "unknown").upper()
             if person_pri == "HIGH" or env_sev == "HIGH":
                 continue  # 保留 send_alert
@@ -736,6 +740,23 @@ class Agent:
                 import warnings
                 warnings.warn(
                     f"[AlarmFusion] person={person_pri} env={env_sev} → save_event(uncertain)")
+
+        # 环境高危险: 若计划中无任何 send_alert, 则在 Agent 决策层生成环境级报警。
+        # 人员档可空(None), DingTalk 显示"人员ID: -"; title/message 满足 communication 必填。
+        if env_sev == "HIGH" and not had_send_alert:
+            actions.append({
+                "tool": "communication_tool",
+                "args": {
+                    "action": "send_alert",
+                    "person_id": None,
+                    "severity": "HIGH",
+                    "priority": None,
+                    "risk_score": None,
+                    "state": None,
+                    "title": "环境高风险报警",
+                    "message": "检测到高危险灾害环境，请关注现场情况",
+                },
+            })
 
     # ============================================================
     # Frame processing

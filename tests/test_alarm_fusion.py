@@ -64,6 +64,36 @@ class AlarmFusionTest(unittest.TestCase):
         self.assertFalse(_is_send(r))
         self.assertFalse(r[0]["args"]["uncertain"])
 
+    def test_case7_low_high_no_send_generates_env_alert(self):
+        # env HIGH 且计划中无 send_alert(仅 save_event) → Agent 生成环境级 send_alert
+        a = _MyAgent()
+        actions = [_send_alert(action="save_event", priority="LOW")]  # 非 send_alert
+        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
+        snd = [x for x in actions
+               if x.get("tool") == "communication_tool"
+               and (x.get("args") or {}).get("action") == "send_alert"]
+        self.assertEqual(len(snd), 1)
+        self.assertIsNone(snd[0]["args"]["person_id"])
+        self.assertEqual(snd[0]["args"]["severity"], "HIGH")
+        self.assertEqual(snd[0]["args"]["title"], "环境高风险报警")
+
+    def test_case8_low_low_no_send_not_generated(self):
+        # env LOW 且无 send_alert → 不生成报警
+        a = _MyAgent()
+        actions = [_send_alert(action="save_event", priority="LOW")]
+        a._apply_alarm_fusion(actions, {"environment_severity": "LOW"})
+        self.assertFalse(any(
+            x.get("tool") == "communication_tool"
+            and (x.get("args") or {}).get("action") == "send_alert"
+            for x in actions))
+
+    @staticmethod
+    def _run_empty_actions(env):
+        a = _MyAgent()
+        actions = []
+        a._apply_alarm_fusion(actions, {"environment_severity": env})
+        return actions
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
