@@ -414,6 +414,22 @@ class Agent:
             }
 
         # --------------------------------------------------------
+        # V4.3 Alarm Fusion (规则路径): 送 Executor 前经融合门。
+        # --------------------------------------------------------
+        # 临时 debug: 打印 fusion 前后通信 send_alert 的 severity/priority。
+        _pre = [((a.get("args") or {}).get("severity"),
+                 (a.get("args") or {}).get("priority"))
+                for a in actions
+                if (a.get("args") or {}).get("action") == "send_alert"]
+        self._apply_alarm_fusion(actions, context)
+        _post = [((a.get("args") or {}).get("severity"),
+                  (a.get("args") or {}).get("priority"))
+                 for a in actions
+                 if a.get("tool") == "communication_tool"
+                 and (a.get("args") or {}).get("action") == "send_alert"]
+        print(f"[AlarmFusion][rule] pre={_pre} post={_post}")
+
+        # --------------------------------------------------------
         # Executor
         # --------------------------------------------------------
 

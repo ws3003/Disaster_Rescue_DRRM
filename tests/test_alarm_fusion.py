@@ -161,6 +161,51 @@ class AlarmFusionTest(unittest.TestCase):
         self.assertEqual(snd[0]["args"]["severity"], "HIGH")
         self.assertEqual(snd[0]["args"]["priority"], "HIGH")
 
+    # ---------- 规则路径(process_trigger) 也经融合门 ----------
+    @staticmethod
+    def _rule_agent(actions, plan_extra=None):
+        from datetime import datetime as _dt
+        import collections
+        a = _MyAgent()
+        plan = {"ok": True, "status": "planned", "task_id": "T1",
+                "trigger_type": "HIGH_RISK", "person_id": 1,
+                "priority": "HIGH", "risk_score": 0.9,
+                "actions": actions, "created": _dt.now().isoformat()}
+        if plan_extra:
+            plan.update(plan_extra)
+        a.planner = mock.MagicMock()
+        a.planner.plan.return_value = plan
+        a.memory = mock.MagicMock()
+        a.executor = mock.MagicMock()
+        a.stats = collections.defaultdict(int)
+        return a
+
+    @staticmethod
+    def _trigger():
+        return {"trigger_type": "HIGH_RISK", "person_id": 1,
+                "state": "Fall", "priority": "HIGH", "risk_score": 0.9}
+
+    def test_rule_env_low_person_high_severity_corrected(self):
+        a = self._rule_agent([_send_alert(priority="HIGH", severity="HIGH")])
+        a.process_trigger(self._trigger(), context={"environment_severity": "LOW"})
+        plan = a.executor.execute.call_args[0][0]
+        snd = self._snd(plan["actions"])
+        self.assertEqual(snd[0]["args"]["severity"], "LOW")      # 环境 LOW 覆写
+        self.assertEqual(snd[0]["args"]["priority"], "HIGH")     # 人员档保留
+
+    def test_rule_env_high_person_high_no_duplicate(self):
+        a = self._rule_agent([_send_alert(priority="HIGH", severity="HIGH")])
+        a.process_trigger(self._trigger(), context={"environment_severity": "HIGH"})
+        plan = a.executor.execute.call_args[0][0]
+        self.assertEqual(len(self._snd(plan["actions"])), 1)     # 仅人员, 无重复环境
+
+    def test_rule_env_high_no_person_no_alarm(self):
+        a = self._rule_agent([{"tool": "database_tool",
+                               "args": {"action": "save_event"}}])  # 无人员
+        a.process_trigger(self._trigger(), context={"environment_severity": "HIGH"})
+        plan = a.executor.execute.call_args[0][0]
+        self.assertEqual(self._snd(plan["actions"]), [])         # 不生成环境报警
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
