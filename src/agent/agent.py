@@ -740,6 +740,7 @@ class Agent:
 
         person_exists = False
         person_high_exists = False
+        had_send_alert = False
         for act in actions or []:
             if not isinstance(act, dict):
                 continue
@@ -750,9 +751,10 @@ class Agent:
                         and args.get("state") not in (None, ""))):
                 person_exists = True
             if (act.get("tool") == "communication_tool"
-                    and str(args.get("action") or "") == "send_alert"
-                    and str(args.get("priority") or "unknown").upper() == "HIGH"):
-                person_high_exists = True
+                    and str(args.get("action") or "") == "send_alert"):
+                had_send_alert = True
+                if str(args.get("priority") or "unknown").upper() == "HIGH":
+                    person_high_exists = True
         # ▸ severity 去污染: 环境档可信时写回 args.severity(仅通信 send_alert), 不改 priority/risk/state。
         if env_sev_valid:
             for act in actions or []:
@@ -782,8 +784,10 @@ class Agent:
                 warnings.warn(
                     f"[AlarmFusion] person={person_pri} env={env_sev} → save_event(uncertain)")
 
-        # 2) 环境高危险且检测到人员、且无 person HIGH 报警 → 生成环境级报警
-        if env_sev == "HIGH" and person_exists and not person_high_exists:
+        # 2) 环境高危险 + 有人员 + 无 person HIGH 报警 且 计划中无任何 send_alert → 生成环境级报警。
+        #    若已有 send_alert(env 已通过 severity 覆写承载), 不追加环境, 避免重复报警。
+        if env_sev == "HIGH" and person_exists and not person_high_exists \
+                and not had_send_alert:
             actions.append({
                 "tool": "communication_tool",
                 "args": {

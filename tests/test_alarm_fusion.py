@@ -161,6 +161,16 @@ class AlarmFusionTest(unittest.TestCase):
         self.assertEqual(snd[0]["args"]["severity"], "HIGH")
         self.assertEqual(snd[0]["args"]["priority"], "HIGH")
 
+    def test_case16_env_high_person_low_existing_send_single(self):
+        # env HIGH + person LOW + 已有 person send_alert → 不追加环境, 恰好 1 条 send
+        a = _MyAgent()
+        actions = [_send_alert(priority="LOW")]
+        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
+        snd = self._snd(actions)
+        self.assertEqual(len(snd), 1)                     # 不产生第二条环境报警
+        self.assertEqual(snd[0]["args"]["severity"], "HIGH")   # env 已写入既有 person send
+        self.assertEqual(snd[0]["args"]["person_id"], 1)       # 人员字段保留
+
     # ---------- 规则路径(process_trigger) 也经融合门 ----------
     @staticmethod
     def _rule_agent(actions, plan_extra=None):
