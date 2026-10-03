@@ -184,6 +184,9 @@ class CommunicationTool(Tool):
             "event_id": kwargs.get("event_id"),
             "task_id": kwargs.get("task_id"),
             "image_path": kwargs.get("image_path"),
+            "priority": kwargs.get("priority"),
+            "risk_score": kwargs.get("risk_score"),
+            "state": kwargs.get("state"),
             "extra": extra,
         }
 
@@ -203,9 +206,10 @@ class CommunicationTool(Tool):
     def _build_dingtalk_markdown(alert: dict[str, Any]) -> str:
         """钉钉 markdown 报警模板。
 
-        首行必须含"灾害报警"(钉钉安全关键词, 否则 errcode 310000 拒绝)。
+        首行必须含"灾害报警/环境报警"(钉钉安全关键词, 否则 errcode 310000 拒绝)。
         取值优先读 alert 顶层, 再回退 extra(Agent/Executor 可能把
         state/risk_score/priority 放在 extra 内)。
+        两种展示: 有人员信息 → 人员报警; 无人员信息 → 环境报警(不渲染空人员字段)。
         """
         ts = alert.get("timestamp") or datetime.now().isoformat(timespec="seconds")
         extra = alert.get("extra") or {}
@@ -217,7 +221,27 @@ class CommunicationTool(Tool):
         risk = extra.get("risk_score") if extra.get("risk_score") is not None else (
             alert.get("risk_score") if alert.get("risk_score") is not None else "-"
         )
-        lines = [
+        has_person = (person is not None
+                      or state != "-" or priority != "-" or risk != "-")
+
+        if not has_person:
+            # 环境级报警: 不显示空人员字段
+            return "\n".join([
+                "## 🚨 环境高风险报警",
+                "",
+                "环境危险等级:",
+                str(severity),
+                "",
+                str(alert.get("message") or ""),
+                "",
+                "时间:",
+                ts,
+                "",
+                "来源:",
+                "Raspberry Pi Edge AI",
+            ])
+
+        return "\n".join([
             "## 🚨 灾害报警",
             "",
             "环境危险等级:",
@@ -240,8 +264,7 @@ class CommunicationTool(Tool):
             "",
             "来源:",
             "Raspberry Pi Edge AI",
-        ]
-        return "\n".join(lines)
+        ])
 
     # ------------------------------------------------------------------
     # 发送(带重试 + 指数退避)
