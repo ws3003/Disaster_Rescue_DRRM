@@ -42,6 +42,32 @@ class DingtalkFormatTest(unittest.TestCase):
         self.assertIn("人员ID:", md)
         self.assertIn("人员风险等级:", md)
 
+    def test_environment_alert_via_build_alert_env_template(self):
+        # 经 _build_alert 透传 alert_type: environment → 环境模板, 不落人员字段
+        tool = CommunicationTool()
+        alert = tool._build_alert(
+            {"action": "send_alert", "alert_type": "environment",
+             "environment_severity": "HIGH",
+             "title": "t", "message": "检测到高危险灾害环境"})
+        self.assertEqual(alert.get("alert_type"), "environment")
+        md = CommunicationTool._build_dingtalk_markdown(alert)
+        self.assertIn("环境高风险报警", md)
+        self.assertIn("环境危险等级:", md)
+        self.assertNotIn("人员ID:", md)
+        self.assertNotIn("人员风险等级:", md)
+
+    def test_person_alert_via_build_alert_keeps_person_fields(self):
+        tool = CommunicationTool()
+        alert = tool._build_alert(
+            {"action": "send_alert", "alert_type": "person",
+             "person_id": 1, "state": "Fall", "person_priority": "HIGH",
+             "risk_score": 0.634, "title": "t", "message": "m"})
+        self.assertEqual(alert.get("alert_type"), "person")
+        md = CommunicationTool._build_dingtalk_markdown(alert)
+        self.assertIn("人员ID:", md)
+        self.assertIn("人员风险等级:", md)
+        self.assertNotIn("环境危险等级", md)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

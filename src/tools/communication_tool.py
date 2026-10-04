@@ -177,6 +177,8 @@ class CommunicationTool(Tool):
             raise ValueError("Parameter 'extra' must be a dictionary.")
         return {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "alert_type": kwargs.get("alert_type"),
+            "environment_severity": kwargs.get("environment_severity"),
             "severity": severity,
             "title": title,
             "message": message,
@@ -185,6 +187,7 @@ class CommunicationTool(Tool):
             "task_id": kwargs.get("task_id"),
             "image_path": kwargs.get("image_path"),
             "priority": kwargs.get("priority"),
+            "person_priority": kwargs.get("person_priority"),
             "risk_score": kwargs.get("risk_score"),
             "state": kwargs.get("state"),
             "extra": extra,
