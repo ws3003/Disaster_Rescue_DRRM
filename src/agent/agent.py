@@ -760,19 +760,30 @@ class Agent:
             pa["action"] = "send_alert"
             pa["alert_type"] = "person"
             new_actions.append({"tool": "communication_tool", "args": pa})
-        # 2) environment 报警(仅当检测到人员)
+        # 2) environment 报警(仅当检测到人员)；经独立 Memory key 冷却, 避免重复环境报警。
         if person_exists and env_sev == "HIGH":
-            new_actions.append({
-                "tool": "communication_tool",
-                "args": {
-                    "action": "send_alert",
-                    "alert_type": "environment",
-                    "person_id": None,
-                    "environment_severity": "HIGH",
-                    "title": "环境高风险报警",
-                    "message": "检测到高危险灾害环境，请关注现场情况",
-                },
-            })
+            try:
+                _env_ok = self.memory.should_alert(
+                    None, "__ENV_HIGH__", current_risk=None,
+                    minutes=self.memory.cooldown_minutes)
+            except Exception:  # noqa: BLE001 — Memory 异常不阻断正常运行(保守放行)
+                _env_ok = True
+            if _env_ok:
+                new_actions.append({
+                    "tool": "communication_tool",
+                    "args": {
+                        "action": "send_alert",
+                        "alert_type": "environment",
+                        "person_id": None,
+                        "environment_severity": "HIGH",
+                        "title": "环境高风险报警",
+                        "message": "检测到高危险灾害环境，请关注现场情况",
+                    },
+                })
+                try:
+                    self.memory.record_alert(None, "__ENV_HIGH__", priority="HIGH")
+                except Exception:  # noqa: BLE001 — 记录失败不影响已生成报警/后续
+                    pass
 
         # 3) 保留非通信(非 send_alert)既有动作; 通信 send_alert 已由上面规整取代
         for act in actions or []:

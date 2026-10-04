@@ -110,5 +110,39 @@ class AlarmFusionRulePathTest(unittest.TestCase):
         self.assertEqual(_snd(plan["actions"], "environment"), [])
 
 
+class EnvironmentCooldownTest(unittest.TestCase):
+    """环境报警独立 Memory key 冷却; 与人员报警互不干扰。"""
+
+    @staticmethod
+    def _agent():
+        from src.agent.memory import Memory
+        a = _MyAgent()
+        a.memory = Memory(cooldown_minutes=30)
+        return a
+
+    def test_first_env_high_sends(self):
+        a = self._agent()
+        actions = [_person("HIGH")]
+        a._apply_alarm_fusion(actions, {"environment_severity": "HIGH"})
+        self.assertEqual(len(_snd(actions, "environment")), 1)
+
+    def test_cooldown_suppresses_second_env(self):
+        a = self._agent()
+        acts1 = [_person("HIGH")]
+        a._apply_alarm_fusion(acts1, {"environment_severity": "HIGH"})  # 首次 record
+        acts2 = [_person("HIGH")]
+        a._apply_alarm_fusion(acts2, {"environment_severity": "HIGH"})  # 冷却内
+        self.assertEqual(_snd(acts2, "environment"), [])
+
+    def test_env_memory_does_not_block_person(self):
+        a = self._agent()
+        a._apply_alarm_fusion([_person("HIGH")], {"environment_severity": "HIGH"})  # env 进冷却
+        acts2 = [_person("HIGH")]
+        a._apply_alarm_fusion(acts2, {"environment_severity": "HIGH"})
+        # 第二次 env 被抑制, 但 person 走独立 key(未在此处被 record)仍可生成
+        self.assertEqual(_snd(acts2, "environment"), [])
+        self.assertEqual(len(_snd(acts2, "person")), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
