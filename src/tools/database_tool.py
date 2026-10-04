@@ -58,8 +58,13 @@ class DatabaseTool(Tool):
         self,
         db_path: str = "data/drrm.db",
     ):
+        # 稳定解析到项目根, 不依赖 CWD:
+        # - 相对路径(默认 data/drrm.db) → <project_root>/data/drrm.db
+        # - 显式绝对路径 → 原样保留
+        _p = Path(db_path or "data/drrm.db")
+        resolved = str(_p) if _p.is_absolute() else str(PROJECT_ROOT / _p)
         self.db = Database(
-            db_path=db_path
+            db_path=resolved
         )
 
     # ==========================================================
