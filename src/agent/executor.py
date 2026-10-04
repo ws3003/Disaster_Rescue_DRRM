@@ -394,6 +394,27 @@ class Executor:
                 }
 
             # --------------------------------------------------------
+            # V4.3 人员状态持久化(最小增量): rescue assess_person 成功后写 persons 表
+            # --------------------------------------------------------
+            if (tool_name == "rescue_tool"
+                    and str(action or "") == "assess_person"
+                    and isinstance(result, dict) and result.get("ok")):
+                try:
+                    _ass = result.get("assessment") or {}
+                    if (_ass.get("person_id") is not None
+                            and _ass.get("state") is not None
+                            and _ass.get("risk_score") is not None):
+                        self.registry.execute(
+                            "database_tool",
+                            action="upsert_person",
+                            person_id=_ass.get("person_id"),
+                            state=_ass.get("state"),
+                            risk=_ass.get("risk_score"),
+                        )
+                except Exception as exc:  # noqa: BLE001 — 写库失败不影响后续
+                    print(f"[DATABASE] upsert_person failed: {exc}")
+
+            # --------------------------------------------------------
             # Update plan trace
             # --------------------------------------------------------
 
