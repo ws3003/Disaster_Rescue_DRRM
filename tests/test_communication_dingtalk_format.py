@@ -68,6 +68,49 @@ class DingtalkFormatTest(unittest.TestCase):
         self.assertIn("人员风险等级:", md)
         self.assertNotIn("环境危险等级", md)
 
+    def test_environment_alert_single_title_no_duplicate(self):
+        # env 模板只保留"环境高风险报警"一个标题, 不附加公共"灾害报警"
+        md = _md({"alert_type": "environment", "environment_severity": "HIGH",
+                  "message": "检测到高危险灾害环境"})
+        self.assertEqual(md.count("## 🚨 环境高风险报警"), 1)
+        self.assertNotIn("🚨 灾害报警", md)
+
+    def test_person_alert_keeps_disaster_title(self):
+        md = _md({"alert_type": "person", "person_id": 1, "state": "Fall",
+                  "person_priority": "HIGH", "risk_score": 0.6})
+        self.assertIn("🚨 灾害报警", md)
+        self.assertNotIn("环境高风险报警", md)
+
+
+class DingtalkTitleTest(unittest.TestCase):
+    """DingTalk 卡片标题按 alert_type 动态, 且不重复前缀。"""
+
+    @staticmethod
+    def _capture():
+        seen = {}
+        def transport(url, **kw):
+            seen["payload"] = kw.get("json")
+            return type("R", (), {"raise_for_status": lambda s: None})()
+        from src.tools.channels import DingTalkChannel
+        c = DingTalkChannel(webhook_url="http://x", transport=transport)
+        return c, seen
+
+    def test_environment_card_title(self):
+        c, seen = self._capture()
+        c.send_markdown("## 🚨 环境高风险报警\n\n环境危险等级: HIGH",
+                        alert={"alert_type": "environment"})
+        md = seen["payload"]["markdown"]
+        self.assertEqual(md["title"], "🚨 环境高风险报警")
+        self.assertNotIn("🚨 灾害报警", md["text"])
+
+    def test_person_card_title(self):
+        c, seen = self._capture()
+        c.send_markdown("## 🚨 灾害报警\n\n人员ID: 1",
+                        alert={"alert_type": "person"})
+        md = seen["payload"]["markdown"]
+        self.assertEqual(md["title"], "🚨 灾害报警")
+        self.assertNotIn("环境高风险报警", md["text"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

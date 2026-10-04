@@ -231,11 +231,16 @@ class DingTalkChannel(Channel):
                 "channel": self.name}
 
     def send_markdown(self, content: str, **meta: Any) -> Dict[str, Any]:
-        # 钉钉安全: 内容首行需含安全关键词, 缺则兜底前缀(保证真实发送不因关键词被拒)
-        if self._KEYWORD not in content.splitlines()[0] if content else False:
-            content = f"## {self._KEYWORD}\n\n{content}"
+        # 卡片标题按 alert_type 动态: person→灾害报警; environment→环境高风险报警。
+        alert = (meta.get("alert") or {}) if isinstance(meta, dict) else {}
+        at = str(alert.get("alert_type") or "").lower()
+        title = "🚨 环境高风险报警" if at == "environment" else "🚨 灾害报警"
+        # 钉钉安全: 正文首行需含标题关键词; 本渠道不动已有 `#` 标题, 仅当正文以头条开头才前缀兜底。
+        first = content.splitlines()[0] if content else ""
+        if not (content and first.startswith("#")):
+            content = f"## {title}\n\n{content}"
         return self._call({"msgtype": "markdown",
-                           "markdown": {"title": self._KEYWORD, "text": content}})
+                           "markdown": {"title": title, "text": content}})
 
     def send_image(self, image_url: str, **meta: Any) -> Dict[str, Any]:
         """发送图片 (钉钉 image 消息要求 picURL)。
