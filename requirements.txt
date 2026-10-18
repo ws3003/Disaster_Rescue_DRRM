@@ -59,4 +59,12 @@ python-multipart==0.0.32
 # V4.2 Voice (Alibaba DashScope Qwen TTS)
 dashscope==1.27.7
 # V4.2 Voice Output: 本地 edge-tts(微软 TTS, 免费, MP3) 作默认合成路径
-edge-tts
+edge-tts==7.2.8
+
+# V4.4 补齐（审计发现缺失，重建环境即丢，必须显式声明）：
+#   oss2        OSSStorageProvider 上传快照/音频到阿里云 OSS（代码中已 import）
+#   jsonschema  Agent task_schema 任务校验
+#   pydantic    server FastAPI 显式依赖（此前依赖 fastapi 间接带入）
+oss2==2.19.1
+jsonschema==4.26.0
+pydantic==2.13.5
