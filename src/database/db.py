@@ -119,6 +119,57 @@ class Database:
         return datetime.now().isoformat()
 
     @staticmethod
+    def _now_iso() -> str:
+        """
+        Return current timestamp as ISO 8601 WITH timezone.
+
+        V4.4 新增时间戳统一采用带时区 ISO 8601 (REQ-C4-01 三类时间戳分开)。
+        不改动既有 _now()；仅用于新增 readings / sensor_alerts 的时间字段。
+        """
+
+        return datetime.now().astimezone().isoformat(
+            timespec="seconds"
+        )
+
+    @staticmethod
+    def _reading_id() -> str:
+        """
+        Generate a reading ID: R-<YYYYMMDD>-<uuid8>.
+        """
+
+        return (
+            "R-"
+            + datetime.now().strftime(
+                "%Y%m%d"
+            )
+            + "-"
+            + uuid.uuid4().hex[
+                :8
+            ].upper()
+        )
+
+    @staticmethod
+    def _sensor_alert_id() -> str:
+        """
+        Generate a sensor alert ID: E-<YYYYMMDD>-<uuid8>.
+
+        前缀与既有 _event_id() 相同 (E-...) 是用户确认的格式；
+        因位于独立表，跨表统一查询时须以实体来源 (source) 消歧，
+        不能仅凭 ID 前缀判断记录来源。
+        """
+
+        return (
+            "E-"
+            + datetime.now().strftime(
+                "%Y%m%d"
+            )
+            + "-"
+            + uuid.uuid4().hex[
+                :8
+            ].upper()
+        )
+
+    @staticmethod
     def _event_id() -> str:
         """
         Generate an event ID.
@@ -782,6 +833,412 @@ class Database:
             result.append(item)
 
         return result
+
+
+    # ================================================================
+    # Environment readings (V4.4 E9-01)
+    # ================================================================
+
+    def save_reading(
+        self,
+        sensor_id: str,
+        temperature: float,
+        humidity: float | None = None,
+        device_captured_at: str | None = None,
+        edge_received_at: str | None = None,
+    ) -> str:
+        """
+        Save one valid temperate/humidity reading (REQ-E7-08 / REQ-E9-01).
+
+        调用方须已按 REQ-E7-02 校验读数有效性; 本方法不定义有效范围。
+        - reading_id   = R-<YYYYMMDD>-<uuid8> (自动生成)
+        - device_captured_at = 设备采样时间 (带时区 ISO, 缺省=当前时)
+        - edge_received_at   = Pi 本地写库时间 (带时区 ISO, 缺省=当前时)
+        - received_at  保持 NULL (服务端接收同步时填充, 本轮不实现同步)
+
+        Returns
+        -------
+        str
+            Generated reading_id.
+        """
+
+        reading_id = self._reading_id()
+
+        now_iso = self._now_iso()
+
+        captured = (
+            device_captured_at
+            or now_iso
+        )
+
+        edge_ts = (
+            edge_received_at
+            or now_iso
+        )
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO readings (
+                    reading_id,
+                    sensor_id,
+                    temperature,
+                    humidity,
+                    device_captured_at,
+                    edge_received_at,
+                    received_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    reading_id,
+                    sensor_id,
+                    float(temperature),
+                    (
+                        None
+                        if humidity is None
+                        else float(humidity)
+                    ),
+                    captured,
+                    edge_ts,
+                ),
+            )
+
+        return reading_id
+
+    def get_reading(
+        self,
+        reading_id: str,
+    ) -> dict | None:
+        """
+        Fetch one reading (or None).
+
+        供应用层校验 reading_id 关联是否有效 (REQ-E9-02 关联不设外键)。
+        """
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    reading_id,
+                    sensor_id,
+                    temperature,
+                    humidity,
+                    device_captured_at,
+                    edge_received_at,
+                    received_at
+                FROM readings
+                WHERE reading_id = ?
+                """,
+                (reading_id,),
+            ).fetchone()
+
+        return (
+            dict(row)
+            if row is not None
+            else None
+        )
+
+    def query_readings(
+        self,
+        sensor_id: str | None = None,
+        start_device_captured_at: str | None = None,
+        end_device_captured_at: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """
+        Query readings by sensor and device-capture time range.
+
+        供 S4-06 区间/分页查询; 字符串排序依赖统一带时区 ISO, 由上层保证。
+        """
+
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if sensor_id is not None:
+            clauses.append("sensor_id = ?")
+            params.append(sensor_id)
+
+        if start_device_captured_at is not None:
+            clauses.append("device_captured_at >= ?")
+            params.append(start_device_captured_at)
+
+        if end_device_captured_at is not None:
+            clauses.append("device_captured_at <= ?")
+            params.append(end_device_captured_at)
+
+        where = (
+            "WHERE " + " AND ".join(clauses)
+            if clauses
+            else ""
+        )
+
+        params.extend([int(limit), int(offset)])
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    reading_id,
+                    sensor_id,
+                    temperature,
+                    humidity,
+                    device_captured_at,
+                    edge_received_at,
+                    received_at
+                FROM readings
+                {where}
+                ORDER BY device_captured_at ASC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+
+    # ================================================================
+    # Sensor alerts (V4.4 E9-02)
+    # ================================================================
+
+    def save_sensor_alert(
+        self,
+        type: str,
+        temperature: float | None = None,
+        humidity: float | None = None,
+        threshold: float | None = None,
+        severity: str | None = None,
+        device_captured_at: str | None = None,
+        reading_id: str | None = None,
+    ) -> str:
+        """
+        Save one sensor environment alert (REQ-E9-02 / REQ-E7-04/05).
+
+        - alert_id = E-<YYYYMMDD>-<uuid8> (自动生成, 位于独立表)
+        - status    初始为 'active' (REQ-E7-04)
+        - occurred_at = 告警发生/确认时间 (带时区 ISO, 缺省=当前时)
+        - received_at  保持 NULL (服务端同步填充)
+        - reading_id  可空; 若提供, 调用方须先经 get_reading 校验存在。
+
+        Returns
+        -------
+        str
+            Generated alert_id.
+        """
+
+        alert_id = self._sensor_alert_id()
+
+        now_iso = self._now_iso()
+
+        captured = (
+            device_captured_at
+            or now_iso
+        )
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sensor_alerts (
+                    alert_id,
+                    type,
+                    severity,
+                    temperature,
+                    humidity,
+                    threshold,
+                    status,
+                    occurred_at,
+                    resolved_at,
+                    device_captured_at,
+                    received_at,
+                    reading_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 'active', ?, NULL, ?, NULL, ?)
+                """,
+                (
+                    alert_id,
+                    type,
+                    severity,
+                    (
+                        None
+                        if temperature is None
+                        else float(temperature)
+                    ),
+                    (
+                        None
+                        if humidity is None
+                        else float(humidity)
+                    ),
+                    (
+                        None
+                        if threshold is None
+                        else float(threshold)
+                    ),
+                    now_iso,
+                    captured,
+                    reading_id,
+                ),
+            )
+
+        return alert_id
+
+    def get_sensor_alert(
+        self,
+        alert_id: str,
+    ) -> dict | None:
+        """
+        Fetch one sensor alert (or None).
+        """
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    alert_id,
+                    type,
+                    severity,
+                    temperature,
+                    humidity,
+                    threshold,
+                    status,
+                    occurred_at,
+                    resolved_at,
+                    device_captured_at,
+                    received_at,
+                    reading_id
+                FROM sensor_alerts
+                WHERE alert_id = ?
+                """,
+                (alert_id,),
+            ).fetchone()
+
+        return (
+            dict(row)
+            if row is not None
+            else None
+        )
+
+    def query_sensor_alerts(
+        self,
+        status: str | None = None,
+        type: str | None = None,
+        start_occurred_at: str | None = None,
+        end_occurred_at: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """
+        Query sensor alerts by status / type / occurred time.
+
+        供 S4-02 列表 (分页); 仅传感器环境告警, 与 events 隔离。
+        """
+
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+
+        if type is not None:
+            clauses.append("type = ?")
+            params.append(type)
+
+        if start_occurred_at is not None:
+            clauses.append("occurred_at >= ?")
+            params.append(start_occurred_at)
+
+        if end_occurred_at is not None:
+            clauses.append("occurred_at <= ?")
+            params.append(end_occurred_at)
+
+        where = (
+            "WHERE " + " AND ".join(clauses)
+            if clauses
+            else ""
+        )
+
+        params.extend([int(limit), int(offset)])
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    alert_id,
+                    type,
+                    severity,
+                    temperature,
+                    humidity,
+                    threshold,
+                    status,
+                    occurred_at,
+                    resolved_at,
+                    device_captured_at,
+                    received_at,
+                    reading_id
+                FROM sensor_alerts
+                {where}
+                ORDER BY occurred_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+    def update_sensor_alert_status(
+        self,
+        alert_id: str,
+        status: str,
+        resolved_at: str | None = None,
+    ) -> bool:
+        """
+        Update a sensor alert status (REQ-E7-04: active -> resolved).
+
+        resolved_at: 提供则一并写入 (缺省=当前带时区时间)。
+        返回是否影响 (False 表示 alert 不存在或状态未变)。
+        """
+
+        new_status = str(status).lower().strip()
+
+        if new_status not in (
+            "active",
+            "resolved",
+        ):
+            raise ValueError(
+                f"非法告警状态: {status!r} "
+                f"(仅允许 active/resolved)"
+            )
+
+        ts = (
+            resolved_at
+            or self._now_iso()
+        )
+
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE sensor_alerts
+                SET status = ?,
+                    resolved_at = ?
+                WHERE alert_id = ?
+                """,
+                (
+                    new_status,
+                    ts,
+                    alert_id,
+                ),
+            )
+
+        return (
+            cursor.rowcount > 0
+        )
 
 
 # ====================================================================
