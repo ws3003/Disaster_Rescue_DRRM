@@ -18,9 +18,36 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import datetime
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+# V4.4 E9-03 媒体取证 DAO 常量 (module-level, 供媒体方法引用)
+_MEDIA_SOURCES = frozenset({"sensor"})
+_MEDIA_TYPES = frozenset({"image", "video"})
+_MEDIA_STATUS = frozenset({"pending", "processing", "success", "failed-awaiting-retry"})
+_MEDIA_CAPTURE_RESULTS = frozenset({"ok", "failed"})
+_MEDIA_UPLOAD_STATUS = frozenset({"pending", "uploading", "success", "failed"})
+# 允许的主状态转换; success 为终态不可回退
+_MEDIA_TRANSITIONS = {
+    "pending": frozenset({"processing"}),
+    "processing": frozenset({"success", "failed-awaiting-retry"}),
+    "failed-awaiting-retry": frozenset({"processing"}),
+}
+_UM = object()  # 哨兵: update 的参数未提供(不更新该字段)
+
+# V4.4 P1-B 投递登记表 DAO 常量 (module-level, 供 delivery 方法引用)
+_DELIVERY_SOURCES = frozenset({"person", "sensor"})
+_DELIVERY_STATUS = frozenset({"pending", "success"})
+# 允许的主状态转换; success 为终态不可回退
+_DELIVERY_TRANSITIONS = {
+    "pending": frozenset({"success"}),
+}
+
+# V4.4 C4-01 Outbox 常量 (module-level)
+_OUTBOX_STATUS = frozenset({"pending", "processing", "retry_wait", "success", "dead_letter"})
+_C4_RECORD_TYPES = frozenset({"person_event", "reading", "sensor_alert"})
 
 
 class Database:
@@ -46,6 +73,8 @@ class Database:
             Path(__file__).resolve().parent
             / "schema.sql"
         )
+
+        self._tx = False  # with_transaction 同实例嵌套保护标志(P1-A)
 
         self._initialize_database()
 
@@ -79,6 +108,60 @@ class Database:
         )
 
         return conn
+
+    @contextmanager
+    def with_transaction(self):
+        """同一连接上的共享事务上下文（SQLite，P1-A）。
+
+        用法: with db.with_transaction() as conn: conn.execute(...)
+
+        - 复用 self._connect() 获取一个连接并交付调用方。
+        - 正常退出提交; 事务体异常回滚并传播原始业务异常。
+        - 提交异常: 尽力回滚, 传播提交异常(不解释为"一定已提交/一定未写")。
+        - 所有退出路径尝试 close(), 并将 self._tx 复位为 False。
+        - 同一 Database 实例内禁止嵌套; 内层抛 RuntimeError。
+        - 清理异常(rollback/close)通过必要的 `from` 异常链保留为 __cause__,
+          不覆盖主异常; 不手工赋值 __context__; 不增公共属性。
+        - self._tx 仅用于同实例嵌套保护, 不宣称线程/跨实例/跨进程安全。
+        """
+        if self._tx:
+            raise RuntimeError("该 Database 实例内不支持嵌套 with_transaction")
+        self._tx = True
+        conn = self._connect()
+        primary = None
+        cause = None
+        try:
+            try:
+                yield conn
+            except BaseException as business:  # noqa: BLE001 - 主异常待传播
+                primary = business
+                try:
+                    conn.rollback()
+                except BaseException as rb:  # noqa: BLE001 - 清理异常入链
+                    cause = rb
+            else:
+                try:
+                    conn.commit()
+                except BaseException as cm:  # noqa: BLE001 - 提交异常待传播
+                    primary = cm
+                    try:
+                        conn.rollback()
+                    except BaseException as rb:  # noqa: BLE001 - 清理异常入链
+                        cause = rb
+        finally:
+            try:
+                conn.close()
+            except BaseException as cl:  # noqa: BLE001 - 关闭异常
+                if primary is None:
+                    primary = cl  # 正常提交后关闭失败: 传播关闭异常
+                elif cause is None:
+                    cause = cl  # 已有主异常: 关闭异常入链, 不覆盖
+            self._tx = False
+        if primary is None:
+            return
+        if cause is None:
+            raise primary
+        raise primary from cause
 
     # ================================================================
     # Initialization
@@ -207,6 +290,75 @@ class Database:
     # Events
     # ================================================================
 
+    # ================================================================
+    # V4.4 C4-01 共享业务写入核心 (受控事务入口与公开 save_* 共用同一 INSERT)
+    # 接受调用方提供的连接, 保证业务写入与 Outbox 幂等登记在同一连接/事务内。
+    # 公开 save_event / save_reading / save_sensor_alert 委托到这些核心, 行为逐字保留。
+    # ================================================================
+
+    def _event_write_core(self, conn, *, type, severity, person_id, payload, source_id: str | None = None) -> str:
+        event_id = source_id or self._event_id()
+        payload_json = json.dumps(payload, ensure_ascii=False, default=str)
+        ts = self._now()
+        conn.execute(
+            """
+            INSERT INTO events (event_id, ts, type, severity, person_id, payload)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (event_id, ts, type, severity, person_id, payload_json),
+        )
+        return event_id
+
+    def _reading_write_core(self, conn, *, sensor_id, temperature, humidity, device_captured_at, edge_received_at, source_id: str | None = None) -> str:
+        reading_id = source_id or self._reading_id()
+        now_iso = self._now_iso()
+        captured = device_captured_at or now_iso
+        edge_ts = edge_received_at or now_iso
+        conn.execute(
+            """
+            INSERT INTO readings (
+                reading_id, sensor_id, temperature, humidity,
+                device_captured_at, edge_received_at, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                reading_id,
+                sensor_id,
+                float(temperature),
+                (None if humidity is None else float(humidity)),
+                captured,
+                edge_ts,
+            ),
+        )
+        return reading_id
+
+    def _sensor_alert_write_core(self, conn, *, type, temperature, humidity, threshold, severity, device_captured_at, reading_id, source_id: str | None = None, occurred_at: str | None = None) -> str:
+        alert_id = source_id or self._sensor_alert_id()
+        now_iso = self._now_iso()
+        # occurred_at 一致性: 调用方显式传入则原样使用(不得重新生成), 否则保持默认保存时刻。
+        used_oc = occurred_at if occurred_at is not None else now_iso
+        captured = device_captured_at or now_iso
+        conn.execute(
+            """
+            INSERT INTO sensor_alerts (
+                alert_id, type, severity, temperature, humidity, threshold,
+                status, occurred_at, resolved_at, device_captured_at, received_at, reading_id
+            ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, NULL, ?, NULL, ?)
+            """,
+            (
+                alert_id,
+                type,
+                severity,
+                (None if temperature is None else float(temperature)),
+                (None if humidity is None else float(humidity)),
+                (None if threshold is None else float(threshold)),
+                used_oc,
+                captured,
+                reading_id,
+            ),
+        )
+        return alert_id
+
     def save_event(
         self,
         type: str,
@@ -237,40 +389,14 @@ class Database:
             Generated event ID.
         """
 
-        event_id = self._event_id()
-
-        payload_json = json.dumps(
-            payload,
-            ensure_ascii=False,
-            default=str,
-        )
-
-        ts = self._now()
-
         with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO events (
-                    event_id,
-                    ts,
-                    type,
-                    severity,
-                    person_id,
-                    payload
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    ts,
-                    type,
-                    severity,
-                    person_id,
-                    payload_json,
-                ),
+            return self._event_write_core(
+                conn,
+                type=type,
+                severity=severity,
+                person_id=person_id,
+                payload=payload,
             )
-
-        return event_id
 
     # ================================================================
     # Recent events
@@ -862,49 +988,15 @@ class Database:
             Generated reading_id.
         """
 
-        reading_id = self._reading_id()
-
-        now_iso = self._now_iso()
-
-        captured = (
-            device_captured_at
-            or now_iso
-        )
-
-        edge_ts = (
-            edge_received_at
-            or now_iso
-        )
-
         with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO readings (
-                    reading_id,
-                    sensor_id,
-                    temperature,
-                    humidity,
-                    device_captured_at,
-                    edge_received_at,
-                    received_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, NULL)
-                """,
-                (
-                    reading_id,
-                    sensor_id,
-                    float(temperature),
-                    (
-                        None
-                        if humidity is None
-                        else float(humidity)
-                    ),
-                    captured,
-                    edge_ts,
-                ),
+            return self._reading_write_core(
+                conn,
+                sensor_id=sensor_id,
+                temperature=temperature,
+                humidity=humidity,
+                device_captured_at=device_captured_at,
+                edge_received_at=edge_received_at,
             )
-
-        return reading_id
 
     def get_reading(
         self,
@@ -1014,6 +1106,7 @@ class Database:
         severity: str | None = None,
         device_captured_at: str | None = None,
         reading_id: str | None = None,
+        occurred_at: str | None = None,
     ) -> str:
         """
         Save one sensor environment alert (REQ-E9-02 / REQ-E7-04/05).
@@ -1030,60 +1123,18 @@ class Database:
             Generated alert_id.
         """
 
-        alert_id = self._sensor_alert_id()
-
-        now_iso = self._now_iso()
-
-        captured = (
-            device_captured_at
-            or now_iso
-        )
-
         with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO sensor_alerts (
-                    alert_id,
-                    type,
-                    severity,
-                    temperature,
-                    humidity,
-                    threshold,
-                    status,
-                    occurred_at,
-                    resolved_at,
-                    device_captured_at,
-                    received_at,
-                    reading_id
-                )
-                VALUES (?, ?, ?, ?, ?, ?, 'active', ?, NULL, ?, NULL, ?)
-                """,
-                (
-                    alert_id,
-                    type,
-                    severity,
-                    (
-                        None
-                        if temperature is None
-                        else float(temperature)
-                    ),
-                    (
-                        None
-                        if humidity is None
-                        else float(humidity)
-                    ),
-                    (
-                        None
-                        if threshold is None
-                        else float(threshold)
-                    ),
-                    now_iso,
-                    captured,
-                    reading_id,
-                ),
+            return self._sensor_alert_write_core(
+                conn,
+                type=type,
+                temperature=temperature,
+                humidity=humidity,
+                threshold=threshold,
+                severity=severity,
+                device_captured_at=device_captured_at,
+                reading_id=reading_id,
+                occurred_at=occurred_at,
             )
-
-        return alert_id
 
     def get_sensor_alert(
         self,
@@ -1181,7 +1232,7 @@ class Database:
                     reading_id
                 FROM sensor_alerts
                 {where}
-                ORDER BY occurred_at DESC
+                ORDER BY occurred_at DESC, alert_id DESC
                 LIMIT ? OFFSET ?
                 """,
                 params,
@@ -1239,6 +1290,972 @@ class Database:
         return (
             cursor.rowcount > 0
         )
+
+    # ================================================================
+    # S4 read queries (V4.4 / S4 contract v0.1.0)
+    # 只读: 供 server S4 查询接口使用。全部使用参数化 SQL。
+    # COUNT 查询与对应列表查询使用完全一致的过滤条件。
+    # ================================================================
+
+    @staticmethod
+    def _deserialize_payload(item: dict) -> dict:
+        """把 events.payload JSON 字符串反序列化为 dict(失败留原值)。"""
+        payload = item.get("payload")
+        if isinstance(payload, str):
+            try:
+                item["payload"] = json.loads(payload)
+            except json.JSONDecodeError:
+                pass
+        return item
+
+    def query_person_alerts(
+        self,
+        type_: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict]:
+        """
+        Query person alert events filtered by event type (contract:
+        person alerts 仅筛选 events.type == high_risk_alert)。
+
+        SELECT 字段与 save_event/get_recent_events 一致;
+        排序 events.ts DESC, event_id DESC (契约 S4-02 人员组)。
+        """
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    event_id,
+                    ts,
+                    type,
+                    severity,
+                    person_id,
+                    payload
+                FROM events
+                WHERE type = ?
+                ORDER BY ts DESC, event_id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (
+                    type_,
+                    int(limit),
+                    int(offset),
+                ),
+            ).fetchall()
+
+        return [
+            self._deserialize_payload(dict(row))
+            for row in rows
+        ]
+
+    def get_event(
+        self,
+        event_id: str,
+    ) -> dict | None:
+        """
+        Fetch a single event by exact event_id (or None)。
+        供 S4-03 人员告警详情查询。
+        """
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    event_id,
+                    ts,
+                    type,
+                    severity,
+                    person_id,
+                    payload
+                FROM events
+                WHERE event_id = ?
+                """,
+                (event_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return self._deserialize_payload(dict(row))
+
+    def count_person_alerts(
+        self,
+        type_: str,
+    ) -> int:
+        """
+        Count person alert events by event type.
+        过滤条件与 query_person_alerts 一致(仅 type)。
+        """
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM events
+                WHERE type = ?
+                """,
+                (type_,),
+            ).fetchone()
+
+        return int(row["n"])
+
+    def count_sensor_alerts(
+        self,
+        status: str | None = None,
+        type: str | None = None,
+        start_occurred_at: str | None = None,
+        end_occurred_at: str | None = None,
+    ) -> int:
+        """
+        Count sensor alerts with the same filters as query_sensor_alerts.
+        (status / type / occurred 闭区间)
+        """
+
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+
+        if type is not None:
+            clauses.append("type = ?")
+            params.append(type)
+
+        if start_occurred_at is not None:
+            clauses.append("occurred_at >= ?")
+            params.append(start_occurred_at)
+
+        if end_occurred_at is not None:
+            clauses.append("occurred_at <= ?")
+            params.append(end_occurred_at)
+
+        where = (
+            "WHERE " + " AND ".join(clauses)
+            if clauses
+            else ""
+        )
+
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS n
+                FROM sensor_alerts
+                {where}
+                """,
+                params,
+            ).fetchone()
+
+        return int(row["n"])
+
+    def count_readings(
+        self,
+        sensor_id: str | None = None,
+        start_device_captured_at: str | None = None,
+        end_device_captured_at: str | None = None,
+    ) -> int:
+        """
+        Count readings with the same filters as query_readings
+        (sensor_id / device_captured_at 闭区间)。
+        """
+
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if sensor_id is not None:
+            clauses.append("sensor_id = ?")
+            params.append(sensor_id)
+
+        if start_device_captured_at is not None:
+            clauses.append("device_captured_at >= ?")
+            params.append(start_device_captured_at)
+
+        if end_device_captured_at is not None:
+            clauses.append("device_captured_at <= ?")
+            params.append(end_device_captured_at)
+
+        where = (
+            "WHERE " + " AND ".join(clauses)
+            if clauses
+            else ""
+        )
+
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS n
+                FROM readings
+                {where}
+                """,
+                params,
+            ).fetchone()
+
+        return int(row["n"])
+
+
+# ====================================================================
+# V4.4 E9-03 媒体取证 DAO
+# 表: media_evidence (schema.sql)。沿用现有 _connect/参数化风格, 不改既有方法。
+# ====================================================================
+
+    @staticmethod
+    def _media_id() -> str:
+        """生成媒体证据 ID (候选格式 M-<YYYYMMDD>-<uuid8>)。"""
+
+        return (
+            "M-"
+            + datetime.now().strftime("%Y%m%d")
+            + "-"
+            + uuid.uuid4().hex[:8].upper()
+        )
+
+
+    @staticmethod
+    def _require_tz_iso(value: str) -> str:
+        """校验字符串为带时区 ISO 8601 时间(真实日期解析); 返回原字符串。"""
+
+        text = str(value)
+        strip_z = text[:-1] + "+00:00" if text.endswith("Z") else text
+        try:
+            parsed = datetime.fromisoformat(strip_z)
+        except ValueError:
+            raise ValueError("时间必须是有效的带时区 ISO 8601 格式")
+        if parsed.tzinfo is None:
+            raise ValueError("时间必须带时区")
+        return text
+
+
+    def save_media_evidence(
+        self,
+        *,
+        source: str,
+        ref_id: str,
+        media_type: str,
+        local_path: str,
+        captured_at: str,
+        status: str = "pending",
+        created_at: str | None = None,
+        media_id: str | None = None,
+        capture_result: str | None = None,
+        upload_status: str | None = None,
+        object_key: str | None = None,
+        uploaded_at: str | None = None,
+        retry_count: int = 0,
+        last_error: str | None = None,
+    ) -> str:
+        """
+        保存一条媒体取证记录, 返回 media_id。
+
+        - 校验枚举/时间/路径/告警存在。
+        - 幂等: 相同 media_id 且 source/ref_id/media_type/local_path/captured_at 一致则返回既有 id;
+          关键字段冲突则抛 ValueError, 不覆盖。
+        - source='sensor' 时校验 sensor_alerts.alert_id 存在。
+        """
+
+        if source not in _MEDIA_SOURCES:
+            raise ValueError(f"非法 source: {source!r} (仅允许 sensor)")
+        if media_type not in _MEDIA_TYPES:
+            raise ValueError(f"非法 media_type: {media_type!r} (仅允许 image/video)")
+        if status not in _MEDIA_STATUS:
+            raise ValueError(f"非法 status: {status!r}")
+        if capture_result is not None and capture_result not in _MEDIA_CAPTURE_RESULTS:
+            raise ValueError(f"非法 capture_result: {capture_result!r}")
+        if upload_status is not None and upload_status not in _MEDIA_UPLOAD_STATUS:
+            raise ValueError(f"非法 upload_status: {upload_status!r}")
+        if not isinstance(retry_count, int) or retry_count < 0:
+            raise ValueError("retry_count 必须为非负整数")
+        if not isinstance(local_path, str) or not local_path:
+            raise ValueError("local_path 必须为非空字符串")
+
+        captured_at = self._require_tz_iso(captured_at)
+        created_at = self._require_tz_iso(created_at) if created_at else self._now_iso()
+        if uploaded_at is not None:
+            uploaded_at = self._require_tz_iso(uploaded_at)
+
+        # 本期仅允许关联传感器告警: 校验告警存在
+        if source == "sensor" and self.get_sensor_alert(ref_id) is None:
+            raise ValueError(f"关联告警不存在: {ref_id!r}")
+
+        media_id = media_id or self._media_id()
+
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO media_evidence (
+                        media_id, source, ref_id, media_type, local_path, status,
+                        capture_result, upload_status, object_key,
+                        captured_at, created_at, uploaded_at, retry_count, last_error
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        media_id, source, ref_id, media_type, local_path, status,
+                        capture_result, upload_status, object_key,
+                        captured_at, created_at, uploaded_at, retry_count, last_error,
+                    ),
+                )
+        except sqlite3.IntegrityError:
+            # media_id 已存在: 幂等或冲突
+            existing = self.get_media_evidence(media_id)
+            if existing is None:  # pragma: no cover - 不应发生
+                raise
+            if (
+                existing.get("source") == source
+                and existing.get("ref_id") == ref_id
+                and existing.get("media_type") == media_type
+                and existing.get("local_path") == local_path
+                and existing.get("captured_at") == captured_at
+            ):
+                return media_id
+            raise ValueError(f"媒体 ID 冲突，关键字段不一致: {media_id!r}")
+
+        return media_id
+
+
+    def get_media_evidence(self, media_id: str) -> dict | None:
+        """按 media_id 获取媒体取证记录 (或 None)。"""
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM media_evidence
+                WHERE media_id = ?
+                """,
+                (media_id,),
+            ).fetchone()
+
+        return dict(row) if row is not None else None
+
+
+    def list_media_evidence_by_ref(self, source: str, ref_id: str) -> list[dict]:
+        """按归属告警列出媒体取证记录 (稳定顺序: created_at ASC)。"""
+
+        if source not in _MEDIA_SOURCES:
+            raise ValueError(f"非法 source: {source!r} (仅允许 sensor)")
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM media_evidence
+                WHERE source = ? AND ref_id = ?
+                ORDER BY created_at ASC, media_id ASC
+                """,
+                (source, ref_id),
+            ).fetchall()
+
+        return [dict(r) for r in rows]
+
+
+    def update_media_evidence_status(
+        self,
+        media_id: str,
+        *,
+        status: str,
+        capture_result: object = _UM,
+        upload_status: object = _UM,
+        object_key: object = _UM,
+        uploaded_at: object = _UM,
+        last_error: object = _UM,
+        retry_count: int | None = None,
+    ) -> bool:
+        """
+        更新媒体取证主状态(及可选辅助字段)。
+
+        - 仅允许契约状态转换; 非法转换/成功回退返回 False 且不改记录。
+        - 单条原子 UPDATE; 辅助字段已提供才更新。只负责数据库状态, 不校验 OSS 真实性。
+        """
+
+        if not isinstance(status, str) or status not in _MEDIA_STATUS:
+            raise ValueError(f"非法 status: {status!r}")
+
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM media_evidence WHERE media_id = ?",
+                (media_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            current = row["status"]
+            if status not in _MEDIA_TRANSITIONS.get(current, frozenset()):
+                return False
+
+            sets: list[str] = ["status = ?"]
+            params: list[Any] = [status]
+
+            def _add(col_name: str, provided: object, value_transform=None) -> None:
+                if provided is _UM:
+                    return
+                val = value_transform(provided) if value_transform else provided
+                sets.append(f"{col_name} = ?")
+                params.append(val)
+
+            if capture_result is not _UM:
+                if capture_result is not None and capture_result not in _MEDIA_CAPTURE_RESULTS:
+                    raise ValueError(f"非法 capture_result: {capture_result!r}")
+                _add("capture_result", capture_result)
+            if upload_status is not _UM:
+                if upload_status is not None and upload_status not in _MEDIA_UPLOAD_STATUS:
+                    raise ValueError(f"非法 upload_status: {upload_status!r}")
+                _add("upload_status", upload_status)
+            if object_key is not _UM:
+                _add("object_key", object_key)
+            if uploaded_at is not _UM:
+                _add("uploaded_at", uploaded_at,
+                     value_transform=(lambda v: self._require_tz_iso(v) if v is not None else None))
+            if last_error is not _UM:
+                _add("last_error", last_error)
+            if retry_count is not None:
+                if not isinstance(retry_count, int) or retry_count < 0:
+                    raise ValueError("retry_count 必须为非负整数")
+                _add("retry_count", retry_count)
+
+            params.append(media_id)
+            cur = conn.execute(
+                f"UPDATE media_evidence SET {', '.join(sets)} WHERE media_id = ?",
+                params,
+            )
+            return cur.rowcount > 0
+
+
+    # ================================================================
+    # V4.4 P1-B 投递登记 (deliveries)
+    # 幂等登记: 首次创建 pending; 重复提交同复合键返回既有记录, 不覆盖 status/created_at。
+    # task_kind 为开放 TEXT (不设枚举), 合法取值待真实投递消费方明确后再定义。
+    # ================================================================
+
+    def save_delivery(
+        self,
+        *,
+        source: str,
+        alert_id: str,
+        task_kind: str,
+        created_at: str | None = None,
+    ) -> tuple[str, str, str]:
+        """投递登记: 幂等创建一条 pending 记录, 返回复合键 (source, alert_id, task_kind)。
+
+        - source 仅允许 person/sensor; alert_id / task_kind 须为非空字符串。
+        - 仅创建初始 pending; 状态推进由 update_delivery_status 负责。
+        - 重复提交同一复合键: 返回既有键, 不新增, 不覆盖 status/created_at。
+        - 幂等判定: 捕获 IntegrityError 后按完整复合键回查; 回查命中才按幂等冲突,
+          回查未命中必须重抛原异常 (不得吞掉 CHECK/NOT NULL 等其他约束错误)。
+        """
+
+        if source not in _DELIVERY_SOURCES:
+            raise ValueError(f"非法 source: {source!r} (仅允许 person/sensor)")
+        if not isinstance(alert_id, str) or not alert_id:
+            raise ValueError("alert_id 必须为非空字符串")
+        if not isinstance(task_kind, str) or not task_kind:
+            raise ValueError("task_kind 必须为非空字符串")
+        created_at = self._require_tz_iso(created_at) if created_at else self._now_iso()
+
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO deliveries (source, alert_id, task_kind, status, created_at)
+                    VALUES (?, ?, ?, 'pending', ?)
+                    """,
+                    (source, alert_id, task_kind, created_at),
+                )
+        except sqlite3.IntegrityError:
+            # 按完整复合键回查: 命中 => 幂等冲突(返回既有记录); 未命中 => 非幂等约束错误, 重抛
+            existing = self.get_delivery(source, alert_id, task_kind)
+            if existing is None:  # pragma: no cover - 防御: 非幂等 IntegrityError 不得误判
+                raise
+            return (existing["source"], existing["alert_id"], existing["task_kind"])
+
+        return (source, alert_id, task_kind)
+
+
+    def get_delivery(
+        self,
+        source: str,
+        alert_id: str,
+        task_kind: str,
+    ) -> dict | None:
+        """按复合键获取一条投递记录 (或 None)。"""
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT source, alert_id, task_kind, status, created_at
+                FROM deliveries
+                WHERE source = ? AND alert_id = ? AND task_kind = ?
+                """,
+                (source, alert_id, task_kind),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+
+    def list_deliveries(self, *, status: str | None = None) -> list[dict]:
+        """列出投递记录; 可选按 status 过滤 (稳定顺序: source, alert_id, task_kind)。"""
+
+        if status is not None and status not in _DELIVERY_STATUS:
+            raise ValueError(f"非法 status: {status!r} (仅允许 pending/success)")
+
+        where = ""
+        params: list[Any] = []
+        if status is not None:
+            where = "WHERE status = ?"
+            params.append(status)
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT source, alert_id, task_kind, status, created_at
+                FROM deliveries
+                {where}
+                ORDER BY source, alert_id, task_kind
+                """,
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+    def update_delivery_status(
+        self,
+        source: str,
+        alert_id: str,
+        task_kind: str,
+        *,
+        status: str,
+    ) -> bool:
+        """将投递记录推进到新状态 (仅 pending -> success)。
+
+        - 非法 status 抛 ValueError; 记录不存在返回 False; 非法转换返回 False 且不改行。
+        - 单条条件 UPDATE 仅改 status 列, 不覆盖其他字段, 避免并发覆盖。
+        - success 仅表示本期记录被标记成功, 不代表远端已收到/处理。
+        """
+
+        if not isinstance(status, str) or status not in _DELIVERY_STATUS:
+            raise ValueError(f"非法 status: {status!r} (仅允许 pending/success)")
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT status FROM deliveries
+                WHERE source = ? AND alert_id = ? AND task_kind = ?
+                """,
+                (source, alert_id, task_kind),
+            ).fetchone()
+            if row is None:
+                return False
+            current = row["status"]
+            if status not in _DELIVERY_TRANSITIONS.get(current, frozenset()):
+                return False
+            cur = conn.execute(
+                """
+                UPDATE deliveries SET status = ?
+                WHERE source = ? AND alert_id = ? AND task_kind = ?
+                """,
+                (status, source, alert_id, task_kind),
+            )
+            return cur.rowcount > 0
+
+
+    # ================================================================
+    # V4.4 C4-01: 单向同步 Outbox + 服务端幂等登记 + 冲突审计
+    # - 首次业务写入、首次幂等登记、首次 Outbox 入队 在同一事务内完成。
+    # - 同键同内容 -> already_synced; 同键异内容 -> c4_content_conflict 审计 + content_mismatch。
+    # - 唯一约束冲突回滚后重新核验已存在内容, 不得一律视为成功。
+    # - fencing: 领取时 gen+1; 回写均校验 id + 预期状态 + 领取时 gen; rowcount==0 即停止。
+    # - 时间字段统一 UTC epoch 毫秒整数 (不改变既有业务表时间格式)。
+    # ================================================================
+
+    @staticmethod
+    def _utc_now_ms() -> int:
+        return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    def _write_business_in_tx(self, conn, record_type: str, source_record_id: str, business: dict) -> None:
+        """在同一连接/事务内以给定稳定 ID 写业务记录 (与公开 save_* 共用 core, 语义一致)。"""
+        b = business if isinstance(business, dict) else {}
+        if record_type == "person_event":
+            self._event_write_core(
+                conn, source_id=source_record_id,
+                type=b.get("type", "c4"),
+                severity=b.get("severity", "unknown"),
+                person_id=b.get("person_id"),
+                payload=b.get("payload", {}),
+            )
+        elif record_type == "reading":
+            self._reading_write_core(
+                conn, source_id=source_record_id,
+                sensor_id=b.get("sensor_id", ""),
+                temperature=b.get("temperature", 0.0),
+                humidity=b.get("humidity"),
+                device_captured_at=b.get("device_captured_at"),
+                edge_received_at=b.get("edge_received_at"),
+            )
+        elif record_type == "sensor_alert":
+            self._sensor_alert_write_core(
+                conn, source_id=source_record_id,
+                type=b.get("type", "sensor_hightemp"),
+                temperature=b.get("temperature"),
+                humidity=b.get("humidity"),
+                threshold=b.get("threshold"),
+                severity=b.get("severity"),
+                device_captured_at=b.get("device_captured_at"),
+                reading_id=b.get("reading_id"),
+            )
+        else:
+            raise ValueError(f"未知 C4 record_type: {record_type!r}")
+
+    def _verify_existing_after_conflict(
+        self, tx, record_type: str, source_record_id: str, content_hash: str, edge_id: str | None,
+    ) -> str:
+        """唯一冲突后, 在给定连接上核验已存在登记内容 (不让所有冲突都视为 already_synced)。"""
+        row = tx.execute(
+            "SELECT content_hash FROM c4_idem WHERE record_type=? AND source_record_id=?",
+            (record_type, source_record_id),
+        ).fetchone()
+        if row is None:
+            return "unhandled"
+        now = self._utc_now_ms()
+        if row["content_hash"] == content_hash:
+            return "already_synced"
+        tx.execute(
+            """
+            INSERT INTO c4_content_conflict
+                (record_type, source_record_id, content_hash, conflict_hash, detected_at, edge_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (record_type, source_record_id, row["content_hash"], content_hash, now, edge_id),
+        )
+        return "content_mismatch"
+
+    def _enqueue_sync_in_tx(
+        self,
+        tx,
+        record_type: str,
+        source_record_id: str,
+        content_hash: str,
+        *,
+        business: dict | None = None,
+        edge_id: str | None = None,
+        created_at_ms: int | None = None,
+    ) -> tuple[str, str | None]:
+        """在调用方提供的连接/事务内执行 enqueue_sync 的核心逻辑。
+
+        - 不自行创建连接、不提交、不关闭；提交/回滚由调用方事务负责。
+        - 幂等/冲突/Outbox 逻辑与公开 enqueue_sync 完全一致。
+        """
+        if record_type not in _C4_RECORD_TYPES:
+            raise ValueError(f"非法 record_type: {record_type!r} (仅允许 {sorted(_C4_RECORD_TYPES)})")
+        if not isinstance(source_record_id, str) or not source_record_id:
+            raise ValueError("source_record_id 必须为非空字符串")
+        if not isinstance(content_hash, str) or not content_hash:
+            raise ValueError("content_hash 必须为非空字符串")
+        now = created_at_ms if created_at_ms is not None else self._utc_now_ms()
+
+        existing = tx.execute(
+            "SELECT content_hash FROM c4_idem WHERE record_type=? AND source_record_id=?",
+            (record_type, source_record_id),
+        ).fetchone()
+        if existing is None:
+            # 首收: 业务写(如需) + 幂等登记 + Outbox 入队 (同事务原子)
+            if business is not None:
+                self._write_business_in_tx(tx, record_type, source_record_id, business)
+            tx.execute(
+                """
+                INSERT INTO c4_idem (record_type, source_record_id, content_hash, received_at, edge_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (record_type, source_record_id, content_hash, now, edge_id),
+            )
+            tx.execute(
+                """
+                INSERT INTO sync_outbox (record_type, source_record_id, status, created_at)
+                VALUES (?, ?, 'pending', ?)
+                """,
+                (record_type, source_record_id, now),
+            )
+            return ("queued", source_record_id)
+        if existing["content_hash"] == content_hash:
+            return ("already_synced", source_record_id)
+        tx.execute(
+            """
+            INSERT INTO c4_content_conflict
+                (record_type, source_record_id, content_hash, conflict_hash, detected_at, edge_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (record_type, source_record_id, existing["content_hash"], content_hash, now, edge_id),
+        )
+        return ("content_mismatch", source_record_id)
+
+    def enqueue_sync(
+        self,
+        record_type: str,
+        source_record_id: str,
+        content_hash: str,
+        *,
+        business: dict | None = None,
+        edge_id: str | None = None,
+        created_at_ms: int | None = None,
+    ) -> tuple[str, str | None]:
+        """受控入口: 首次业务写 + 幂等登记 + Outbox 入队 (同事务), 或返回冲突/重复结果。
+
+        返回 (result, source_record_id): result ∈
+          "queued"           首收, 已登记并入队
+          "already_synced"   同键同内容, 不写业务/入队
+          "content_mismatch" 同键异内容, 追加冲突审计, 不覆盖首次
+        """
+        try:
+            with self.with_transaction() as tx:
+                return self._enqueue_sync_in_tx(
+                    tx, record_type, source_record_id, content_hash,
+                    business=business, edge_id=edge_id, created_at_ms=created_at_ms,
+                )
+        except sqlite3.IntegrityError:
+            # 并发唯一冲突/约束冲突: 整事务回滚, 在新事务重核已存在内容
+            with self.with_transaction() as tx:
+                result = self._verify_existing_after_conflict(tx, record_type, source_record_id, content_hash, edge_id)
+            if result == "unhandled":
+                raise
+            return (result, source_record_id)
+
+    # ---- C4-01 待核验承载 (c4_verify): 规范化失败/存在原因码 -> 记入, 不进 enqueue_sync ----
+
+    def _add_verify_in_tx(
+        self,
+        tx,
+        record_type: str,
+        source_record_id: str,
+        reasons: set[str],
+        *,
+        business_json: dict | None = None,
+        edge_id: str | None = None,
+        now_ms: int | None = None,
+    ) -> bool:
+        """在调用方提供的连接/事务内执行 add_verify 核心 (新增/合并, 不丢并发原因)。
+
+        - 不自行创建连接、不提交、不关闭; 提交/回滚由调用方事务负责。
+        """
+        from src.database.canonical import REASONS, canonical_reasons_json, parse_reasons_json
+
+        new = {str(r) for r in reasons}
+        if not new.issubset(REASONS):
+            bad = sorted(new - REASONS)
+            raise ValueError(f"非法原因码: {bad}")
+        now = now_ms if now_ms is not None else self._utc_now_ms()
+        biz = json.dumps(business_json, ensure_ascii=False, default=str) if isinstance(business_json, dict) else None
+
+        row = tx.execute(
+            "SELECT reasons FROM c4_verify WHERE record_type=? AND source_record_id=?",
+            (record_type, source_record_id),
+        ).fetchone()
+        if row is not None:
+            merged = new | parse_reasons_json(row["reasons"])
+            tx.execute(
+                """
+                UPDATE c4_verify
+                SET reasons=?, business_json=?, edge_id=?, updated_at=?
+                WHERE record_type=? AND source_record_id=?
+                """,
+                (canonical_reasons_json(merged), biz, edge_id, now, record_type, source_record_id),
+            )
+            return True
+        try:
+            tx.execute(
+                """
+                INSERT INTO c4_verify
+                    (record_type, source_record_id, reasons, business_json, edge_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (record_type, source_record_id, canonical_reasons_json(new), biz, edge_id, now, now),
+            )
+            return True
+        except sqlite3.IntegrityError:
+            # 并发 INSERT 冲突 -> 重取并合并
+            row2 = tx.execute(
+                "SELECT reasons FROM c4_verify WHERE record_type=? AND source_record_id=?",
+                (record_type, source_record_id),
+            ).fetchone()
+            merged = new | parse_reasons_json(row2["reasons"])
+            tx.execute(
+                """
+                UPDATE c4_verify
+                SET reasons=?, business_json=?, edge_id=?, updated_at=?
+                WHERE record_type=? AND source_record_id=?
+                """,
+                (canonical_reasons_json(merged), biz, edge_id, now, record_type, source_record_id),
+            )
+            return True
+
+    def add_verify(
+        self,
+        record_type: str,
+        source_record_id: str,
+        reasons: set[str],
+        *,
+        business_json: dict | None = None,
+        edge_id: str | None = None,
+        now_ms: int | None = None,
+    ) -> bool:
+        """新增/合并一条待核验记录 (同键并发合并原因码, 不丢失)。"""
+        with self.with_transaction() as conn:
+            return self._add_verify_in_tx(
+                conn, record_type, source_record_id, reasons,
+                business_json=business_json, edge_id=edge_id, now_ms=now_ms,
+            )
+
+    def get_verify(self, record_type: str, source_record_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, record_type, source_record_id, reasons, business_json, edge_id, created_at, updated_at
+                FROM c4_verify WHERE record_type=? AND source_record_id=?
+                """,
+                (record_type, source_record_id),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_verify(self, limit: int = 100) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM c4_verify ORDER BY id LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---- Outbox 状态操作 (id + 预期状态 + 领取时 gen 条件更新; rowcount==0 即停) ----
+
+    def outbox_claim(self, worker_id: str, now_ms: int | None = None) -> int | None:
+        """原子领取一条可处理任务; gen+1; 返回 outbox id (无可领取返 None)。"""
+        now = now_ms if now_ms is not None else self._utc_now_ms()
+        with self.with_transaction() as tx:
+            row = tx.execute(
+                """
+                SELECT id FROM sync_outbox
+                WHERE (status='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=:now))
+                   OR (status='retry_wait' AND next_attempt_at IS NOT NULL AND next_attempt_at<=:now)
+                   OR (status='processing' AND lease_until IS NOT NULL AND lease_until<:now)
+                ORDER BY id LIMIT 1
+                """,
+                {"now": now},
+            ).fetchone()
+            if row is None:
+                return None
+            oid = row["id"]
+            cur = tx.execute(
+                """
+                UPDATE sync_outbox
+                SET status='processing', gen=gen+1, worker_id=:me, lease_until=:until
+                WHERE id=:id
+                  AND ((status='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=:now))
+                    OR (status='retry_wait' AND next_attempt_at IS NOT NULL AND next_attempt_at<=:now)
+                    OR (status='processing' AND lease_until IS NOT NULL AND lease_until<:now))
+                """,
+                {"id": oid, "me": worker_id, "until": now + self._outbox_lease_ms, "now": now},
+            )
+            if cur.rowcount != 1:
+                return None  # 已被其余 worker 领取
+            return oid
+
+    _outbox_lease_ms = 30_000  # 默认租约 30s (候选, 可配置)
+
+    def outbox_renew(self, outbox_id: int, worker_id: str, gen: int, now_ms: int | None = None) -> bool:
+        """续租: gen 不变; 仅租约未过期且 gen 匹配才可续租。"""
+        now = now_ms if now_ms is not None else self._utc_now_ms()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE sync_outbox SET lease_until=:until
+                WHERE id=:id AND status='processing' AND worker_id=:me AND gen=:gen AND lease_until>=:now
+                """,
+                {"until": now + self._outbox_lease_ms, "id": outbox_id, "me": worker_id, "gen": gen, "now": now},
+            )
+            return cur.rowcount > 0
+
+    def outbox_mark_success(self, outbox_id: int, worker_id: str, gen: int, now_ms: int | None = None) -> bool:
+        """成功回写 (终态): 校验 id+processing+gen。"""
+        now = now_ms if now_ms is not None else self._utc_now_ms()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE sync_outbox SET status='success', completed_at=:now
+                WHERE id=:id AND status='processing' AND worker_id=:me AND gen=:gen
+                """,
+                {"id": outbox_id, "me": worker_id, "gen": gen, "now": now},
+            )
+            return cur.rowcount > 0
+
+    def outbox_mark_retry_wait(
+        self, outbox_id: int, worker_id: str, gen: int,
+        *, next_attempt_at: int, last_error: str, now_ms: int | None = None,
+    ) -> bool:
+        """可重试失败回写 -> retry_wait, retry_count+1 (校验 id+processing+gen)。"""
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE sync_outbox
+                SET status='retry_wait', retry_count=retry_count+1, next_attempt_at=:na, last_error=:err
+                WHERE id=:id AND status='processing' AND worker_id=:me AND gen=:gen
+                """,
+                {"id": outbox_id, "me": worker_id, "gen": gen, "na": next_attempt_at, "err": last_error},
+            )
+            return cur.rowcount > 0
+
+    def outbox_mark_dead_letter(
+        self, outbox_id: int, worker_id: str, gen: int, *, last_error: str, now_ms: int | None = None,
+    ) -> bool:
+        """重试耗尽/永久失败 -> dead_letter (校验 id+processing+gen)。"""
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE sync_outbox SET status='dead_letter', last_error=:err
+                WHERE id=:id AND status='processing' AND worker_id=:me AND gen=:gen
+                """,
+                {"id": outbox_id, "me": worker_id, "gen": gen, "err": last_error},
+            )
+            return cur.rowcount > 0
+
+    def outbox_requeue(self, outbox_id: int, *, reason: str = "manual", now_ms: int | None = None):
+        """人工重入: dead_letter -> pending; 保留原失败历史(追加 requeued 标记), 重置重试计数。"""
+        now = now_ms if now_ms is not None else self._utc_now_ms()
+        with self.with_transaction() as tx:
+            row = tx.execute(
+                "SELECT last_error FROM sync_outbox WHERE id=? AND status='dead_letter'",
+                (outbox_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            hist = (row["last_error"] or "") + f"|requeued@{now}:{reason}"
+            cur = tx.execute(
+                """
+                UPDATE sync_outbox
+                SET status='pending', gen=gen+1, retry_count=0, next_attempt_at=NULL,
+                    worker_id=NULL, lease_until=NULL, last_error=:hist
+                WHERE id=:id AND status='dead_letter'
+                """,
+                {"hist": hist, "id": outbox_id},
+            )
+            return cur.rowcount > 0
+
+    def get_outbox(self, outbox_id: int) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM sync_outbox WHERE id=?",
+                (outbox_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_outbox(self, status: str | None = None, limit: int = 100) -> list[dict]:
+        if status is not None and status not in _OUTBOX_STATUS:
+            raise ValueError(f"非法 outbox status: {status!r}")
+        params: list[Any] = []
+        where = "WHERE 1=1"
+        if status is not None:
+            where += " AND status=?"
+            params.append(status)
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM sync_outbox {where} ORDER BY id LIMIT ?",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ====================================================================
