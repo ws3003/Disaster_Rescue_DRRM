@@ -208,3 +208,65 @@ class TestLastCloudError:
         r = EdgeFallbackRouter(cloud, lambda img: (_ for _ in ()).throw(RuntimeError("edge")), _cfg())
         r.infer(None)
         assert r.last_cloud_error == "cloud_timeout"      # 边缘失败不覆盖云端错误码
+
+class TestClientBoundedRetry:
+    def test_default_single_call(self):
+        calls = [0]
+        def f(img, timeout):
+            calls[0] += 1
+            raise CloudTimeoutError()
+        c = CloudYoloClient(infer_func=f)
+        with pytest.raises(CloudTimeoutError):
+            c.infer(None, 1.0)
+        assert calls[0] == 1                             # max_attempts 默认 1
+
+    def test_transient_retry_then_success(self):
+        calls = [0]
+        det = Detection(class_id=1, class_name="civilian", confidence=0.9, bbox=(1, 2, 3, 4))
+        def f(img, timeout):
+            calls[0] += 1
+            if calls[0] < 3:
+                raise CloudTimeoutError()
+            return [det]
+        c = CloudYoloClient(infer_func=f, max_attempts=3)
+        res = c.infer(None, 1.0)
+        assert len(res) == 1 and calls[0] == 3           # 含首次共 3 次
+
+    def test_transient_reaches_cap_raises(self):
+        calls = [0]
+        def f(img, timeout):
+            calls[0] += 1
+            raise CloudConnectionError()
+        c = CloudYoloClient(infer_func=f, max_attempts=2)
+        with pytest.raises(CloudConnectionError):
+            c.infer(None, 1.0)
+        assert calls[0] == 2                             # 不超过 max_attempts
+
+    def test_non_transient_not_retried(self):
+        calls = [0]
+        def f(img, timeout):
+            calls[0] += 1
+            return [{"bad": 1}]                           # 无效响应 -> invalid
+        c = CloudYoloClient(infer_func=f, max_attempts=3)
+        with pytest.raises(CloudInvalidResponseError):
+            c.infer(None, 1.0)
+        assert calls[0] == 1                             # 非瞬时不重试
+
+    @pytest.mark.parametrize("bad", [0, -1, True, False, 1.5, "3"])
+    def test_illegal_max_attempts(self, bad):
+        with pytest.raises(ValueError):
+            CloudYoloClient(infer_func=lambda img, t: [], max_attempts=bad)
+
+    def test_final_failure_surfaces_once(self):
+        # 客户端内部重试后，最终失败只抛一次（服务层只见最终结果）
+        calls = [0]
+        def f(img, timeout):
+            calls[0] += 1
+            raise CloudTimeoutError()
+        c = CloudYoloClient(infer_func=f, max_attempts=3)
+        seen = 0
+        try:
+            c.infer(None, 1.0)
+        except CloudTimeoutError:
+            seen += 1
+        assert seen == 1 and calls[0] == 3

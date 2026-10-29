@@ -46,7 +46,9 @@ class CloudYoloClient:
     - 输入：BGR 图像（np.ndarray，与边缘检测器一致）。
     - 输出：校验通过的 Detection 元组，或抛 CloudError 子类（超时/连接/无效/不可用）。
     - `infer_func`/`health_func` 可注入（Fake 测试）；未注入则视为未接入真实服务。
-    - 不做无限重试：单次调用后由调用方/配置决定是否回退。
+    - **有界重试归客户端**：`infer` 对瞬时错误（CloudTimeoutError / CloudConnectionError，含映射自
+      TimeoutError/OSError/其它异常）在 `max_attempts` 内重试（默认 1=只试一次，行为不变）；
+      非瞬时错误（无效/不可用等）立即失败，不重试。服务层不重试，只消费客户端最终结果。
     """
 
     def __init__(
@@ -55,28 +57,50 @@ class CloudYoloClient:
         infer_func: Optional[Callable[[Any, Optional[float]], Any]] = None,
         health_func: Optional[Callable[[], bool]] = None,
         model_id: str = "yolov26l",
+        max_attempts: int = 1,
     ):
+        # 校验：正整数，显式拒绝 bool/浮点/字符串/0/负值
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts <= 0:
+            raise ValueError(f"max_attempts 必须为正整数, 得到 {max_attempts!r}")
         self._infer = infer_func
         self._health = health_func
         self.model_id = model_id
+        self.max_attempts = int(max_attempts)
 
     def infer(self, image_bgr: Any, timeout: Optional[float] = None) -> tuple[Detection, ...]:
         if self._infer is None:
             raise CloudUnavailableError("cloud client not wired")
-        try:
-            raw = self._infer(image_bgr, timeout)
-        except CloudError:
-            raise
-        except TimeoutError:
-            raise CloudTimeoutError() from None
-        except OSError:
-            raise CloudConnectionError() from None
-        except Exception:
-            raise CloudConnectionError() from None
-        try:
-            return validate_detections(raw)
-        except ValueError as exc:
-            raise CloudInvalidResponseError(str(exc)) from exc
+        for attempt in range(self.max_attempts):
+            try:
+                raw = self._infer(image_bgr, timeout)
+            except CloudTimeoutError as exc:
+                if attempt == self.max_attempts - 1:
+                    raise
+                continue                        # 瞬时错误，还有尝试次数
+            except CloudConnectionError as exc:
+                if attempt == self.max_attempts - 1:
+                    raise
+                continue
+            except TimeoutError:
+                if attempt == self.max_attempts - 1:
+                    raise CloudTimeoutError() from None
+                continue
+            except OSError:
+                if attempt == self.max_attempts - 1:
+                    raise CloudConnectionError() from None
+                continue
+            except CloudError:
+                raise                           # 非瞬时（无效/不可用等）：不重试
+            except Exception:
+                if attempt == self.max_attempts - 1:
+                    raise CloudConnectionError() from None
+                continue
+            # 成功：校验并返回（已消耗一次尝试；无需再试）
+            try:
+                return validate_detections(raw)
+            except ValueError as exc:
+                raise CloudInvalidResponseError(str(exc)) from exc
+        raise CloudConnectionError()            # 循环耗尽未返回/未抛（防御性）
 
     def health(self) -> bool:
         """健康检查。失败/未接入一律返回 False，不代表下次推理必成功。"""
