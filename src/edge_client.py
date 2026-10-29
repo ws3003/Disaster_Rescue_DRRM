@@ -413,6 +413,7 @@ def run_loop(
     observation: Optional[Dict[str, Any]] = None,
     flush_state: Optional[Dict[str, Any]] = None,
     vision_client: Optional[Any] = None,
+    probe_scheduler: Optional[Callable[[Any], Any]] = None,
 ) -> int:
     """周期性 采集→(感知)→编码→上传→打印; preview 时叠加显示相机帧。
 
@@ -462,6 +463,15 @@ def run_loop(
             print("camera capture failed")
             sleep(interval)
             continue
+
+        # ── X4 云端恢复探测：仅当有调度器时，按单调时钟/冷却恢复态节流调用。
+        # 调度器内部负责单调时钟节流；run_loop 只把当前帧传给调度器(由调度器决定是否探测)。
+        # 云端正常/禁用时调度器返回 None(无开销)；冷却结束恢复态才会发真实短超时探测。
+        if probe_scheduler is not None:
+            try:
+                probe_scheduler(frame)
+            except Exception:  # noqa: BLE001 — 探测调度失败不得阻断主帧上传
+                print("[EdgeClient] x4 probe scheduler error (main loop continues)")
 
         try:
             jpeg = encode_jpeg(frame, quality)
@@ -698,13 +708,16 @@ def main(argv: Optional[list] = None) -> int:
     # 使 X4DetectionService 成为检测后端(云端失败时其内部回退本地 Detector)。
     # 姿态/状态/风险/排序/事件生成与 Agent 输入格式不变。
     perception = None
+    probe_scheduler = None
     perception_cfg = cfg.get("perception", {}) or {}
     if perception_cfg.get("enabled", True):
         try:
-            from src.x4.composition import build_x4_perception
+            from src.x4.composition import build_x4_perception, make_probe_scheduler
             perception = build_x4_perception()
+            probe_scheduler = make_probe_scheduler(perception)
         except Exception as exc:  # noqa: BLE001
             print(f"[EdgeClient] perception init failed, upload image only: {exc}")
+            probe_scheduler = None
 
     # V4.0-B Agent 决策辅助: main() 中一次性初始化, 跨帧复用 (memory cooldown 生效)
     # agent.enabled=true 才初始化; 失败回退为仅上传(不阻塞 camera/perception/upload)。
@@ -771,6 +784,7 @@ def main(argv: Optional[list] = None) -> int:
                 "caller": flush_caller,
             },
             vision_client=_build_vision_client(cfg),
+            probe_scheduler=probe_scheduler,
         )
     finally:
         cam.close()

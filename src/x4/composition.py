@@ -20,7 +20,7 @@ from typing import Any, Callable, List, Optional
 
 from src.x4.config import X4Config, load_x4_config
 from src.x4.http_transport import new_http_client
-from src.x4.service import X4DetectionService
+from src.x4.service import CLOUD_COOLDOWN, RECOVERY_PROBE, X4DetectionService
 
 
 class X4CompositionError(RuntimeError):
@@ -88,10 +88,71 @@ def build_x4_perception(
             cloud = None
     edge = edge_detect if edge_detect is not None else make_edge_detector()
 
-    svc = X4DetectionService(cfg=cfg, cloud=cloud, edge_detect=edge, db=db, record=record)
+    svc = X4DetectionService(cfg=cfg, cloud=cloud, edge_detect=edge, db=db, record=record,
+                             probe_interval_seconds=cfg.probe_interval_seconds)
 
     if det_only:
         return svc
 
     from src.edge_perception import EdgePerception
     return EdgePerception(det=svc)
+
+
+def make_probe_fn(service: Any, cfg: X4Config) -> Callable[[Any], Any]:
+    """构造一个恢复探测调度可调用的闭包：用当前帧作探测图像、真实推理、短超时。
+
+    - `probe_fn(frame)` 返回 `service.tick_probe(probe_once)` 的状态字：
+      `in_cooldown/deferred/in_probe/probe_ok/restored/probe_failed/None`。
+    - `probe_once` 用真实云端推理（`service.cloud.infer`）以短超时判定云端可用，
+      不使用健康检查端点（避免"健康成功但推理失败"误判）。
+    - 云端未接线（service.cloud is None）或未启用时，`tick_probe` 自身返回 None，不发起探测。
+    - 单调节流（monotonic 间隔）由调用方 run_loop 负责；本函数只在到间隔时被调用。
+    """
+    def _probe_once() -> bool:
+        cloud = getattr(service, "cloud", None)
+        if cloud is None:
+            return False
+        try:
+            img = _PROBE_IMAGE if _PROBE_IMAGE is not None else None
+            if img is None:
+                return False
+            cloud.infer(img, timeout=cfg.probe_short_timeout_seconds)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    _PROBE_IMAGE: Optional[Any] = None
+
+    def probe_fn(frame: Any) -> Any:
+        nonlocal _PROBE_IMAGE
+        # 云端正常(CLOUD_PREFERRED)/禁用(EDGE_ONLY)：快路径，不设图像、不触达探测（零开销）。
+        state = getattr(getattr(service, "machine", None), "state", "")
+        if state not in (CLOUD_COOLDOWN, RECOVERY_PROBE):
+            return None
+        _PROBE_IMAGE = frame  # 探测图像取当前帧（同步探测：帧未被复用前调用）
+        try:
+            return service.tick_probe(_probe_once)
+        finally:
+            _PROBE_IMAGE = None  # 释放引用，避免长驻大帧
+
+    return probe_fn
+
+
+def make_probe_scheduler(perception: Any, cfg: Optional[X4Config] = None) -> Optional[Callable[[Any], Any]]:
+    """从已装配的感知组件(EdgePerception.det 即 X4DetectionService)提取恢复探测调度器。
+
+    - 探测绑定**同一个** `X4DetectionService`（探测恢复后其状态机同步回到 CLOUD_PREFERRED，
+      与感知链路共用同一状态）。
+    - perception 是注入的 X4DetectionService、或 EdgePerception(det=X4DetectionService) 时可取；
+      否则返回 None（非 X4 感知/未接线 → 不调度探测）。
+    """
+    svc = perception if isinstance(perception, X4DetectionService) else None
+    if svc is None:
+        # EdgePerception 封装其 det（组合根用 `EdgePerception(det=X4DetectionService)`）
+        det = getattr(perception, "_det", None)
+        if isinstance(det, X4DetectionService):
+            svc = det
+    if svc is None:
+        return None
+    c = cfg if cfg is not None else svc.cfg
+    return make_probe_fn(svc, c)

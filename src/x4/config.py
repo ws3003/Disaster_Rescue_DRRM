@@ -22,6 +22,9 @@ class X4Config:
     model_id: str = "yolov26l"
     fallback_enabled: bool = True    # 云端失败时回退到边缘检测
     cloud_health_enabled: bool = False
+    # 云端恢复探测（冷却/恢复态调度；云端正常/禁用时无开销）
+    probe_interval_seconds: float = 10.0   # 冷却结束后恢复探测间隔
+    probe_short_timeout_seconds: float = 2.0  # 探测专用短超时（不改变正常推理超时）
 
 
 def _as_bool(v: Any, name: str, default: bool) -> bool:
@@ -69,5 +72,7 @@ def load_x4_config(path: str | Path = "config/x4.yaml") -> X4Config:
         model_id=str(cfg.get("model_id") or "yolov26l"),
         fallback_enabled=_as_bool(cfg.get("fallback_enabled"), "fallback_enabled", True),
         cloud_health_enabled=_as_bool(cfg.get("cloud_health_enabled"), "cloud_health_enabled", False),
+        probe_interval_seconds=_as_float(cfg.get("probe_interval_seconds"), "probe_interval_seconds", 0.001, 10.0),
+        probe_short_timeout_seconds=_as_float(cfg.get("probe_short_timeout_seconds"), "probe_short_timeout_seconds", 0.001, 2.0),
     )
     return c
