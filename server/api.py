@@ -36,6 +36,8 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import server.schemas as sch
+from server import s4 as s4_module
+from server import c4 as c4_module
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
@@ -568,3 +570,11 @@ def get_snapshot(filename: str) -> FileResponse:
     if not fpath.is_file():
         raise HTTPException(status_code=404, detail="snapshot 不存在")
     return FileResponse(fpath, media_type="image/jpeg")
+
+
+# ======================================================================
+# V4.4 S4 只读查询接口 (挂载独立 router, 契约 schemas/s4_contract.json v0.1.0)
+# 仅新增 S4 路由; 不改动既有 V4.3 端点/响应模型。
+# ======================================================================
+app.include_router(s4_module.router)
+app.include_router(c4_module.router)
