@@ -90,23 +90,18 @@ class DatabaseTool(Tool):
             # ==================================================
 
             if action == "save_event":
-
-                event_id = self.db.save_event(
-                    type=kwargs.get(
-                        "type",
-                        "unknown",
-                    ),
-                    severity=kwargs.get(
-                        "severity"
-                    ),
-                    person_id=kwargs.get(
-                        "person_id"
-                    ),
-                    payload=kwargs.get(
-                        "payload",
-                        {},
-                    ),
+                from src.sync import bridge as c4_bridge
+                _shot = c4_bridge.create_sync_record(
+                    self.db,
+                    record_type="person_event",
+                    business={
+                        "type": kwargs.get("type", "unknown"),
+                        "severity": kwargs.get("severity"),
+                        "person_id": kwargs.get("person_id"),
+                        "payload": kwargs.get("payload", {}),
+                    },
                 )
+                event_id = _shot["source_record_id"]
 
                 return {
                     "ok": True,
