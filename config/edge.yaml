@@ -76,3 +76,17 @@ observation:
 # 救援工具配置
 rescue:
   snapshot_path: "data/latest_vision.json"
+
+# ============================================================
+# V4.4 E7 传感器配置（开发联调参数，非现场安全认证标准）
+# 供 src.sensor.config.load_sensor_config 读取；两级高温+恢复阈值。
+# ============================================================
+sensor:
+  sensor_id: "dht11-01"
+  temperature_threshold: 40.0
+  level2_threshold: 50.0
+  recovery_threshold: 36.0
+  sample_period_seconds: 10.0
+  confirm_high_count: 3
+  confirm_recovery_count: 3
+  cooldown_seconds: 600.0
