@@ -1,0 +1,13 @@
+# X4/E6 服务端配置（`config/x4_server.yaml`）
+# 仅结构参考，合法 YAML；鉴权 token 一律从环境变量 X4_API_TOKEN 读取，绝不写入本文件。
+# 模型权重路径仅由服务端配置决定；客户端只提交白名单 model_id（禁止用客户端字符串拼接路径）。
+x4_server:
+  auth:
+    token_env: X4_API_TOKEN      # Bearer token 由此环境变量读取；缺失=未配令牌
+  limits:
+    max_file_bytes: 10485760     # 默认 10 MiB
+  inference:
+    conf: 0.25                   # 检测置信度阈值 (0,1]
+    imgsz: 640                   # 模型输入尺寸（正整数）
+  models:
+    yolov26l: "D:/YOLOv26数据集/yolov26l_best.pt"   # model_id 白名单 -> 权重路径
