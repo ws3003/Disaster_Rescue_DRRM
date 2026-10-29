@@ -1,0 +1,11 @@
+# X4 云端 YOLO 推理 + 边缘回退配置（独立文件，不改 edge.yaml）。
+# 安全默认：enabled=false（未配置真实云端服务时不走云端路径）。
+# cloud_endpoint 为空 = 未接入真实远端；接入需你确认真实服务地址后在此/环境注入。
+x4:
+  enabled: false                        # 是否尝试云端推理
+  request_timeout_seconds: 8.0          # 单次云端请求超时（不无限重试）
+  max_attempts: 1                       # 云端尝试次数（不无限重试）
+  cloud_endpoint: ""                    # 真实云端地址（未配置则缺省禁用/仅 Fake）
+  model_id: "yolov26l"                  # 云端候选模型标识
+  fallback_enabled: true                # 云端失败时回退边缘检测
+  cloud_health_enabled: false           # 是否启用云端健康检查前置
