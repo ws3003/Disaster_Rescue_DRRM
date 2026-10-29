@@ -131,6 +131,19 @@ class SensorAlertsTableTest(unittest.TestCase):
         self.assertEqual(events, 1)          # sensor_alerts 有一条
         self.assertEqual(events_count, 0)    # events 表不受影响
 
+    def test_occurred_at_explicit_persisted_verbatim(self) -> None:
+        # C4 3.2 一致性: 显式传入的 occurred_at 必须原样持久化, 不被核心重新生成
+        TS = "2026-10-28T12:34:56+08:00"
+        aid = self.db.save_sensor_alert(
+            type="sensor_over_temp", temperature=52.0, threshold=45.0, occurred_at=TS
+        )
+        row = self.db.get_sensor_alert(aid)
+        self.assertEqual(row["occurred_at"], TS)
+        # 缺省(不传) -> 使用默认保存时刻, 不等于显式值
+        aid2 = self.db.save_sensor_alert(type="sensor_over_temp", temperature=52.0, threshold=45.0)
+        row2 = self.db.get_sensor_alert(aid2)
+        self.assertNotEqual(row2["occurred_at"], TS)
+
 
 if __name__ == "__main__":
     unittest.main()
