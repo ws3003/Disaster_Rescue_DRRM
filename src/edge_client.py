@@ -694,12 +694,15 @@ def main(argv: Optional[list] = None) -> int:
     quality = args.quality if args.quality is not None else up_cfg.get("jpeg_quality", 90)
 
     # 本地感知桥接: 默认开启; 初始化失败回退为仅上传图片, 不阻塞
+    # V4.4 X4 组合根接入: 经 src/x4.composition.build_x4_perception() 装配感知组件,
+    # 使 X4DetectionService 成为检测后端(云端失败时其内部回退本地 Detector)。
+    # 姿态/状态/风险/排序/事件生成与 Agent 输入格式不变。
     perception = None
     perception_cfg = cfg.get("perception", {}) or {}
     if perception_cfg.get("enabled", True):
         try:
-            import edge_perception
-            perception = edge_perception.EdgePerception()
+            from src.x4.composition import build_x4_perception
+            perception = build_x4_perception()
         except Exception as exc:  # noqa: BLE001
             print(f"[EdgeClient] perception init failed, upload image only: {exc}")
 
