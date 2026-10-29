@@ -1,9 +1,14 @@
 <import src="../../templates/alert-item.wxml" />
 
+<view class="app-bg"></view>
+
 <view class="container">
   <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
 
-  <view class="page-title">告警列表</view>
+  <view class="hero">
+    <view class="hero-title">告警列表</view>
+    <view class="hero-subtitle">按类别分组 · 服务端分页</view>
+  </view>
 
   <view class="tabs">
     <view
@@ -16,8 +21,70 @@
     >{{tab.label}}</view>
   </view>
 
-  <view class="muted" style="margin-bottom: 16rpx;">
-    类别由服务端 category 参数控制；分组顺序、排序与 has_more 均以服务端返回为准，客户端不合并、不重排。
+  <!-- 本地筛选：只过滤已加载数据，契约未提供 search/severity/status 参数 -->
+  <view class="search">
+    <text class="search-icon">⌕</text>
+    <input
+      class="search-input"
+      placeholder="筛选已加载告警（key / 标题 / 设备）"
+      placeholder-class="search-placeholder"
+      value="{{keyword}}"
+      confirm-type="search"
+      bindinput="onKeywordInput"
+    />
+    <text wx:if="{{keyword}}" class="search-clear" bindtap="onClearKeyword">清除</text>
+  </view>
+
+  <view class="filter-row">
+    <text class="filter-label">严重程度</text>
+    <view
+      wx:for="{{severityOptions}}"
+      wx:for-item="option"
+      wx:key="value"
+      class="fchip {{option.value == severityFilter ? 'fchip-active' : ''}}"
+      data-value="{{option.value}}"
+      bindtap="onSeverityTap"
+    >{{option.label}}</view>
+  </view>
+
+  <view wx:if="{{showStatusFilter}}" class="filter-row">
+    <text class="filter-label">状态</text>
+    <view
+      wx:for="{{statusOptions}}"
+      wx:for-item="option"
+      wx:key="value"
+      class="fchip {{option.value == statusFilter ? 'fchip-active' : ''}}"
+      data-value="{{option.value}}"
+      bindtap="onStatusTap"
+    >{{option.label}}</view>
+  </view>
+
+  <view class="search-hint">
+    <block wx:if="{{filtering}}">
+      本地筛选已加载 {{loadedCount}} 条，命中 {{filteredCount}} 条（非服务端搜索）
+      <text class="link" bindtap="onResetFilters">重置</text>
+    </block>
+    <block wx:else>
+      筛选与排序以服务端返回为准，客户端不合并、不重排。
+    </block>
+  </view>
+
+  <!-- 已加载统计（仅统计已加载数据，不代表服务端全量） -->
+  <view wx:if="{{loadedCount}}" class="stats-bar">
+    <view class="stats-item">
+      <text class="stats-value">{{loadedCount}}</text>
+      <text class="stats-label">已加载</text>
+    </view>
+    <view class="stats-sep"></view>
+    <view class="stats-item">
+      <text class="stats-value stats-high">{{highCount}}</text>
+      <text class="stats-label">高严重</text>
+    </view>
+    <view class="stats-sep"></view>
+    <view class="stats-item">
+      <text class="stats-value">{{total}}</text>
+      <text class="stats-label">服务端总数</text>
+    </view>
   </view>
 
   <view wx:if="{{error}}" class="notice notice-error">
@@ -25,18 +92,40 @@
     <view class="btn btn-ghost" bindtap="retry">重试</view>
   </view>
 
+  <!-- 首次加载骨架屏 -->
+  <block wx:if="{{loading && !views.length && !initialized}}">
+    <view class="card">
+      <view class="sk sk-line sk-line-sm"></view>
+      <view class="sk sk-block"></view>
+      <view class="sk sk-block"></view>
+      <view class="sk sk-block"></view>
+    </view>
+  </block>
+
   <view wx:if="{{initialized && isEmpty}}" class="state-block">
     当前分类暂无告警数据。
   </view>
 
+  <view wx:if="{{filtering && filterEmpty}}" class="state-block">
+    没有匹配的告警。本地筛选只作用于已加载的 {{loadedCount}} 条数据。
+  </view>
+
   <view wx:if="{{views.length}}" class="card">
     <block wx:for="{{views}}" wx:for-item="alert" wx:key="alertKey">
+      <view wx:if="{{alert.categoryHeader}}" class="category-sep">
+        <view class="dot"></view>{{alert.categoryHeader}}
+      </view>
+      <view wx:if="{{alert.dateHeader}}" class="date-sep">{{alert.dateHeader}}</view>
       <template is="alertItem" data="{{item: alert}}" />
     </block>
   </view>
 
-  <view wx:if="{{loading}}" class="footer-state">加载中…</view>
+  <view wx:if="{{loading}}" class="footer-state">
+    <text class="spinner"></text>加载中…
+  </view>
   <view wx:elif="{{initialized && error && !views.length}}" class="footer-state">加载失败，请重试。</view>
   <view wx:elif="{{views.length && hasMore}}" class="footer-state">上拉加载更多</view>
   <view wx:elif="{{views.length && !hasMore}}" class="footer-state">已加载全部（服务端 meta.has_more=false）。</view>
 </view>
+
+<view wx:if="{{showBackTop}}" class="fab" bindtap="backToTop">↑</view>

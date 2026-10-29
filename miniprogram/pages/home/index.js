@@ -37,14 +37,16 @@ Page({
   },
 
   applyState(state) {
+    // 相对时间只是展示层派生值，每次渲染取当前时间即可。
+    const nowMs = Date.now();
     this.setData({
       loading: state.loading,
       status: state.status,
       person: Object.assign({}, state.person, {
-        views: buildAlertListViews(state.person.items)
+        views: buildAlertListViews(state.person.items, { nowMs: nowMs })
       }),
       sensor: Object.assign({}, state.sensor, {
-        views: buildAlertListViews(state.sensor.items)
+        views: buildAlertListViews(state.sensor.items, { nowMs: nowMs })
       }),
       summary: state.summary
     });
@@ -92,5 +94,12 @@ Page({
     wx.navigateTo({
       url: '/pages/detail/index?alert_key=' + encodeURIComponent(alertKey)
     });
+  },
+
+  onShareAppMessage() {
+    return {
+      title: '灾害现场智能监测 · 现场态势',
+      path: '/pages/home/index'
+    };
   }
 });

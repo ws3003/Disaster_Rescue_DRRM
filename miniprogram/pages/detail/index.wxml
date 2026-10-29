@@ -1,11 +1,28 @@
+<view class="app-bg"></view>
+
 <view class="container">
   <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
 
-  <view class="page-title">告警详情</view>
+  <view class="hero">
+    <view class="hero-title">告警详情</view>
+    <view class="hero-subtitle">S4-03 · 契约字段完整展示</view>
+  </view>
 
-  <view wx:if="{{alertKey}}" class="muted mono" style="margin-bottom: 16rpx;">alert_key：{{alertKey}}</view>
+  <view wx:if="{{alertKey}}" class="copy-bar">
+    <text class="copy-key mono">alert_key：{{alertKey}}</text>
+    <text class="copy-btn" bindtap="copyAlertKey">复制</text>
+  </view>
 
-  <view wx:if="{{loading && !detailView}}" class="state-block">加载告警详情…</view>
+  <!-- 加载骨架屏 -->
+  <block wx:if="{{loading && !detailView}}">
+    <view class="card">
+      <view class="sk sk-line" style="width: 60%;"></view>
+      <view class="sk sk-line sk-line-sm"></view>
+      <view class="sk sk-line"></view>
+      <view class="sk sk-line"></view>
+      <view class="sk sk-line sk-line-sm"></view>
+    </view>
+  </block>
 
   <view wx:if="{{error}}" class="notice notice-error">
     {{error.message}}
@@ -13,18 +30,69 @@
   </view>
 
   <block wx:if="{{detailView}}">
+    <!-- 概要卡 -->
     <view class="section card">
-      <view class="item-head">
-        <view class="item-title">{{detailView.headline}}</view>
-        <text class="tag {{detailView.categoryClass}}">{{detailView.categoryLabel}}</text>
+      <view class="detail-head">
+        <view class="detail-headline">{{detailView.headline}}</view>
+        <view class="detail-tags">
+          <text class="tag {{detailView.categoryClass}}">{{detailView.categoryLabel}}</text>
+          <text wx:if="{{detailView.severityText !== '—'}}" class="sev-badge {{detailView.severityClass}}">
+            严重程度 {{detailView.severityText}}
+          </text>
+          <text wx:if="{{detailView.statusText}}" class="tag {{detailView.statusClass}}">{{detailView.statusText}}</text>
+        </view>
+        <view class="detail-time">
+          {{detailView.timeLabel}}：{{detailView.timeText}}
+          <text wx:if="{{detailView.relativeText}}" class="relative">{{detailView.relativeText}}</text>
+        </view>
       </view>
-      <view wx:if="{{detailView.statusText}}" style="margin-bottom: 8rpx;">
-        <text class="tag {{detailView.statusClass}}">{{detailView.statusText}}</text>
+    </view>
+
+    <!-- 触发快照对比：只用契约里的 temperature / humidity / threshold -->
+    <view wx:if="{{detailView.metrics.length}}" class="section card">
+      <view class="card-title">
+        <text>触发快照对比</text>
+        <text class="muted">阈值来自契约字段</text>
       </view>
-      <view class="divider"></view>
+
+      <view
+        class="metric"
+        wx:for="{{detailView.metrics}}"
+        wx:for-item="metric"
+        wx:key="label"
+      >
+        <view class="metric-head">
+          <text class="metric-label">{{metric.label}}</text>
+          <text class="metric-value {{metric.over ? 'metric-over-text' : ''}}">{{metric.valueText}}</text>
+        </view>
+        <view class="metric-track">
+          <view
+            class="metric-fill {{metric.over ? 'metric-over' : ''}}"
+            style="width: {{metric.fillPct}}%;"
+          ></view>
+          <view
+            wx:if="{{metric.thresholdPct !== null}}"
+            class="metric-threshold"
+            style="left: {{metric.thresholdPct}}%;"
+          ></view>
+        </view>
+        <view wx:if="{{metric.over !== null}}" class="metric-note {{metric.over ? 'metric-over-text' : ''}}">
+          {{metric.over ? '高于阈值' : '低于阈值'}}（阈值 {{metric.thresholdText}}）
+        </view>
+      </view>
+    </view>
+
+    <!-- 字段分组 -->
+    <view
+      class="section card"
+      wx:for="{{detailView.fieldGroups}}"
+      wx:for-item="group"
+      wx:key="title"
+    >
+      <view class="card-title"><text>{{group.title}}</text></view>
       <view
         class="row"
-        wx:for="{{detailView.fields}}"
+        wx:for="{{group.fields}}"
         wx:for-item="field"
         wx:key="label"
       >
@@ -33,13 +101,16 @@
       </view>
     </view>
 
+    <!-- 关联数据 S4-04 -->
     <view class="section card">
       <view class="card-title">
         <text>关联数据</text>
         <text class="muted">S4-04</text>
       </view>
 
-      <view wx:if="{{relatedLoading}}" class="state-block">加载关联数据…</view>
+      <view wx:if="{{relatedLoading}}" class="state-block">
+        <text class="spinner"></text>加载关联数据…
+      </view>
 
       <view wx:if="{{relatedError}}" class="notice notice-error">
         {{relatedError.message}}
@@ -57,8 +128,7 @@
           wx:for="{{relatedView.readings}}"
           wx:for-item="reading"
           wx:key="readingId"
-          class="card"
-          style="background: #f9fafb; margin-top: 12rpx; box-shadow: none;"
+          class="reading-card"
         >
           <view
             class="row"

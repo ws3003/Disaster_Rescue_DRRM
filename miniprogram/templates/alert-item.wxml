@@ -1,15 +1,24 @@
 <template name="alertItem">
-  <view class="list-item" bindtap="onItemTap" data-key="{{item.alertKey}}">
+  <view
+    class="list-item"
+    hover-class="list-item-hover"
+    bindtap="onItemTap"
+    data-key="{{item.alertKey}}"
+  >
     <view class="item-head">
       <view class="item-title">{{item.title}}</view>
+      <text
+        wx:if="{{item.severityText !== '—'}}"
+        class="sev-badge {{item.severityClass}}"
+      >{{item.severityText}}</text>
+    </view>
+
+    <view class="item-meta">
       <text class="tag {{item.categoryClass}}">{{item.categoryLabel}}</text>
+      <text>{{item.timeText}}</text>
+      <text wx:if="{{item.relativeText}}" class="item-relative">{{item.relativeText}}</text>
     </view>
-    <view class="muted">{{item.timeLabel}}：{{item.timeText}}</view>
-    <view class="muted">严重程度：{{item.severityText}}<text wx:if="{{item.statusText}}">　状态：{{item.statusText}}</text></view>
-    <view class="chips" wx:if="{{item.chips.length}}">
-      <view class="chip" wx:for="{{item.chips}}" wx:for-item="chip" wx:key="label">
-        <text class="chip-key">{{chip.label}}</text>{{chip.value}}
-      </view>
-    </view>
+
+    <view class="item-more">查看详情 ›</view>
   </view>
 </template>

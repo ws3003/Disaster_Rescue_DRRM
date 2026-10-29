@@ -1,17 +1,27 @@
 <import src="../../templates/alert-item.wxml" />
 
+<view class="app-bg"></view>
+
 <view class="container">
   <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
 
-  <view class="page-title">系统总览</view>
+  <view class="hero">
+    <view class="hero-title">灾害现场智能监测</view>
+    <view class="hero-subtitle">V4.4 · 现场态势总览</view>
+  </view>
 
+  <!-- 系统运行状态 S4-01 -->
   <view class="section card">
     <view class="card-title">
       <text>系统运行状态</text>
       <text class="muted">S4-01</text>
     </view>
 
-    <view wx:if="{{status.loading && !status.view}}" class="state-block">加载系统状态…</view>
+    <block wx:if="{{status.loading && !status.view}}">
+      <view class="sk sk-line"></view>
+      <view class="sk sk-line sk-line-sm"></view>
+      <view class="sk sk-line sk-line-sm"></view>
+    </block>
 
     <view wx:if="{{status.error}}" class="notice notice-error">
       {{status.error.message}}
@@ -21,7 +31,9 @@
     <block wx:if="{{status.view}}">
       <view class="row">
         <text class="row-label">设备状态</text>
-        <text class="row-value">{{status.view.deviceStatusText}}</text>
+        <view class="row-value">
+          <text class="tag {{status.view.deviceStatusClass}}">{{status.view.deviceStatusText}}</text>
+        </view>
       </view>
       <view class="divider"></view>
       <view class="muted">模块状态</view>
@@ -34,33 +46,39 @@
     </block>
   </view>
 
+  <!-- 高风险摘要 -->
   <view class="section card">
     <view class="card-title">
       <text>高风险摘要</text>
       <text class="muted">S4-02 meta.total</text>
     </view>
+
     <view class="stat-grid">
-      <view class="stat">
+      <view class="stat stat-person">
         <view class="stat-value">{{summary.personText}}</view>
         <view class="stat-label">人员高风险告警（条）</view>
       </view>
-      <view class="stat">
+      <view class="stat stat-sensor">
         <view class="stat-value">{{summary.sensorText}}</view>
         <view class="stat-label">传感器环境告警（条）</view>
       </view>
     </view>
-    <view class="muted" style="margin-top: 12rpx;">
+    <view class="muted" style="margin-top: 14rpx;">
       按告警类别分别统计；契约未提供 severity/状态维度的聚合接口，本摘要不做额外推导。
     </view>
   </view>
 
+  <!-- 最近告警 · 人员 -->
   <view class="section card">
     <view class="card-title">
       <text>最近告警 · 人员</text>
       <text class="link" bindtap="goAlertsPerson">查看全部</text>
     </view>
 
-    <view wx:if="{{person.loading && !person.views.length}}" class="state-block">加载中…</view>
+    <block wx:if="{{person.loading && !person.views.length}}">
+      <view class="sk sk-block"></view>
+      <view class="sk sk-block"></view>
+    </block>
 
     <view wx:if="{{person.error}}" class="notice notice-error">
       {{person.error.message}}
@@ -79,13 +97,17 @@
     <view wx:if="{{person.total !== null}}" class="muted">人员告警总数（meta.total）：{{person.total}}</view>
   </view>
 
+  <!-- 最近告警 · 传感器环境 -->
   <view class="section card">
     <view class="card-title">
       <text>最近告警 · 传感器环境</text>
       <text class="link" bindtap="goAlertsSensor">查看全部</text>
     </view>
 
-    <view wx:if="{{sensor.loading && !sensor.views.length}}" class="state-block">加载中…</view>
+    <block wx:if="{{sensor.loading && !sensor.views.length}}">
+      <view class="sk sk-block"></view>
+      <view class="sk sk-block"></view>
+    </block>
 
     <view wx:if="{{sensor.error}}" class="notice notice-error">
       {{sensor.error.message}}
@@ -104,9 +126,10 @@
     <view wx:if="{{sensor.total !== null}}" class="muted">传感器环境告警总数（meta.total）：{{sensor.total}}</view>
   </view>
 
+  <!-- 全部告警入口 -->
   <view class="section card">
     <view class="card-title"><text>全部告警</text></view>
     <view class="muted">人员告警与传感器环境告警按服务端分组顺序展示，不做跨组全局时间排序。</view>
-    <view class="btn" bindtap="goAlerts">进入告警列表</view>
+    <view class="btn btn-block" bindtap="goAlerts">进入告警列表</view>
   </view>
 </view>

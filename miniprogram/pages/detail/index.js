@@ -76,5 +76,27 @@ Page({
     if (this._controller) {
       this._controller.retry();
     }
+  },
+
+  copyAlertKey() {
+    const key = this.data.alertKey;
+    if (!key) {
+      return;
+    }
+    wx.setClipboardData({
+      data: key,
+      success: function () {
+        wx.showToast({ title: '已复制告警标识', icon: 'none' });
+      }
+    });
+  },
+
+  onShareAppMessage() {
+    const view = this.data.detailView;
+    const key = this.data.alertKey;
+    return {
+      title: view ? view.headline + ' · ' + view.categoryLabel : '灾害现场智能监测',
+      path: '/pages/detail/index?alert_key=' + encodeURIComponent(key || '')
+    };
   }
 });
