@@ -1,0 +1,48 @@
+{
+  "libVersion": "3.17.5",
+  "projectname": "Disaster%20Rescue%20DRRM",
+  "condition": {
+    "miniprogram": {
+      "list": [
+        {
+          "name": "pages/detail/index",
+          "pathName": "pages/detail/index",
+          "query": "alert_key=person%253A999999",
+          "scene": null,
+          "launchMode": "default"
+        },
+        {
+          "name": "pages/detail/index",
+          "pathName": "pages/detail/index",
+          "query": "alert_key=person%3A999999",
+          "launchMode": "default",
+          "scene": null
+        },
+        {
+          "name": "pages/detail/index",
+          "pathName": "pages/detail/index",
+          "query": "alert_key=person%3A999999",
+          "launchMode": "default",
+          "scene": null
+        }
+      ]
+    }
+  },
+  "setting": {
+    "urlCheck": true,
+    "coverView": false,
+    "lazyloadPlaceholderEnable": false,
+    "skylineRenderEnable": false,
+    "preloadBackgroundData": false,
+    "autoAudits": false,
+    "useApiHook": true,
+    "showShadowRootInWxmlPanel": false,
+    "useStaticServer": false,
+    "useLanDebug": false,
+    "showES6CompileOption": false,
+    "compileHotReLoad": true,
+    "checkInvalidKey": true,
+    "ignoreDevUnusedFiles": true,
+    "bigPackageSizeSupport": false
+  }
+}

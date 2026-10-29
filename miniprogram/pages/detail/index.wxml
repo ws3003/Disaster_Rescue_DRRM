@@ -1,0 +1,80 @@
+<view class="container">
+  <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
+
+  <view class="page-title">告警详情</view>
+
+  <view wx:if="{{alertKey}}" class="muted mono" style="margin-bottom: 16rpx;">alert_key：{{alertKey}}</view>
+
+  <view wx:if="{{loading && !detailView}}" class="state-block">加载告警详情…</view>
+
+  <view wx:if="{{error}}" class="notice notice-error">
+    {{error.message}}
+    <view wx:if="{{canRetry}}" class="btn btn-ghost" bindtap="retry">重试</view>
+  </view>
+
+  <block wx:if="{{detailView}}">
+    <view class="section card">
+      <view class="item-head">
+        <view class="item-title">{{detailView.headline}}</view>
+        <text class="tag {{detailView.categoryClass}}">{{detailView.categoryLabel}}</text>
+      </view>
+      <view wx:if="{{detailView.statusText}}" style="margin-bottom: 8rpx;">
+        <text class="tag {{detailView.statusClass}}">{{detailView.statusText}}</text>
+      </view>
+      <view class="divider"></view>
+      <view
+        class="row"
+        wx:for="{{detailView.fields}}"
+        wx:for-item="field"
+        wx:key="label"
+      >
+        <text class="row-label">{{field.label}}</text>
+        <text class="row-value {{field.mono ? 'mono' : ''}}">{{field.value}}</text>
+      </view>
+    </view>
+
+    <view class="section card">
+      <view class="card-title">
+        <text>关联数据</text>
+        <text class="muted">S4-04</text>
+      </view>
+
+      <view wx:if="{{relatedLoading}}" class="state-block">加载关联数据…</view>
+
+      <view wx:if="{{relatedError}}" class="notice notice-error">
+        {{relatedError.message}}
+        <view class="btn btn-ghost" bindtap="retryRelated">重试</view>
+      </view>
+
+      <block wx:if="{{relatedView}}">
+        <view class="muted">关联环境读数（最多 1 条，仅经 sensor_alerts.reading_id 关联）</view>
+
+        <view wx:if="{{!relatedView.hasReadings}}" class="state-block">
+          {{relatedView.readingsEmptyText}}
+        </view>
+
+        <view
+          wx:for="{{relatedView.readings}}"
+          wx:for-item="reading"
+          wx:key="readingId"
+          class="card"
+          style="background: #f9fafb; margin-top: 12rpx; box-shadow: none;"
+        >
+          <view
+            class="row"
+            wx:for="{{reading.fields}}"
+            wx:for-item="field"
+            wx:key="label"
+          >
+            <text class="row-label">{{field.label}}</text>
+            <text class="row-value {{field.mono ? 'mono' : ''}}">{{field.value}}</text>
+          </view>
+        </view>
+
+        <view class="divider"></view>
+        <view class="muted">媒体关联</view>
+        <view class="muted" style="margin-top: 8rpx;">{{relatedView.mediaText}}</view>
+      </block>
+    </view>
+  </block>
+</view>

@@ -1,0 +1,80 @@
+// 真实 API 模式下的 wx.request 封装。
+// 只在 USE_MOCK=false 时由 services/s4-service.js 调用。
+// Token 从本地存储读取，禁止硬编码、禁止写入 Mock 数据或仓库配置。
+
+const { createAppError, mapNetworkError } = require('./errors');
+
+function buildUrl(baseUrl, path, query) {
+  const parts = [];
+  const input = query || {};
+  Object.keys(input).forEach(function (key) {
+    const value = input[key];
+    if (value === undefined || value === null) {
+      return;
+    }
+    parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
+  });
+  const qs = parts.join('&');
+  return String(baseUrl).replace(/\/+$/, '') + path + (qs ? '?' + qs : '');
+}
+
+function getTokenFromStorage(storageKey) {
+  if (typeof wx === 'undefined' || typeof wx.getStorageSync !== 'function') {
+    return '';
+  }
+  try {
+    return wx.getStorageSync(storageKey) || '';
+  } catch (err) {
+    return '';
+  }
+}
+
+function createRequest(options) {
+  const opts = options || {};
+  const baseUrl = opts.baseUrl;
+  const timeout = opts.timeout;
+  const getToken = opts.getToken || function () { return ''; };
+
+  return function request(path, query) {
+    return new Promise(function (resolve, reject) {
+      let token = '';
+      try {
+        token = getToken() || '';
+      } catch (err) {
+        token = '';
+      }
+      // 真实模式下未配置 Token 时，本地请求前拦截，不发起 wx.request。
+      if (!token) {
+        reject(createAppError('TOKEN_MISSING', { detail: '真实模式下未配置 Bearer Token' }));
+        return;
+      }
+      if (typeof wx === 'undefined' || typeof wx.request !== 'function') {
+        reject(createAppError('NETWORK_ERROR', { detail: 'wx.request 不可用' }));
+        return;
+      }
+      wx.request({
+        url: buildUrl(baseUrl, path, query),
+        method: 'GET',
+        timeout: timeout,
+        header: {
+          Authorization: 'Bearer ' + token
+        },
+        success: function (res) {
+          resolve({
+            statusCode: res.statusCode,
+            body: res.data
+          });
+        },
+        fail: function (err) {
+          reject(mapNetworkError(err));
+        }
+      });
+    });
+  };
+}
+
+module.exports = {
+  buildUrl,
+  getTokenFromStorage,
+  createRequest
+};

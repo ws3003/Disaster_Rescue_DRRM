@@ -1,0 +1,42 @@
+<import src="../../templates/alert-item.wxml" />
+
+<view class="container">
+  <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
+
+  <view class="page-title">告警列表</view>
+
+  <view class="tabs">
+    <view
+      wx:for="{{tabs}}"
+      wx:for-item="tab"
+      wx:key="value"
+      class="tab {{tab.value == category ? 'tab-active' : ''}}"
+      data-value="{{tab.value}}"
+      bindtap="onTabTap"
+    >{{tab.label}}</view>
+  </view>
+
+  <view class="muted" style="margin-bottom: 16rpx;">
+    类别由服务端 category 参数控制；分组顺序、排序与 has_more 均以服务端返回为准，客户端不合并、不重排。
+  </view>
+
+  <view wx:if="{{error}}" class="notice notice-error">
+    {{error.message}}
+    <view class="btn btn-ghost" bindtap="retry">重试</view>
+  </view>
+
+  <view wx:if="{{initialized && isEmpty}}" class="state-block">
+    当前分类暂无告警数据。
+  </view>
+
+  <view wx:if="{{views.length}}" class="card">
+    <block wx:for="{{views}}" wx:for-item="alert" wx:key="alertKey">
+      <template is="alertItem" data="{{item: alert}}" />
+    </block>
+  </view>
+
+  <view wx:if="{{loading}}" class="footer-state">加载中…</view>
+  <view wx:elif="{{initialized && error && !views.length}}" class="footer-state">加载失败，请重试。</view>
+  <view wx:elif="{{views.length && hasMore}}" class="footer-state">上拉加载更多</view>
+  <view wx:elif="{{views.length && !hasMore}}" class="footer-state">已加载全部（服务端 meta.has_more=false）。</view>
+</view>
