@@ -1,5 +1,8 @@
 const { createDefaultService } = require('../../services/index');
 const { createDetailController } = require('../../logic/detail-controller');
+const store = require('../../utils/local-store');
+const navContext = require('../../utils/nav-context');
+const net = require('../../utils/net');
 
 Page({
   data: {
@@ -13,7 +16,18 @@ Page({
     detailView: null,
     relatedView: null,
     relatedLoading: false,
-    relatedError: null
+    relatedError: null,
+    followed: false,
+    offline: false,
+    nav: {
+      inContext: false,
+      position: 0,
+      total: 0,
+      hasPrev: false,
+      hasNext: false,
+      prevKey: '',
+      nextKey: ''
+    }
   },
 
   onLoad(query) {
@@ -35,11 +49,26 @@ Page({
       onStateChange: (state) => this.applyState(state)
     });
 
+    this._unsubscribeNet = net.subscribe((online) => {
+      this.setData({ offline: !online });
+    });
+
     let alertKey = '';
     if (query && query.alert_key) {
       alertKey = decodeURIComponent(query.alert_key);
     }
+    this.setData({
+      followed: store.isFollowed(alertKey),
+      nav: navContext.getNeighbors(alertKey)
+    });
     this._controller.load(alertKey);
+  },
+
+  onUnload() {
+    if (this._unsubscribeNet) {
+      this._unsubscribeNet();
+      this._unsubscribeNet = null;
+    }
   },
 
   applyState(state) {
@@ -89,6 +118,35 @@ Page({
         wx.showToast({ title: '已复制告警标识', icon: 'none' });
       }
     });
+  },
+
+  toggleFollow() {
+    const key = this.data.alertKey;
+    if (!key) {
+      return;
+    }
+    const result = store.toggleFollow(key);
+    this.setData({ followed: result.followed });
+    wx.showToast({
+      title: result.followed ? '已加入本地关注' : '已取消关注',
+      icon: 'none'
+    });
+  },
+
+  goPrev() {
+    if (this.data.nav.hasPrev) {
+      wx.redirectTo({
+        url: '/pages/detail/index?alert_key=' + encodeURIComponent(this.data.nav.prevKey)
+      });
+    }
+  },
+
+  goNext() {
+    if (this.data.nav.hasNext) {
+      wx.redirectTo({
+        url: '/pages/detail/index?alert_key=' + encodeURIComponent(this.data.nav.nextKey)
+      });
+    }
   },
 
   onShareAppMessage() {

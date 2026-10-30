@@ -1,25 +1,65 @@
 <import src="../../templates/alert-item.wxml" />
+<wxs module="fmt">
+module.exports.pad = function (n) {
+  var v = n + 1;
+  return v < 10 ? '0' + v : '' + v;
+};
+</wxs>
 
 <view class="app-bg"></view>
 
 <view class="container">
-  <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
-
-  <view class="hero">
-    <view class="hero-title">灾害现场智能监测</view>
-    <view class="hero-subtitle">V4.4 · 现场态势总览</view>
+  <view class="hud-bar">
+    <text class="hud-seg">SYS//V4.4</text>
+    <text class="hud-seg hud-seg-dim">{{mockMode ? 'MOCK DATA' : 'LIVE LINK'}}</text>
   </view>
 
+  <view wx:if="{{offline && !mockMode}}" class="notice notice-warn">
+    当前网络不可用，页面展示的是最近一次成功加载的数据。
+  </view>
+
+  <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
+
+  <!-- 刊头 -->
+  <view class="masthead">
+    <view class="masthead-art"></view>
+    <view class="masthead-scan"></view>
+    <view class="eyebrow">DISASTER RESPONSE · V4.4</view>
+    <view class="display-title">现场态势</view>
+    <view class="masthead-meta">
+      <view class="meta-left">
+        <view wx:if="{{!mockMode}}" class="live-dot"></view>
+        <text class="muted">{{updatedAt ? '更新于 ' + updatedAt : '正在加载…'}}</text>
+      </view>
+      <text class="text-link" bindtap="refreshAll">刷新</text>
+    </view>
+  </view>
+
+  <!-- 大数字：两组告警计数（S4-02 meta.total） -->
+  <view class="stat-pair">
+    <view class="stat-col stat-col-alert">
+      <view class="stat-num">{{summary.personText}}</view>
+      <view class="stat-cap">人员告警</view>
+    </view>
+    <view class="stat-col stat-col-sensor">
+      <view class="stat-num">{{summary.sensorText}}</view>
+      <view class="stat-cap">传感器告警</view>
+    </view>
+  </view>
+  <view class="note">计数来自各组 meta.total；契约未提供 severity 聚合，不做额外推导。</view>
+
   <!-- 系统运行状态 S4-01 -->
-  <view class="section card">
-    <view class="card-title">
-      <text>系统运行状态</text>
-      <text class="muted">S4-01</text>
+  <view class="block">
+    <view class="block-head">
+      <view class="block-head-left">
+        <text class="block-no">01</text>
+        <text class="block-title">系统运行状态</text>
+      </view>
+      <text class="block-tag">S4-01</text>
     </view>
 
     <block wx:if="{{status.loading && !status.view}}">
       <view class="sk sk-line"></view>
-      <view class="sk sk-line sk-line-sm"></view>
       <view class="sk sk-line sk-line-sm"></view>
     </block>
 
@@ -31,48 +71,28 @@
     <block wx:if="{{status.view}}">
       <view class="row">
         <text class="row-label">设备状态</text>
-        <view class="row-value">
-          <text class="tag {{status.view.deviceStatusClass}}">{{status.view.deviceStatusText}}</text>
-        </view>
+        <text class="row-value {{status.view.deviceStatusClass}}">{{status.view.deviceStatusText}}</text>
       </view>
-      <view class="divider"></view>
-      <view class="muted">模块状态</view>
-      <view wx:if="{{status.view.modulesEmpty}}" class="muted">暂无模块状态数据（modules 为空对象）。</view>
+      <view class="row">
+        <text class="row-label">模块状态</text>
+        <text class="row-value">{{status.view.modulesEmpty ? '暂无数据（modules 为空对象）' : ''}}</text>
+      </view>
       <view class="row" wx:for="{{status.view.modules}}" wx:for-item="module" wx:key="name">
         <text class="row-label">{{module.name}}</text>
         <text class="row-value mono">{{module.value}}</text>
       </view>
-      <view class="muted" style="margin-top: 12rpx;">{{status.view.modulesNote}}</view>
+      <view class="note">{{status.view.modulesNote}}</view>
     </block>
   </view>
 
-  <!-- 高风险摘要 -->
-  <view class="section card">
-    <view class="card-title">
-      <text>高风险摘要</text>
-      <text class="muted">S4-02 meta.total</text>
-    </view>
-
-    <view class="stat-grid">
-      <view class="stat stat-person">
-        <view class="stat-value">{{summary.personText}}</view>
-        <view class="stat-label">人员高风险告警（条）</view>
-      </view>
-      <view class="stat stat-sensor">
-        <view class="stat-value">{{summary.sensorText}}</view>
-        <view class="stat-label">传感器环境告警（条）</view>
-      </view>
-    </view>
-    <view class="muted" style="margin-top: 14rpx;">
-      按告警类别分别统计；契约未提供 severity/状态维度的聚合接口，本摘要不做额外推导。
-    </view>
-  </view>
-
   <!-- 最近告警 · 人员 -->
-  <view class="section card">
-    <view class="card-title">
-      <text>最近告警 · 人员</text>
-      <text class="link" bindtap="goAlertsPerson">查看全部</text>
+  <view class="block">
+    <view class="block-head">
+      <view class="block-head-left">
+        <text class="block-no">02</text>
+        <text class="block-title">最近告警 · 人员</text>
+      </view>
+      <text class="text-link" bindtap="goAlertsPerson">全部</text>
     </view>
 
     <block wx:if="{{person.loading && !person.views.length}}">
@@ -88,20 +108,31 @@
     <view
       wx:if="{{!person.loading && !person.error && !person.views.length}}"
       class="state-block"
-    >暂无人员告警。</view>
+    >
+      <view class="empty-art"></view>
+      暂无人员告警
+    </view>
 
-    <block wx:for="{{person.views}}" wx:for-item="alert" wx:key="alertKey">
-      <template is="alertItem" data="{{item: alert}}" />
+    <block
+      wx:for="{{person.views}}"
+      wx:for-item="alert"
+      wx:for-index="idx"
+      wx:key="alertKey"
+    >
+      <template is="alertItem" data="{{item: alert, index: fmt.pad(idx)}}" />
     </block>
 
-    <view wx:if="{{person.total !== null}}" class="muted">人员告警总数（meta.total）：{{person.total}}</view>
+    <view wx:if="{{person.total !== null}}" class="note">人员告警总数：{{person.total}}</view>
   </view>
 
   <!-- 最近告警 · 传感器环境 -->
-  <view class="section card">
-    <view class="card-title">
-      <text>最近告警 · 传感器环境</text>
-      <text class="link" bindtap="goAlertsSensor">查看全部</text>
+  <view class="block">
+    <view class="block-head">
+      <view class="block-head-left">
+        <text class="block-no">03</text>
+        <text class="block-title">最近告警 · 传感器环境</text>
+      </view>
+      <text class="text-link" bindtap="goAlertsSensor">全部</text>
     </view>
 
     <block wx:if="{{sensor.loading && !sensor.views.length}}">
@@ -117,19 +148,29 @@
     <view
       wx:if="{{!sensor.loading && !sensor.error && !sensor.views.length}}"
       class="state-block"
-    >暂无传感器环境告警。</view>
+    >
+      <view class="empty-art"></view>
+      暂无传感器环境告警
+    </view>
 
-    <block wx:for="{{sensor.views}}" wx:for-item="alert" wx:key="alertKey">
-      <template is="alertItem" data="{{item: alert}}" />
+    <block
+      wx:for="{{sensor.views}}"
+      wx:for-item="alert"
+      wx:for-index="idx"
+      wx:key="alertKey"
+    >
+      <template is="alertItem" data="{{item: alert, index: fmt.pad(idx)}}" />
     </block>
 
-    <view wx:if="{{sensor.total !== null}}" class="muted">传感器环境告警总数（meta.total）：{{sensor.total}}</view>
+    <view wx:if="{{sensor.total !== null}}" class="note">传感器环境告警总数：{{sensor.total}}</view>
   </view>
 
-  <!-- 全部告警入口 -->
-  <view class="section card">
-    <view class="card-title"><text>全部告警</text></view>
-    <view class="muted">人员告警与传感器环境告警按服务端分组顺序展示，不做跨组全局时间排序。</view>
-    <view class="btn btn-block" bindtap="goAlerts">进入告警列表</view>
+  <!-- 现场链路线稿 -->
+  <view class="home-drone"></view>
+
+  <!-- 通栏入口 -->
+  <view class="cta" bindtap="goAlerts">
+    <text>进入告警列表</text>
+    <text class="cta-arrow">→</text>
   </view>
 </view>

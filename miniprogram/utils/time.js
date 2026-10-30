@@ -129,6 +129,14 @@ function dateGroupLabel(dateKey, nowMs) {
   return matched[1] + '年' + Number(matched[2]) + '月' + Number(matched[3]) + '日';
 }
 
+// 本地时钟 HH:mm:ss，仅用于“更新于 …”这类界面提示。
+function formatClock(ms) {
+  const value = Number.isFinite(ms) ? ms : Date.now();
+  const d = new Date(value);
+  function pad(n) { return n < 10 ? '0' + n : String(n); }
+  return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
 module.exports = {
   isNaiveIso,
   isZonedIso,
@@ -138,5 +146,6 @@ module.exports = {
   dateKeyOf,
   parseTimeMs,
   formatRelativeTime,
-  dateGroupLabel
+  dateGroupLabel,
+  formatClock
 };

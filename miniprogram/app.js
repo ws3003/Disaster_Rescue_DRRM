@@ -1,4 +1,5 @@
 const env = require('./config/env');
+const net = require('./utils/net');
 
 App({
   globalData: {
@@ -8,6 +9,8 @@ App({
   },
 
   onLaunch() {
+    // 网络状态只用于界面提示（离线横幅），不改变请求行为。
+    net.init();
     // 预留：真实模式下的 Token 注入与生命周期管理需在联调前确认，
     // 本阶段不实现任何登录、签发、刷新或撤销能力。
   }

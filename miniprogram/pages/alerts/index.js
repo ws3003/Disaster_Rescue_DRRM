@@ -3,6 +3,9 @@ const { createAlertsListController } = require('../../logic/alerts-list-controll
 const { buildAlertListViews, decorateListGroups } = require('../../utils/view');
 const { filterAlertViews } = require('../../utils/filter');
 const { CATEGORIES } = require('../../utils/dto-schema');
+const store = require('../../utils/local-store');
+const navContext = require('../../utils/nav-context');
+const net = require('../../utils/net');
 
 Page({
   data: {
@@ -23,8 +26,10 @@ Page({
     isEmpty: false,
     // 本地筛选（仅作用于已加载数据，不发起服务端搜索）
     keyword: '',
+    keywords: [],
     severityFilter: '',
     statusFilter: '',
+    followedOnly: false,
     severityOptions: [
       { value: '', label: '全部' },
       { value: 'high', label: '高' },
@@ -42,7 +47,8 @@ Page({
     highCount: 0,
     filtering: false,
     filterEmpty: false,
-    showBackTop: false
+    showBackTop: false,
+    offline: false
   },
 
   onLoad(query) {
@@ -50,7 +56,12 @@ Page({
     const globalData = (app && app.globalData) || {};
     this.setData({
       mockMode: globalData.useMock === true,
-      mockNotice: globalData.mockNotice || ''
+      mockNotice: globalData.mockNotice || '',
+      keywords: store.getKeywords()
+    });
+
+    this._unsubscribeNet = net.subscribe((online) => {
+      this.setData({ offline: !online });
     });
 
     let initialCategory = '';
@@ -77,6 +88,20 @@ Page({
     this._controller.setCategory(initialCategory);
   },
 
+  onShow() {
+    // 从详情页返回时，关注状态可能已变化，重新计算本地筛选结果。
+    if (this._rawViews && this._rawViews.length) {
+      this.renderViews();
+    }
+  },
+
+  onUnload() {
+    if (this._unsubscribeNet) {
+      this._unsubscribeNet();
+      this._unsubscribeNet = null;
+    }
+  },
+
   applyState(state) {
     const nowMs = Date.now();
     this._rawViews = buildAlertListViews(state.items, { nowMs: nowMs });
@@ -93,13 +118,15 @@ Page({
     this.renderViews();
   },
 
-  // 先按关键词/严重程度/状态做本地过滤，再按相邻日期与类别插入分组标题。
+  // 先按关键词/严重程度/状态/关注做本地过滤，再按相邻日期与类别插入分组标题。
   // 顺序仍是服务端返回的顺序，不重排、不合并。
   renderViews() {
     const nowMs = Date.now();
     const filtered = filterAlertViews(this._rawViews, this.data.keyword, {
       severity: this.data.severityFilter,
-      status: this.data.statusFilter
+      status: this.data.statusFilter,
+      followedOnly: this.data.followedOnly,
+      followedKeys: store.getFollowed()
     });
     const decorated = decorateListGroups(filtered.views, {
       nowMs: nowMs,
@@ -128,9 +155,26 @@ Page({
     this.renderViews();
   },
 
+  onKeywordConfirm() {
+    const value = String(this.data.keyword || '').trim();
+    if (value) {
+      this.setData({ keywords: store.addKeyword(value) });
+    }
+  },
+
+  onKeywordTap(event) {
+    const value = event.currentTarget.dataset.value || '';
+    this.setData({ keyword: value });
+    this.renderViews();
+  },
+
   onClearKeyword() {
     this.setData({ keyword: '' });
     this.renderViews();
+  },
+
+  onClearHistory() {
+    this.setData({ keywords: store.clearKeywords() });
   },
 
   onSeverityTap(event) {
@@ -151,8 +195,18 @@ Page({
     this.renderViews();
   },
 
+  onToggleFollowFilter() {
+    this.setData({ followedOnly: !this.data.followedOnly });
+    this.renderViews();
+  },
+
   onResetFilters() {
-    this.setData({ keyword: '', severityFilter: '', statusFilter: '' });
+    this.setData({
+      keyword: '',
+      severityFilter: '',
+      statusFilter: '',
+      followedOnly: false
+    });
     this.renderViews();
   },
 
@@ -162,7 +216,12 @@ Page({
       return;
     }
     // 切换类别时清空本地筛选，避免旧筛选造成“看起来没数据”的误解。
-    this.setData({ keyword: '', severityFilter: '', statusFilter: '' });
+    this.setData({
+      keyword: '',
+      severityFilter: '',
+      statusFilter: '',
+      followedOnly: false
+    });
     // 控制器会重置分页并让旧请求失效。
     this._controller.setCategory(value);
   },
@@ -205,6 +264,11 @@ Page({
     if (!alertKey) {
       return;
     }
+    // 把“当前已展示的顺序”交给详情页，用于上一条/下一条导航。
+    navContext.setContext(
+      this.data.views.map(function (view) { return view.alertKey; }),
+      '告警列表'
+    );
     wx.navigateTo({
       url: '/pages/detail/index?alert_key=' + encodeURIComponent(alertKey)
     });

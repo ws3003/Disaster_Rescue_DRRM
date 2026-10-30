@@ -6,10 +6,10 @@
   ],
   "window": {
     "navigationBarTitleText": "灾害现场智能监测",
-    "navigationBarBackgroundColor": "#0B1220",
-    "navigationBarTextStyle": "white",
-    "backgroundColor": "#070B14",
-    "backgroundTextStyle": "light"
+    "navigationBarBackgroundColor": "#EEF2F6",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#EEF2F6",
+    "backgroundTextStyle": "dark"
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"

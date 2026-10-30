@@ -1,24 +1,25 @@
 <template name="alertItem">
   <view
-    class="list-item"
-    hover-class="list-item-hover"
+    class="entry"
+    hover-class="entry-hover"
     bindtap="onItemTap"
     data-key="{{item.alertKey}}"
   >
-    <view class="item-head">
-      <view class="item-title">{{item.title}}</view>
-      <text
-        wx:if="{{item.severityText !== '—'}}"
-        class="sev-badge {{item.severityClass}}"
-      >{{item.severityText}}</text>
+    <text class="entry-index">{{index}}</text>
+
+    <view class="entry-body">
+      <view class="entry-title">{{item.title}}</view>
+      <view class="entry-meta">
+        <text class="tag {{item.categoryClass}}">{{item.categoryLabel}}</text>
+        <text
+          wx:if="{{item.severityText !== '—'}}"
+          class="sev-badge {{item.severityClass}}"
+        >{{item.severityText}}</text>
+        <text class="entry-time">{{item.timeText}}</text>
+        <text wx:if="{{item.relativeText}}" class="entry-rel">{{item.relativeText}}</text>
+      </view>
     </view>
 
-    <view class="item-meta">
-      <text class="tag {{item.categoryClass}}">{{item.categoryLabel}}</text>
-      <text>{{item.timeText}}</text>
-      <text wx:if="{{item.relativeText}}" class="item-relative">{{item.relativeText}}</text>
-    </view>
-
-    <view class="item-more">查看详情 ›</view>
+    <text class="entry-arrow">›</text>
   </view>
 </template>

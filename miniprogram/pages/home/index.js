@@ -1,12 +1,16 @@
 const { createDefaultService } = require('../../services/index');
 const { createHomeController } = require('../../logic/home-controller');
 const { buildAlertListViews } = require('../../utils/view');
+const { formatClock } = require('../../utils/time');
+const net = require('../../utils/net');
 
 Page({
   data: {
     mockMode: false,
     mockNotice: '',
     loading: false,
+    updatedAt: '',
+    offline: false,
     status: { loading: false, error: null, data: null, view: null },
     person: { loading: false, error: null, items: [], views: [], total: null },
     sensor: { loading: false, error: null, items: [], views: [], total: null },
@@ -19,6 +23,10 @@ Page({
     this.setData({
       mockMode: globalData.useMock === true,
       mockNotice: globalData.mockNotice || ''
+    });
+
+    this._unsubscribeNet = net.subscribe((online) => {
+      this.setData({ offline: !online });
     });
 
     const service = createDefaultService();
@@ -39,17 +47,88 @@ Page({
   applyState(state) {
     // 相对时间只是展示层派生值，每次渲染取当前时间即可。
     const nowMs = Date.now();
-    this.setData({
-      loading: state.loading,
-      status: state.status,
-      person: Object.assign({}, state.person, {
-        views: buildAlertListViews(state.person.items, { nowMs: nowMs })
-      }),
-      sensor: Object.assign({}, state.sensor, {
-        views: buildAlertListViews(state.sensor.items, { nowMs: nowMs })
-      }),
-      summary: state.summary
+    this.setData(
+      {
+        loading: state.loading,
+        status: state.status,
+        person: Object.assign({}, state.person, {
+          views: buildAlertListViews(state.person.items, { nowMs: nowMs })
+        }),
+        sensor: Object.assign({}, state.sensor, {
+          views: buildAlertListViews(state.sensor.items, { nowMs: nowMs })
+        }),
+        summary: state.summary,
+        updatedAt: state.loading ? this.data.updatedAt : formatClock(Date.now())
+      },
+      () => this.animateSummary(state.summary)
+    );
+  },
+
+  // 纯展示动效：数字从当前值缓动到新值，不改变任何数据来源。
+  animateSummary(summary) {
+    const targets = [
+      { key: 'personText', value: summary.personTotal },
+      { key: 'sensorText', value: summary.sensorTotal }
+    ].filter(function (target) {
+      return typeof target.value === 'number' && Number.isFinite(target.value);
     });
+    if (!targets.length) {
+      return;
+    }
+
+    const self = this;
+    if (this._summaryTimer) {
+      clearTimeout(this._summaryTimer);
+      this._summaryTimer = null;
+    }
+
+    const from = targets.map(function (target) {
+      const parsed = parseInt(self.data.summary[target.key], 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    });
+    const unchanged = targets.every(function (target, index) {
+      return target.value === from[index];
+    });
+    if (unchanged) {
+      return;
+    }
+
+    const start = Date.now();
+    const duration = 720;
+
+    function tick() {
+      const progress = Math.min(1, (Date.now() - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const patch = {};
+      targets.forEach(function (target, index) {
+        patch[target.key] = String(Math.round(from[index] + (target.value - from[index]) * eased));
+      });
+      self.setData({ summary: Object.assign({}, self.data.summary, patch) });
+      if (progress < 1) {
+        self._summaryTimer = setTimeout(tick, 40);
+      } else {
+        self._summaryTimer = null;
+      }
+    }
+
+    tick();
+  },
+
+  onUnload() {
+    if (this._unsubscribeNet) {
+      this._unsubscribeNet();
+      this._unsubscribeNet = null;
+    }
+    if (this._summaryTimer) {
+      clearTimeout(this._summaryTimer);
+      this._summaryTimer = null;
+    }
+  },
+
+  refreshAll() {
+    if (this._controller) {
+      this._controller.load();
+    }
   },
 
   onPullDownRefresh() {

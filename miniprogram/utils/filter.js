@@ -36,20 +36,24 @@ function haystackOf(view) {
 
 // options.severity: '' | 'high' | 'medium' | 'low'（对应契约 severity 原值的小写）
 // options.status:   '' | 'active' | 'resolved'（只有传感器告警有该字段）
+// options.followedOnly + options.followedKeys：本地关注列表过滤（纯客户端状态）
 function filterAlertViews(views, keyword, options) {
   const list = views || [];
   const opts = options || {};
   const normalized = normalizeKeyword(keyword);
   const severity = normalizeChoice(opts.severity);
   const status = normalizeChoice(opts.status);
+  const followedOnly = opts.followedOnly === true;
+  const followedKeys = Array.isArray(opts.followedKeys) ? opts.followedKeys : [];
 
-  const filtering = !!normalized || !!severity || !!status;
+  const filtering = !!normalized || !!severity || !!status || followedOnly;
   if (!filtering) {
     return {
       views: list.slice(),
       keyword: '',
       severity: '',
       status: '',
+      followedOnly: false,
       matched: list.length,
       total: list.length,
       active: false
@@ -66,6 +70,9 @@ function filterAlertViews(views, keyword, options) {
     if (status && normalizeChoice(view.statusKey) !== status) {
       return false;
     }
+    if (followedOnly && followedKeys.indexOf(view.alertKey) === -1) {
+      return false;
+    }
     return true;
   });
 
@@ -74,6 +81,7 @@ function filterAlertViews(views, keyword, options) {
     keyword: normalized,
     severity: severity,
     status: status,
+    followedOnly: followedOnly,
     matched: matched.length,
     total: list.length,
     active: true
