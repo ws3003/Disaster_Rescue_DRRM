@@ -104,6 +104,19 @@ class TestProbeConfig:
         from src.x4.config import load_x4_config
         _ = load_x4_config  # 存在性标注；具体 load 校验见既有 config 测试
 
+    @pytest.mark.parametrize("bad", [0, -1, -0.5, 0.0005])
+    def test_invalid_short_timeout_rejected(self, bad):
+        # B4-1: `_as_float(lo=0.001)` 拒绝 <0.001(含 0/负/0.0005)，抛 X4ConfigError
+        from src.x4.config import _as_float, X4ConfigError
+        with pytest.raises(X4ConfigError):
+            _as_float(bad, "probe_short_timeout_seconds", 0.001, 2.0)
+
+    def test_short_timeout_lower_bound_accepted(self):
+        # B4-1: 恰好 0.001 应通过（边界），默认值仍 2.0
+        from src.x4.config import _as_float
+        assert _as_float(0.001, "probe_short_timeout_seconds", 0.001, 2.0) == 0.001
+        assert _as_float(None, "probe_short_timeout_seconds", 0.001, 2.0) == 2.0
+
 
 class TestProbeSchedulingWithClock:
     def _make(self, cloud_results, clock, fail_threshold=3, cooldown=30.0,
@@ -178,6 +191,28 @@ class TestProbeSchedulingWithClock:
         assert svc.machine.state == "recovery_probe"   # 未恢复，停留在恢复探测态
         assert svc.machine.wants_cloud() is False       # 持续本地兜底
 
+    def test_consecutive_probe_failures_stay_in_recovery(self):
+        """连续两次探测失败：状态保持恢复探测、本地兜底、探测次数=2、成功计数=0（B4-3）。"""
+        clock = _Clock()
+        # 探测始终失败
+        svc, cl, probe_fn = self._make([False], clock, fail_threshold=1, cooldown=30.0,
+                                       restore_success=2, interval=10.0)
+        svc.machine.on_cloud_failure()               # 进冷却
+        clock.advance(31.0)                  # 冷却结束
+        assert probe_fn(_frame()) in ("deferred",)    # 进 RECOVERY，首次延到下一间隔
+        clock.advance(10.0)
+        assert probe_fn(_frame()) == "probe_failed"   # 探测#1 失败（触发一次真实探测）
+        clock.advance(10.0)
+        assert probe_fn(_frame()) == "probe_failed"   # 探测#2 失败
+        # 关键断言：
+        assert svc.machine.state == "recovery_probe"  # 未恢复云端优先（连续失败保持）
+        assert svc.machine.wants_cloud() is False       # 本地兜底持续
+        assert cl.calls == 2                            # 确已触发两次真实探测
+        assert svc.machine.consecutive_probe_ok == 0    # 成功计数未累积
+        # 探测间隔在两次失败后仍按 probe_due_at 节流（不会每帧重试）：
+        clock.advance(5.0)  # 未到下一间隔
+        assert probe_fn(_frame()) == "deferred"         # 尚未到间隔，不重复探测
+
     def test_disabled_no_probe_when_not_cloud_viable(self):
         """云端禁用(endpoint 空) → 无探测。"""
         clock = _Clock()
@@ -220,7 +255,146 @@ class _CloudGenericExc:
         raise self.exc
 
 
-class TestProbeGenericException:
+class TestRealHttpStub:
+    """真实 HTTP 客户端 → 本地 127.0.0.1 stub（非 fake cloud）。验证 transport 映射与探测回退。"""
+
+    @pytest.fixture()
+    def stub(self):
+        """标准库 http.server stub：只绑 127.0.0.1，临时高位端口，mode 切换，请求计数。"""
+        import http.server as hs
+        import socketserver
+        import threading
+
+        class _Srv(socketserver.ThreadingMixIn, hs.HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+            mode = "ok"
+            count = 0
+
+        class _H(hs.BaseHTTPRequestHandler):
+            def log_message(self, *a): pass
+            def do_POST(self):
+                _Srv.count += 1
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                m = _Srv.mode
+                if m == "timeout":
+                    time.sleep(4.0)
+                    try: self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(b'{}')
+                    except Exception: pass
+                    return
+                if m == "500":
+                    self.send_response(500); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(b'{"x":1}'); return
+                if m == "badjson":
+                    self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(b'{"bad":'); return
+                self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+                self.wfile.write(b'{"model_id":"yolov26l","detections":[{"class_id":1,"class_name":"civilian","confidence":0.9,"bbox":[1,2,3,4]}],"latency_ms":1}')
+            def do_GET(self):
+                _Srv.count += 1; self.send_response(405); self.end_headers()
+
+        srv = _Srv(("127.0.0.1", 0), _H)
+        port = srv.server_address[1]
+        token = "stub-test-token"
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        yield {
+            "port": port, "token": token,
+            "set": lambda m: setattr(_Srv, "mode", m),
+            "count": lambda: _Srv.count,
+        }
+        srv.shutdown(); srv.server_close()
+
+    def _client(self, stub, timeout_s):
+        cfg = X4Config(enabled=True,
+                       cloud_endpoint=f"http://127.0.0.1:{stub['port']}/predict",
+                       model_id="yolov26l", max_attempts=1,
+                       request_timeout_seconds=timeout_s, fallback_enabled=True,
+                       probe_interval_seconds=10.0, probe_short_timeout_seconds=timeout_s)
+        # 断言 endpoint 严格为本地回环
+        assert cfg.cloud_endpoint.startswith("http://127.0.0.1:")
+        from src.x4.http_transport import new_http_client
+        import os
+        os.environ["X4_API_TOKEN"] = stub["token"]
+        return cfg, new_http_client(cfg)
+
+    def test_real_http_success_maps_ok(self, stub):
+        """真实 HTTP 200 + 合法 JSON → 检测解析成功（非 fake）。"""
+        cfg, real = self._client(stub, 5.0)
+        dets = real.infer(_frame(), timeout=5.0)
+        assert len(dets) == 1 and dets[0].class_name == "civilian"
+        assert stub["count"]() == 1
+
+    @pytest.mark.parametrize("mode,exc_name,http", [
+        ("500", "CloudConnectionError", 500),
+        ("badjson", "CloudInvalidResponseError", 200),
+    ])
+    def test_real_http_error_maps(self, stub, mode, exc_name, http):
+        """真实 HTTP 500 / 非法 JSON → 映射为预期云端异常（非 fake）。"""
+        from src.x4 import cloud_yolo as cy
+        stub["set"](mode)
+        cfg, real = self._client(stub, 5.0)
+        with pytest.raises(getattr(cy, exc_name)):
+            real.infer(_frame(), timeout=5.0)
+        assert stub["count"]() == 1
+
+    def test_real_http_timeout_maps(self, stub):
+        """真实 HTTP 延迟超时 → CloudTimeoutError；已发 1 次请求；不宣称严格墙钟上界。"""
+        from src.x4.cloud_yolo import CloudTimeoutError
+        stub["set"]("timeout")
+        cfg, real = self._client(stub, 1.0)   # 客户端超时 1s，stub 延迟 4s
+        with pytest.raises(CloudTimeoutError):
+            real.infer(_frame(), timeout=1.0)
+        assert stub["count"]() == 1
+
+    def test_real_http_continuous_failure_keeps_fallback(self, stub):
+        """真实 HTTP 继续失败 → 状态机保持本地回退、不恢复云端。"""
+        from src.x4.composition import make_probe_fn
+        stub["set"]("500")
+        cfg = X4Config(enabled=True,
+                       cloud_endpoint=f"http://127.0.0.1:{stub['port']}/predict",
+                       model_id="yolov26l", max_attempts=1,
+                       request_timeout_seconds=5.0, fallback_enabled=True,
+                       probe_interval_seconds=10.0, probe_short_timeout_seconds=5.0)
+        from src.x4.http_transport import new_http_client
+        cl = new_http_client(cfg)
+        clock = _Clock()
+        edge = _Edge()
+        svc = X4DetectionService(cfg=cfg, cloud=cl, edge_detect=edge, now=clock,
+                                 fail_threshold=1, cooldown_seconds=30.0,
+                                 probe_interval_seconds=10.0, restore_success=2, record=False)
+        svc.machine.on_cloud_failure()   # 进冷却
+        clock.advance(31.0)
+        probe_fn = make_probe_fn(svc, cfg)
+        probe_fn(_frame())               # 进 RECOVERY deferred
+        clock.advance(10.0)
+        assert probe_fn(_frame()) == "probe_failed"   # 探测#1 真实 HTTP 失败
+        assert svc.machine.state == "recovery_probe"
+        assert svc.machine.wants_cloud() is False
+
+    def test_real_http_recovery_to_cloud(self, stub):
+        """真实 HTTP 故障解除 → 连续成功达恢复阈值后切回云端优先。"""
+        from src.x4.http_transport import new_http_client
+        stub["set"]("ok")                 # 故障已解除
+        cfg = X4Config(enabled=True,
+                       cloud_endpoint=f"http://127.0.0.1:{stub['port']}/predict",
+                       model_id="yolov26l", max_attempts=1,
+                       request_timeout_seconds=5.0, fallback_enabled=True,
+                       probe_interval_seconds=10.0, probe_short_timeout_seconds=5.0)
+        cl = new_http_client(cfg)
+        clock = _Clock()
+        svc = X4DetectionService(cfg=cfg, cloud=cl, edge_detect=_Edge(), now=clock,
+                                 fail_threshold=1, cooldown_seconds=30.0,
+                                 probe_interval_seconds=10.0, restore_success=2, record=False)
+        svc.machine.on_cloud_failure()
+        clock.advance(31.0)
+        from src.x4.composition import make_probe_fn
+        probe_fn = make_probe_fn(svc, cfg)
+        probe_fn(_frame())               # RECOVERY deferred
+        clock.advance(10.0)
+        assert probe_fn(_frame()) in ("probe_ok", "restored") # 探测#1 成功（真实 HTTP）
+        clock.advance(10.0)
+        r = probe_fn(_frame())           # 探测#2 成功 → 恢复阈值(2)达标
+        assert r == "restored"
+        assert svc.machine.state == "cloud_preferred"
+        assert svc.machine.wants_cloud() is True
     """恢复探测遇到普通 Exception（非 CloudError）：必须被 _probe_once 捕获并作失败，不崩溃、不误恢复。"""
 
     def _probe_state(self, exc_cls):

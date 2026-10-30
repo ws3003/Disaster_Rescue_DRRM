@@ -1,0 +1,39 @@
+# C4 Outbox Worker systemd 服务样例（Raspberry Pi）
+#
+# 用法(占位路径需替换, 见下方 [替换项]):
+#   sudo cp deploy/systemd/c4-worker.service.example /etc/systemd/system/c4-worker.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now c4-worker
+#   sudo journalctl -u c4-worker -f          # 查看日志
+#
+# 环境变量文件: /etc/c4-worker.env  (chmod 600; 含 C4_SERVER_BASE_URL / C4_API_TOKEN / 可选轮询参数)
+# 绝不把 Token 写入本文件或 systemd unit。
+
+[Unit]
+Description=DRRM C4 Pi->Server Outbox sync worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# [替换项] 项目根目录(绝对路径)
+WorkingDirectory=/opt/disaster-rescue-drrm
+# [替换项] venv 内 python 绝对路径; 不要假设固定路径
+ExecStart=/opt/disaster-rescue-drrm/venv/bin/python -m scripts.c4_worker
+# 也可用绝对脚本路径: ExecStart=/opt/disaster-rescue-drrm/venv/bin/python /opt/disaster-rescue-drrm/scripts/c4_worker.py
+User=pi
+Group=pi
+# 从环境文件注入: C4_SERVER_BASE_URL, C4_API_TOKEN, (可选 C4_POLL_INTERVAL_SECONDS/…/DRRM_DB)
+EnvironmentFile=/etc/c4-worker.env
+Restart=always
+RestartSec=5
+# 优雅停止: 结束当前 batch 后再退出(不把未成功记录标 success)
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# 日志进 journal
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -58,9 +58,9 @@
       "GET /api/v1/alerts/{alert_key}/related",
       "GET /api/v1/environment/readings"
     ],
-    "implementation_status": "not_implemented",
-    "env_name": "pending",
-    "lifecycle": "pending",
+    "implementation_status": "implemented",
+    "env_name": "S4_API_TOKEN",
+    "lifecycle": "server-static-bearer-token",
     "prohibited_reuse_of_outbound_credentials": [
       "VLM_API_KEY",
       "LLM_API_KEY",
@@ -119,7 +119,7 @@
       "meta": ["page", "page_size", "total", "has_more"],
       "auth": true,
       "errors": ["INVALID_PARAMETER", "UNAUTHORIZED", "FORBIDDEN", "INTERNAL_ERROR"],
-      "implementation_status": "not_implemented",
+      "implementation_status": "implemented",
       "sort": {
         "person": "events.ts DESC, event_id DESC",
         "sensor": "occurred_at DESC, alert_id DESC"
@@ -139,7 +139,7 @@
       "meta": {},
       "auth": true,
       "errors": ["INVALID_PARAMETER", "UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "INTERNAL_ERROR"],
-      "implementation_status": "not_implemented",
+      "implementation_status": "implemented",
       "note": "非法 ID 格式返回 400 INVALID_PARAMETER；格式合法但记录不存在返回 404 NOT_FOUND。",
       "dao_dependency": "人员告警详情查询依赖 get_event(event_id)；该 DAO 能力当前尚未实现（此为本契约的依赖与实现状态说明，不作为本轮实现要求）。"
     },
@@ -160,7 +160,7 @@
       "meta": {},
       "auth": true,
       "errors": ["INVALID_PARAMETER", "UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "INTERNAL_ERROR"],
-      "implementation_status": "not_implemented",
+      "implementation_status": "implemented",
       "relation_rule": "仅通过 sensor_alerts.reading_id 关联读数，最多一条；人员告警不关联环境读数；不允许按时间接近程度推断关联；无已核实的媒体记录表或视频媒体 URL，media 为占位。",
       "relation_note": "data.readings 中的 [] 仅为空结果示例，不代表实际响应恒为空；实际 readings 数组可包含 0~1 条环境读数 DTO（仅经 sensor_alerts.reading_id 关联）；不得按时间接近程度推断关联；不得伪造媒体记录或 URL。"
     },
@@ -181,7 +181,7 @@
       "meta": ["page", "page_size", "total", "has_more"],
       "auth": true,
       "errors": ["INVALID_PARAMETER", "UNAUTHORIZED", "FORBIDDEN", "VALIDATION_ERROR", "INTERNAL_ERROR"],
-      "implementation_status": "not_implemented",
+      "implementation_status": "implemented",
       "note": "device_captured_at 闭区间；默认排序 device_captured_at ASC；start > end 返回 422 VALIDATION_ERROR；received_at 可为 null；温度/湿度单位 ℃/%RH 为展示约定，实际采集与存储单位待 E7 核实。"
     }
   ],
@@ -247,7 +247,7 @@
       "count_readings"
     ],
     "auto_implemented": false,
-    "implemented_status": "not_implemented",
+    "implemented_status": "implemented",
     "constraints": {
       "parameterized_sql": true,
       "count_matches_list_filter": true

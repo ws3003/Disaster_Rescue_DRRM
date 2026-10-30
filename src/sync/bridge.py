@@ -18,12 +18,33 @@
 
 from __future__ import annotations
 
+import math
+from decimal import Decimal
 from typing import Any
 
 from src.database import canonical
 
 # C4 同步/规范化协议版本 (协议元数据, 非业务字段; 与 canonical._HASH_VERSION 对齐)
 SYNC_NORM_VERSION = "v1"
+
+
+def exact_number(value: Any) -> Any:
+    """E7→C4 交界：把数值转为 canonical 支持的精确十进制表示（不降精度、不取整）。
+
+    - bool → 原样（canonical 视 bool 非法）；int → 原样（canonical 整数精确分支）。
+    - float（有限） → repr(float)，即最短"往返"十进制字符串（26.75→"26.75"，21.0→"21.0"，
+      −5.25→"-5.25"）。canonical 对十进制字符串按 Decimal 精确规范化，入库 REAL 列会被
+      SQLite 数值亲和还原为同值。这样 E7 产生的合法小数温度不再因 float 精度被误判 unparsable。
+    - Decimal / str → 原样；None → 原样。
+    - NaN / ±Inf → 原样（canonical 仍判 unparsable→c4_verify，不伪造合法，不静默丢失）。
+    """
+    if value is None or isinstance(value, bool) or isinstance(value, (int, Decimal, str)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return value
+        return repr(value)
+    return value
 
 # 各类型业务 dict 必须提供的键 (其余键可选; 缺失键由 canonical 的 required 检查兜底)
 _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {

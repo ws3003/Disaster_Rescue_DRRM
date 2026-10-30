@@ -116,6 +116,38 @@ def test_edge_client_main_uses_composition_root(monkeypatch):
     assert composer_calls == [True]                 # 组合根被调用一次
 
 
+def test_edge_client_main_composition_failure_falls_back(monkeypatch):
+    """B4-2: X4 组合根构建失败 → 异常被捕获、probe_scheduler 安全置 None、仅上传回退继续。"""
+    import src.edge_client as ec
+
+    def fail_build(*a, **k):
+        raise RuntimeError("build boom")
+
+    def fake_upload_ctor(*a, **k):
+        return _FakeUploader()
+
+    def fake_cam_ctor(**k):
+        return _FakeCam()
+
+    seen = {}
+    def fake_run_loop(uploader, cam, **k):
+        seen["perception"] = k.get("perception")
+        seen["probe"] = k.get("probe_scheduler")
+        return 0
+
+    monkeypatch.setattr(ec, "EdgeUploader", fake_upload_ctor)
+    monkeypatch.setattr(ec, "EdgeCam", fake_cam_ctor)
+    # 构造失败：组合根抛 RuntimeException，main 的 try/except 捕获后置 None
+    monkeypatch.setattr("src.x4.composition.build_x4_perception", fail_build)
+    monkeypatch.delenv("X4_API_TOKEN", raising=False)
+    with mock.patch.object(ec, "run_loop", fake_run_loop):
+        rc = ec.main(["--server", "http://127.0.0.1:9999", "--once"])
+    assert rc == 0                              # 构建失败不终止 main
+    # 构建失败 → perception 回退为 None（仅上传），probe_scheduler 安全 None（不误用）
+    assert seen.get("perception") is None
+    assert seen.get("probe") is None
+
+
 def test_composition_path_constructs_x4_service(monkeypatch):
     """组合根本体：注入 Fake cloud+edge → 云端成功走 X4，本地不触发。"""
 

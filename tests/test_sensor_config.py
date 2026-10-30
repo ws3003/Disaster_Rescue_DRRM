@@ -66,3 +66,45 @@ class TestConfig:
                 fh.write("other: 1\n")
             with pytest.raises(SensorConfigError):
                 load_sensor_config(p)
+
+
+class TestA1A2Config:
+    """E7-01/02 新增可选配置（量程 + reader/device）。"""
+
+    def _base(self):
+        return {
+            "sensor_id": "ds18b20-01", "temperature_threshold": 40.0,
+            "sample_period_seconds": 10.0, "confirm_high_count": 3,
+            "confirm_recovery_count": 3, "cooldown_seconds": 600.0,
+        }
+
+    def test_optional_range_and_reader_parsed(self):
+        data = {**self._base(), "temperature_min": -20.0, "temperature_max": 60.0,
+                "humidity_min": 5.0, "humidity_max": 95.0,
+                "reader": "ds18b20", "device_id": "28-abc", "device_dir": "/sys/bus/w1/devices"}
+        cfg = sensor_config_from_dict(data)
+        assert cfg.temperature_min == -20.0 and cfg.temperature_max == 60.0
+        assert cfg.humidity_min == 5.0 and cfg.humidity_max == 95.0
+        assert cfg.reader == "ds18b20" and cfg.device_id == "28-abc"
+        assert cfg.device_dir == "/sys/bus/w1/devices"
+
+    def test_defaults_when_absent(self):
+        cfg = sensor_config_from_dict(self._base())
+        assert cfg.temperature_min == -40.0 and cfg.temperature_max == 85.0
+        assert cfg.humidity_min == 0.0 and cfg.humidity_max == 100.0
+        assert cfg.reader == "fake" and cfg.device_id is None
+
+    def test_bad_range_rejected(self):
+        with pytest.raises(SensorConfigError):
+            sensor_config_from_dict({**self._base(), "temperature_min": 90.0, "temperature_max": 10.0})
+
+    def test_bad_reader_rejected(self):
+        with pytest.raises(SensorConfigError):
+            sensor_config_from_dict({**self._base(), "reader": "sht31"})
+
+    def test_edge_yaml_loads_new_fields(self):
+        # 确保集成的 config/edge.yaml 可被现有加载器解析（含新增字段）
+        cfg = load_sensor_config("config/edge.yaml")
+        assert cfg.reader == "ds18b20"
+        assert cfg.device_id == "28-0224e33f1e4e"
+        assert int(cfg.temperature_max) == 85

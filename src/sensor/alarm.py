@@ -80,8 +80,8 @@ class HighTempAlarm:
             record_type="sensor_alert",
             business={
                 "type": ALERT_TYPE,
-                "temperature": temp,
-                "threshold": threshold,
+                "temperature": c4_bridge.exact_number(temp),
+                "threshold": c4_bridge.exact_number(threshold),
                 "device_captured_at": captured_at,
                 "occurred_at": occurred_at,
             },

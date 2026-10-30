@@ -26,8 +26,9 @@ from typing import Any, Callable, Optional
 from src.database.db import Database
 from src.evidence.recorder import EvidenceRecorder, FakeRecorder
 from src.sensor.alarm import HighTempAlarm
-from src.sensor.config import SensorConfig
+from src.sensor.config import SensorConfig, load_sensor_config
 from src.sensor.loop import SampledSensorLoop
+from src.sensor.sensor_errors import SensorReadError
 
 _QUEUE_GET_TIMEOUT = 0.2
 
@@ -204,6 +205,49 @@ class SensorRunner:
         return ok
 
 
+def build_sensor_reader(cfg: SensorConfig, *, provider: Any = None):
+    """按配置装配传感器读取器（E7-01，A2）。
+
+    - cfg.reader == 'ds18b20' → DS18B20Reader(device_dir, device_id)（真实 One-Wire 温度）。
+    - 否则 → FakeReader(provider)（Windows 测试/离线联调）。provider 缺失时抛错，
+      明确可诊断——不把 Fake 当作真实硬件已接入。
+
+    构造过程不触碰 Linux 设备路径（DS18B20Reader 仅 read() 时访问），Windows 无副作用。
+    """
+    if cfg.reader == "ds18b20":
+        from src.sensor.ds18b20_reader import DEFAULT_W1_DIR, DS18B20Reader
+        device_dir = cfg.device_dir or str(DEFAULT_W1_DIR)
+        return DS18B20Reader(device_dir=device_dir, device_id=cfg.device_id)
+    if provider is None:
+        raise SensorReadError(
+            "reader=fake 需要显式 provider（测试/离线联调）；不要将 Fake 当作真实硬件已接入")
+    from src.sensor.reader import FakeReader
+    return FakeReader(provider)
+
+
+def build_runner_from_config(
+    sensor_config_path: Any,
+    *,
+    db: Database,
+    reader_provider: Any = None,
+    recorder_adapter: Any = None,
+    uploader: Any = None,
+    storage_config: str = "config/storage.yaml",
+    sleep: Callable[[float], None] = time.sleep,
+) -> "SensorRunner":
+    """生产装配入口：从 sensor 配置 yaml 加载，按 reader 选择真实 DS18B20 或 Fake 读取器。
+
+    适用 Raspberry Pi 生产（reader=ds18b20 + device_id）；Windows 离线联调传 reader_provider
+    （Fake provider）即可。供启动脚本调用，不另建第二套 SensorRunner。
+    """
+    cfg = load_sensor_config(sensor_config_path)
+    reader = build_sensor_reader(cfg, provider=reader_provider)
+    return build_runner_with_storage(
+        cfg, db=db, reader=reader, recorder_adapter=recorder_adapter,
+        uploader=uploader, storage_config=storage_config, sleep=sleep,
+    )
+
+
 def build_runner(
     sensor_cfg: SensorConfig,
     *,
@@ -223,6 +267,8 @@ def build_runner(
     """
     alarm = HighTempAlarm(sensor_cfg, db)
     loop = SampledSensorLoop(sensor_cfg, reader, alarm, db, sleep=sleep)
+    # E7-07 重启恢复：从 SQLite 恢复上次持久化的设备离线/故障状态
+    loop.restore_state()
     recorder = EvidenceRecorder(
         db,
         recorder=recorder_adapter or FakeRecorder(),

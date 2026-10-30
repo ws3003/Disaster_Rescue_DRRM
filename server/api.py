@@ -31,14 +31,14 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import server.schemas as sch
 from server import s4 as s4_module
 from server import c4 as c4_module
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 from src.llm.client import LLMClient, LLMConfigError, LLMProviderError
@@ -50,7 +50,7 @@ from src.vlm.client import (
     VLMProviderError,
 )
 from src.vlm.parser import SceneParseError, parse as parse_vlm
-from src.storage import upload_snapshot
+from src.storage import StorageSignError, create_storage, upload_snapshot
 from src.assistant.responder import AssistantResponder
 from src.assistant.voice import VoiceAssistant
 from src.assistant.agent_bridge import AgentBridge
@@ -578,3 +578,21 @@ def get_snapshot(filename: str) -> FileResponse:
 # ======================================================================
 app.include_router(s4_module.router)
 app.include_router(c4_module.router)
+
+# ----------------------------------------------------------------------
+# V4.4 媒体访问授权（D-0）— 已解耦至 server.media：
+# 仅当 auth 依赖存在时挂载媒体路由（保留 get_current_user 鉴权，绝不公开匿名）；
+# 微信登录 router 不在此自动挂载（是否挂载由未来独立集成任务决定）。
+# 使用精确模块存在性检查：server.media 存在但含真实错误时不会吞掉异常。
+# ----------------------------------------------------------------------
+import importlib.util as _ilu  # noqa: E402
+
+if (
+    _ilu.find_spec("server.media") is not None
+    and _ilu.find_spec("server.auth") is not None
+):
+    from server import media as media_module
+    media_module.install(app)
+    app.include_router(media_module.router)
+
+# ======================================================================

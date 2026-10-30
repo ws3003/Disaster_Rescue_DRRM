@@ -115,3 +115,46 @@ class TestImportSafety:
         # 顶层不应初始化任何硬件库
         for forbidden in ("adafruit", "board", "GPIO"):
             assert not hasattr(mod, forbidden)
+
+
+class TestRangeValidation:
+    """E7-02 读数量程（A1）：边界有效、越界无效、可配置。"""
+
+    def test_default_boundaries_valid(self):
+        assert is_valid_sample(-40.0, 0.0)
+        assert is_valid_sample(85.0, 100.0)
+        assert is_valid_sample(0.0, 50.0)
+
+    def test_out_of_range_invalid(self):
+        assert not is_valid_sample(-40.01, None)
+        assert not is_valid_sample(85.01, None)
+        assert not is_valid_sample(50.0, -0.01)
+        assert not is_valid_sample(50.0, 100.01)
+
+    def test_nan_inf_invalid(self):
+        assert not is_valid_sample(float("nan"), None)
+        assert not is_valid_sample(float("inf"), None)
+        assert not is_valid_sample(20.0, float("-inf"))
+
+    def test_custom_limits_change_result(self):
+        assert is_valid_sample(90.0, None, temperature_max=100.0)
+        assert not is_valid_sample(101.0, None, temperature_max=100.0)
+
+    def test_humidity_none_valid(self):
+        assert is_valid_sample(25.0, None)
+
+    def test_build_reading_defers_range_to_loop(self):
+        # Reader 层不预判配置量程：有限越界值仍构造 Reading；
+        # 量程由 SensorLoop（is_valid_sample + SensorConfig）统一把关。
+        r = build_reading(120.0, None, TS)
+        assert r.temperature_c == 120.0
+        assert is_valid_sample(r.temperature_c, None) is False  # 越界在业务层被拒
+
+    def test_build_reading_rejects_non_finite(self):
+        from src.sensor.validate import is_finite_sample
+        assert is_finite_sample(25.0, None) is True
+        assert is_finite_sample(float("nan"), None) is False
+        assert is_finite_sample(float("inf"), 40.0) is False
+        assert is_finite_sample("25", None) is False  # 类型非法（字符串）
+        with pytest.raises(SensorReadError):
+            build_reading(float("nan"), None, TS)

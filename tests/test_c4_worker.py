@@ -293,99 +293,61 @@ class TestHashReuse:
         assert results == ["success"] and _outbox_of(db, sid)["status"] == "success"
 
 
-# ---- 定向缺陷修复: 小数值 unbuildable -> c4_verify + outbox 中性化, 不误发/不误死信即丢 ----
-class TestUnbuildableToVerify:
-    def test_fractional_reading_not_synced_as_normal_success(self, db):
-        # 服务端回了 synced, 但记录不可哈希 -> 绝不能当作普通成功
+# ---- E7→C4 数值契约衔接后：合法小数值 reading 现可正常同步（worker 重读按 exact 重哈希，
+#     不再因 Decimal 入队 → SQLite float → 重读 float 而误判 unbuildable）----
+class TestFractionalNowSyncs:
+    def test_fractional_syncs_when_server_ok(self, db):
         sid = _seed_fractional_reading(db)
         results = _worker(db, lambda *a, **k: _resp_ok(sid, "synced")).process_batch()
-        assert results == ["dead"]
-        assert _outbox_of(db, sid)["status"] == "dead_letter"
-        assert _outbox_of(db, sid)["completed_at"] is None  # 未被标成功
+        out = _outbox_of(db, sid)
+        assert out["status"] == "success" and out["completed_at"] is not None
+        assert db.get_verify("reading", sid) is None          # 不再误入 c4_verify
+        assert len(results) == 1
 
-    def test_not_treated_as_ordinary_network_retry(self, db):
-        # 即使 HTTP client 抛网络错, 也先判 unbuildable -> dead, 而非 retry_wait
+    def test_fractional_network_error_retry_wait(self, db):
         sid = _seed_fractional_reading(db)
-        results = _worker(db, lambda *a, **k: (_ for _ in ()).throw(ConnectionError("down"))).process_batch()
-        assert results == ["dead"]
+        _worker(db, lambda *a, **k: (_ for _ in ()).throw(ConnectionError("down"))).process_batch()
         got = _outbox_of(db, sid)
-        assert got["status"] == "dead_letter" and "unbuildable" in (got["last_error"] or "")
-        assert "retry_wait" != got["status"]
+        # 现可哈希 → 网络错误走重试，而非被当成不可构建的 dead_letter
+        assert got["status"] == "retry_wait" and got["status"] != "dead_letter"
+        assert "network" in (got["last_error"] or "").lower()
 
-    def test_verify_reason_recorded_and_not_resent(self, db):
+    def test_fractional_no_verify_written(self, db):
         sid = _seed_fractional_reading(db)
         _worker(db, lambda *a, **k: _resp_ok(sid, "synced")).process_batch()
-        v = db.get_verify("reading", sid)
-        assert v is not None
-        assert set(canonical.parse_reasons_json(v["reasons"])) == {"unparsable"}
-        # outbox 中性化: 后续不再被领取/重发
-        assert _outbox_of(db, sid)["status"] == "dead_letter"
-        assert db.outbox_claim("w-restart", now_ms=999_999_999_999_999) is None
-
-    def test_verify_write_failure_no_half_state(self, db, monkeypatch):
-        sid = _seed_fractional_reading(db)
-
-        def _boom(*a, **k):
-            raise RuntimeError("verify down")
-
-        monkeypatch.setattr(db, "add_verify", _boom)
-        with pytest.raises(RuntimeError):
-            _worker(db, lambda *a, **k: _resp_ok(sid, "synced")).process_batch()
-        # verify 失败 -> 未把 outbox 推向死信(verify 先行), 记录仍处可恢复的 processing(租约过期后可重试)
-        assert _outbox_of(db, sid)["status"] == "processing"
         assert db.get_verify("reading", sid) is None
+        assert _outbox_of(db, sid)["status"] == "success"
+
+    def test_fractional_hash_stable_preserves_value(self, db):
+        sid = _seed_fractional_reading(db)
+        with db._connect() as c:
+            stored = c.execute("SELECT temperature FROM readings WHERE reading_id=?",
+                               (sid,)).fetchone()[0]
+        assert float(stored) == 30.5                          # 精度保留
+        biz = {"sensor_id": "s1", "temperature": bridge.exact_number(float(stored)),
+               "humidity": bridge.exact_number(40.0), "device_captured_at": "2026-10-28T10:00:00Z"}
+        h, reasons = canonical.compute_content_hash("reading", biz,
+                                                    version=bridge.SYNC_NORM_VERSION)
+        assert sorted(reasons) == [] and h
 
     def test_integer_record_still_success(self, db):
         sid = _seed_sensor_alert(db)
         results = _worker(db, lambda *a, **k: _resp_ok(sid, "synced")).process_batch()
         assert results == ["success"] and _outbox_of(db, sid)["status"] == "success"
-        assert db.get_verify("sensor_alert", sid) is None  # 可哈希路径不写 verify
+        assert db.get_verify("sensor_alert", sid) is None
 
 
-# ---- 0-A 写 verify 后失去认领 / B 以更高 gen 补完 的 fencing 交织 (read-only 结论的安全态, 补显式覆盖) ----
-class TestUnbuildableReclaimRace:
-    def test_a_lost_claim_then_b_completes_dead(self, db):
-        sid = _seed_fractional_reading(db)
-        oid = db.outbox_claim("A", now_ms=1_000)          # gen: 0 -> 1
+class TestFencing:
+    """A 失去认领后陈旧 gen 回写被拒（fencing），与数值无绑定。"""
+
+    def test_stale_gen_writeback_rejected(self, db):
+        sid = _seed_sensor_alert(db)
+        oid = db.outbox_claim("A", now_ms=1_000)
         assert oid is not None
         genA = db.get_outbox(oid)["gen"]
-        biz = {"sensor_id": "s1", "temperature": 30.5, "humidity": 40,
-               "device_captured_at": "2026-10-28T10:00:00Z"}
-
-        # 1) A 写 verify
-        assert db.add_verify("reading", sid, {"unparsable"}, business_json=biz) is True
-        assert db.get_verify("reading", sid) is not None
-
-        # 2) A 失去认领: A 租约(1_000+30_000)过期后 B 重新领取, gen 增加
         assert db.outbox_claim("B", now_ms=100_000) == oid
         genB = db.get_outbox(oid)["gen"]
         assert genB == genA + 1
-
-        # 3) A 用陈旧 gen 走真实 _to_verify: verify 幂等保留, dead_letter CAS 因 fencing 失败 -> lost
-        resA = _worker(db, lambda *a, **k: None, worker_id="A")._to_verify(
-            oid, genA, "reading", sid, {"unparsable"}, biz)
-        assert resA == "lost"
-        # A 未能覆盖新状态: 仍为 B 的 processing
-        assert db.get_outbox(oid)["status"] == "processing"
-        assert db.get_outbox(oid)["worker_id"] == "B"
-        # A 的 verify 保留, 原因未丢未改
-        v = db.get_verify("reading", sid)
-        assert v is not None and set(canonical.parse_reasons_json(v["reasons"])) == {"unparsable"}
-
-        # 4) B 用当前 gen 处理同一条 unbuildable -> dead_letter
-        resB = _worker(db, lambda *a, **k: None, worker_id="B").process_one(oid, gen=genB)
-        assert resB == "dead"
-        final = db.get_outbox(oid)
-        assert final["status"] == "dead_letter"
-        assert "unbuildable" in (final["last_error"] or "")
-
-        # 5) verify 保持单行, 原因准确
-        with db._connect() as conn:
-            n = conn.execute("SELECT COUNT(*) AS n FROM c4_verify").fetchone()[0]
-            assert n == 1
-        v2 = db.get_verify("reading", sid)
-        assert set(canonical.parse_reasons_json(v2["reasons"])) == {"unparsable"}
-
-        # 6) 旧 generation A 的回写不能覆盖 B 的终态
+        # A 用陈旧 gen 回写 dead_letter 被 fencing 拒绝；B 的状态保留
         assert db.outbox_mark_dead_letter(oid, "A", genA, last_error="stale") is False
-        assert db.get_outbox(oid)["status"] == "dead_letter"
+        assert db.get_outbox(oid)["status"] == "processing" and db.get_outbox(oid)["worker_id"] == "B"

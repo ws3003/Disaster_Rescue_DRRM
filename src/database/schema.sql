@@ -232,3 +232,66 @@ CREATE TABLE IF NOT EXISTS c4_verify (
 
 CREATE INDEX IF NOT EXISTS idx_c4_verify_key
 ON c4_verify(record_type, source_record_id);
+
+-- ======================================================================
+-- V4.4 微信用户认证 (login / me / logout)
+-- 设计: users(user_id, wechat_openid 唯一) + sessions(session_token 仅存 SHA-256 哈希)
+-- 说明: session_token_hash 只存哈希; revoked_at 非空=已撤销; expires_at 判断过期。
+-- ======================================================================
+CREATE TABLE IF NOT EXISTS users (
+    user_id       TEXT PRIMARY KEY,            -- U-<YYYYMMDD>-<uuid8>
+    wechat_openid TEXT NOT NULL UNIQUE,        -- 微信 openid, 一 openid 一内部用户
+    created_at    TEXT NOT NULL                -- 带时区 ISO 8601
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id       TEXT PRIMARY KEY,         -- S-<YYYYMMDD>-<uuid8>
+    user_id          TEXT NOT NULL,
+    session_token_hash TEXT NOT NULL UNIQUE,   -- 仅存 SHA-256 哈希, 不存明文 Token
+    created_at       TEXT NOT NULL,
+    expires_at       TEXT NOT NULL,
+    revoked_at       TEXT,                     -- NULL=未撤销; 非空=已撤销
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id
+ON sessions(user_id);
+
+-- ============================================================
+-- V4.4 E7-07: 传感器设备状态与故障历史（A3）
+-- sensor_status: 每传感器一行当前状态；程序重启后据此恢复离线/降质状态。
+--   status: online | degraded | offline
+--       degraded  = 读到数据但质量不合格(如越界/非法值)；不视为设备断线
+--       offline   = 设备级连续读取失败达到 offline_after_failures
+--   fault_type: device(读取故障) | data_quality(数据质量问题)（与 VLM 图像环境告警独立）
+-- sensor_fault_events: 故障发生/恢复历史（不删、不改已有表）
+-- 以下均为新增表（IF NOT EXISTS 幂等），符合"新增表迁移"最小方案。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sensor_status (
+    sensor_id            TEXT PRIMARY KEY,
+    status               TEXT NOT NULL CHECK (status IN ('online','degraded','offline')),
+    fault_type           TEXT,
+    last_error           TEXT,
+    first_fault_at       TEXT,
+    last_fault_at        TEXT,
+    recovered_at         TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    quality_failures     INTEGER NOT NULL DEFAULT 0,
+    updated_at           TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sensor_status_updated
+ON sensor_status(updated_at);
+
+CREATE TABLE IF NOT EXISTS sensor_fault_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    sensor_id    TEXT NOT NULL,
+    status       TEXT NOT NULL CHECK (status IN ('online','degraded','offline')),
+    fault_type   TEXT,
+    detail       TEXT,
+    occurred_at  TEXT NOT NULL,
+    recovered_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sensor_fault_sensor_time
+ON sensor_fault_events(sensor_id, occurred_at);

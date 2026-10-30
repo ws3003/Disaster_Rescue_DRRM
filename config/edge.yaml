@@ -83,6 +83,16 @@ rescue:
 # ============================================================
 sensor:
   sensor_id: "dht11-01"
+  # 读取器选择: "ds18b20"=真实 One-Wire 温度; "fake"=测试/离线 Mock(需显式 provider)
+  reader: "ds18b20"
+  # DS18B20 One-Wire 设备 (Raspberry Pi 已识别: 28-0224e33f1e4e, GPIO4)
+  device_id: "28-0224e33f1e4e"
+  device_dir: "/sys/bus/w1/devices"
+  # E7-02 读数量程（开发默认；以真实硬件规格为准可改）
+  temperature_min: -40
+  temperature_max: 85
+  humidity_min: 0
+  humidity_max: 100
   temperature_threshold: 40.0
   level2_threshold: 50.0
   recovery_threshold: 36.0

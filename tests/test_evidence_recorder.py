@@ -122,11 +122,12 @@ class TestTrigger:
         r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
         m = db.list_media_evidence_by_ref(MEDIA_SOURCE, rid)[0]
         assert m["ref_id"] == rid
-        assert m["local_path"] and os.path.exists(m["local_path"])
-        assert os.path.getsize(m["local_path"]) > 0  # 非空视频文件
-        # 确定性对象键: 本地文件名与 media_id 一致, object_key = evidence/{media_id}.mp4
+        # X5-06：上传+数据库成功确认后本地文件被清理，local_path 元数据仍保留（文件名/对象键确定性）。
+        assert m["local_path"]
         assert os.path.basename(m["local_path"]) == f"{m['media_id']}.mp4"
         assert m["object_key"] == f"evidence/{m['media_id']}.mp4"
+        assert m["status"] == "success"
+        # 确定性对象键: 本地文件名与 media_id 一致（成功后本地已清理，故原大小断言去掉）
 
     def test_deterministic_object_key(self, db, tmp_path):
         # 同一媒体在重试前后对象键不变（上传失败→恢复成功后核对）
@@ -326,3 +327,121 @@ class TestSuccessWritebackRetry:
         assert out["ok"] is False and out["error"] == "status_update_failed_after_upload"
         m = db.list_media_evidence_by_ref(MEDIA_SOURCE, rid)[0]
         assert m["status"] != "success"   # 不谎报成功
+
+class TestX506Cleanup:
+    """X5-06：仅确认上传+数据库成功后清理本地；失败/越界/幂等不误删。tmp_path 即 recorder._tmp_base。"""
+
+    def test_upload_success_cleans_local(self, db, tmp_path):
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=OkUploader())
+        out = r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        assert out.get("ok") is True and out.get("error") is None
+        m = _first_media(db)
+        assert m["status"] == "success" and m["upload_status"] == "success"
+        assert not os.path.exists(m["local_path"])          # 本地已清理
+
+    def test_upload_failure_keeps_local(self, db, tmp_path):
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=FailUploader(), max_retries=3)
+        out = r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        assert out["ok"] is False
+        m = _first_media(db)
+        assert m["status"] == "failed-awaiting-retry"
+        assert os.path.exists(m["local_path"])              # 失败保留
+
+    def test_uploader_exception_keeps_local(self, db, tmp_path):
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=RaisesUploader(), max_retries=3)
+        out = r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        assert out["ok"] is False
+        m = _first_media(db)
+        assert os.path.exists(m["local_path"])              # 异常保留
+
+    def test_db_success_write_fail_keeps_local(self, db, tmp_path, monkeypatch):
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=OkUploader())
+        orig = db.update_media_evidence_status
+
+        def _fail_success(mid, **kw):
+            if kw.get("status") == "success":
+                return False
+            return orig(mid, **kw)
+
+        monkeypatch.setattr(db, "update_media_evidence_status", _fail_success)
+        out = r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        assert out["ok"] is False and out["error"] == "status_update_failed_after_upload"
+        m = _first_media(db)
+        assert m["status"] != "success"
+        assert os.path.exists(m["local_path"])              # DB失败→保留
+
+    def test_cleanup_failure_does_not_reverse_upload_success(self, db, tmp_path, monkeypatch):
+        from pathlib import Path
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=OkUploader())
+        # 模拟本地删除失败：patch Path.unlink 抛异常（清理被捕获，上传成功状态不回退）
+        orig_unlink = Path.unlink
+
+        def _boom(self_path):
+            raise OSError("permission denied")
+
+        monkeypatch.setattr(Path, "unlink", _boom)
+        try:
+            out = r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        finally:
+            monkeypatch.setattr(Path, "unlink", orig_unlink)
+        assert out.get("ok") is True and out.get("error") is None     # 上传成功不被回退
+        m = _first_media(db)
+        assert m["status"] == "success" and m["upload_status"] == "success"
+        assert os.path.exists(m["local_path"])                # 文件因删除失败仍存在
+
+    def test_cleanup_missing_file_idempotent(self, db, tmp_path):
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=OkUploader())
+        out = r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        assert out["ok"] is True                              # 首次已删
+        # 再次清理（文件已不存在）→ 幂等不崩
+        m = _first_media(db)
+        r._clean_up_proof(m["local_path"], m["media_id"])
+        assert not os.path.exists(m["local_path"])
+
+    def test_cleanup_does_not_delete_other_media(self, db, tmp_path):
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=OkUploader())
+        # 在 tmp 目录放一个"其他证据"文件，清理当前 media 不应动它
+        other = os.path.join(str(tmp_path), "other.mp4")
+        with open(other, "wb") as f:
+            f.write(b"x")
+        out = r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        assert out["ok"] is True
+        assert os.path.exists(other)                          # 其他媒体保留
+
+    def test_cleanup_rejects_path_outside_evidence_dir(self, db, tmp_path):
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=OkUploader())
+        out = r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        assert out.get("ok") is True
+        m = _first_media(db)
+        assert m is not None
+        # local_path 被改成 tmp 外部路径 → 清理应拒绝，不删除
+        outside = os.path.join(tempfile.gettempdir(), f"outside_{m['media_id']}.mp4")
+        with open(outside, "wb") as f:
+            f.write(b"keep")
+        r._clean_up_proof(outside, m["media_id"])
+        assert os.path.exists(outside)                        # 越界文件未删
+        os.remove(outside)
+
+    def test_failed_retry_preserves_until_success(self, db, tmp_path, monkeypatch):
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=FailUploader(), max_retries=3)
+        r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        m = _first_media(db)
+        assert os.path.exists(m["local_path"])                # 失败重试期间保留
+
+    def test_cleanup_duplicate_call_idempotent(self, db, tmp_path):
+        rid = _new_alert(db)
+        r = _mk(db, tmp_path, uploader=OkUploader())
+        r.handle_event({"type": "alert_upgraded", "alert_id": rid, "level": 2})
+        m = _first_media(db)
+        r._clean_up_proof(m["local_path"], m["media_id"])     # 重复清理幂等
+        r._clean_up_proof(m["local_path"], m["media_id"])
+        assert not os.path.exists(m["local_path"])

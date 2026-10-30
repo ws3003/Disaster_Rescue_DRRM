@@ -28,6 +28,7 @@ Runner，此约定不代表已完成生产验证。本模块不把远端返回�
 
 from __future__ import annotations
 
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -195,7 +196,34 @@ class EvidenceRecorder:
             uploaded_ok = _write_success()
         if not uploaded_ok:
             return "status_update_failed_after_upload"
+        # X5-06：数据库已确认成功后才清理本地视频；清理失败不回退上传成功状态。
+        self._clean_up_proof(dest, media_id)
         return None
+
+    def _clean_up_proof(self, dest: str, media_id: str) -> None:
+        """上传 + 数据库成功状态均确认后，安全清理本地媒体文件（X5-06）。
+
+        - 只删除 `media_id` 对应的预期路径 `<tmp_base>/{media_id}.mp4`；不递归、不用通配符、不删其他媒体。
+        - 路径校验：`dest` 必须是 `self._tmp_base` 目录下的文件（防止不可信 `local_path` 越界）。
+        - 幂等：文件不存在视为清理成功（不抛、不误删他文件）。
+        - 删除异常被捕获并记录到日志：**不得因清理失败把已确认的上传成功改回失败**。
+        """
+        try:
+            target = Path(dest).resolve()
+            base = self._tmp_base.resolve()
+            expected = (self._tmp_base / f"{media_id}.mp4").resolve()
+            # 只允许清理预期证据目录内的精确文件
+            if not expected.is_relative_to(base):
+                return
+            if target != expected:
+                return
+            if target.exists():
+                target.unlink()
+        except Exception as exc:  # noqa: BLE001 — 清理失败仅记录, 不翻转上传成功事实
+            import logging
+            logging.getLogger("x4.evidence").warning(
+                "media cleanup failed (upload stays success): media_id=%s err=%s",
+                media_id, type(exc).__name__)
 
     def _mark_failed(self, media_id: str, *, last_error: str,
                      capture_result: Any = None, upload_status: Any = None) -> bool:

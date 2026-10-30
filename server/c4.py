@@ -11,13 +11,17 @@ Pi 侧 Outbox worker 将待同步记录投递至此; 服务端做幂等接收(c4
 from __future__ import annotations
 
 import hmac
+import math
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 
+from src.database import canonical as _canonical
 from src.database.db import Database
+from src.sync import bridge as _bridge
 
 router = APIRouter(prefix="/api/v1")
 
@@ -28,6 +32,15 @@ _CODES = {
 }
 
 _C4_RECORD_TYPES = frozenset({"person_event", "reading", "sensor_alert"})
+
+# 需携带业务本体的记录类型（writing 业务只读副本到服务端库 readings/sensor_alerts）
+_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert"})
+
+# 各类型的必填业务字段（缺失 → 整批 400，不产生半写入）
+_BUSINESS_REQUIRED = {
+    "reading": frozenset({"sensor_id", "temperature", "device_captured_at"}),
+    "sensor_alert": frozenset({"type", "occurred_at"}),
+}
 
 
 def get_db() -> Database:
@@ -54,6 +67,53 @@ def _fail_json(code: str, message: str, http_status: int) -> JSONResponse:
                         content={"code": code, "message": message, "data": None, "meta": {}})
 
 
+def _is_finite_number(value: Any) -> bool:
+    """数值必须为 int/float/Decimal/十进制字符串、非 bool、有限（不允许 NaN/±Inf）。"""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return math.isfinite(float(value))
+    if isinstance(value, str):
+        try:
+            import decimal as _dec
+            d = _dec.Decimal(value.strip())
+            d_float = float(d)
+        except Exception:  # noqa: BLE001
+            return False
+        return math.isfinite(d_float)
+    return False
+
+
+def _validate_business(rt: str, business: Any) -> None:
+    """业务本体校验：
+    - person_event 不要求 business（延续旧协议）。
+    - reading/sensor_alert：business 缺失视为"旧客户端"（只登记 c4_idem，不写业务副本，向后兼容）；
+      若提供则必须为 dict 且含必填字段、数值合法（否则 400，不产生写入）。
+    """
+    if rt not in _BUSINESS_CARRIERS:
+        return
+    if business is None:
+        return  # 旧客户端：无业务本体 → 仅幂等登记，兼容
+    if not isinstance(business, dict):
+        raise HTTPException(status_code=400, detail=f"{rt} business 必须为对象")
+    missing = [k for k in _BUSINESS_REQUIRED[rt] if k not in business]
+    if missing:
+        raise HTTPException(status_code=400,
+                            detail=f"{rt} business 缺少字段: {sorted(missing)}")
+    # 数值/时间合法性
+    num_fields = {"temperature"} | ({"humidity", "threshold"} if rt == "sensor_alert" else set())
+    for k in num_fields:
+        v = business.get(k)
+        if v is None:
+            continue
+        if not _is_finite_number(v):
+            raise HTTPException(status_code=400, detail=f"{rt}.business.{k} 非法数值")
+    for k in ("device_captured_at", "occurred_at"):
+        v = business.get(k)
+        if isinstance(v, str) and not v.strip():
+            raise HTTPException(status_code=400, detail=f"{rt}.business.{k} 为空")
+
+
 def _validate_record(rec: Dict[str, Any]) -> None:
     """单条记录字段级校验; 非法抛 HTTP 400, 不产生任何写入。
 
@@ -65,27 +125,94 @@ def _validate_record(rec: Dict[str, Any]) -> None:
     ch = rec.get("content_hash")
     if rt not in _C4_RECORD_TYPES or not isinstance(sid, str) or not sid or not isinstance(ch, str) or not ch:
         raise HTTPException(status_code=400, detail="invalid record fields")
+    _validate_business(rt, rec.get("business"))
+
+
+def _hash_of_business(rt: str, business: Dict[str, Any]):
+    """用与 Pi 相同的 canonical 规则，从业务本体重算 hash（校验与 content_hash 一致）。"""
+    if not isinstance(business, dict):
+        return None, {"invalid"}
+    view = _bridge._canonical_view(rt, business)
+    return _canonical.classify(rt, view, version=_bridge.SYNC_NORM_VERSION)
+
+
+def _write_business_copy(tx, rt: str, sid: str, business: Dict[str, Any], recv_iso: str) -> None:
+    """在调用方事务内写 Windows 只读业务副本（readings / sensor_alerts）。
+
+    同一事务与 c4_idem 登记一起提交；失败则整体回滚（不出现"已登记但无副本/有副本未登记"）。
+    """
+    if rt == "reading":
+        tx.execute(
+            """
+            INSERT INTO readings
+              (reading_id, sensor_id, temperature, humidity, device_captured_at,
+               edge_received_at, received_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (sid, business.get("sensor_id"), business.get("temperature"),
+             business.get("humidity"), business.get("device_captured_at"),
+             business.get("edge_received_at"), recv_iso),
+        )
+    elif rt == "sensor_alert":
+        tx.execute(
+            """
+            INSERT INTO sensor_alerts
+              (alert_id, type, severity, temperature, humidity, threshold, status,
+               occurred_at, resolved_at, device_captured_at, received_at, reading_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (sid, business.get("type"), business.get("severity"),
+             business.get("temperature"), business.get("humidity"), business.get("threshold"),
+             business.get("status", "active"), business.get("occurred_at"),
+             business.get("resolved_at"), business.get("device_captured_at"),
+             recv_iso, business.get("reading_id")),
+        )
 
 
 def _ingest(db: Database, rec: Dict[str, Any]) -> str:
-    """单条幂等接收: 无登记→synced; 同hash→already_synced; 异hash→content_mismatch(记冲突审计, 不覆盖)。"""
+    """单条幂等接收+业务副本落地。
+
+    - 无登记 → (业务合法且 hash 复核一致) 同一事务登记 c4_idem 并写业务副本 → synced；
+      业务缺失(旧客户端/person_event) → 仅登记 → synced（兼容，不写副本）。
+    - 同hash → already_synced（不重复入库）。
+    - 异hash / hash 复核不一致 → content_mismatch（冲突审计，不覆盖首收，不写副本）。
+    """
     _validate_record(rec)
     rt = rec.get("record_type")
     sid = rec.get("source_record_id")
     ch = rec.get("content_hash")
     edge = rec.get("edge_id")
+    business = rec.get("business")
     now = int(__import__("time").time() * 1000)
+    recv_iso = datetime.now().astimezone().isoformat(timespec="seconds")
     with db.with_transaction() as tx:
         row = tx.execute(
             "SELECT content_hash FROM c4_idem WHERE record_type=? AND source_record_id=?",
             (rt, sid),
         ).fetchone()
         if row is None:
+            # 首收：若携带业务本体，则复核 hash；不一致 → 记冲突、不写副本
+            if isinstance(business, dict):
+                _h, _why = _hash_of_business(rt, business)
+                if not _h or _h != ch:
+                    tx.execute(
+                        """
+                        INSERT INTO c4_content_conflict
+                          (record_type, source_record_id, content_hash, conflict_hash,
+                           detected_at, edge_id)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (rt, sid, ch, _h or "", now, edge),
+                    )
+                    return "content_mismatch"
             tx.execute(
                 "INSERT INTO c4_idem (record_type, source_record_id, content_hash, received_at, edge_id) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (rt, sid, ch, now, edge),
             )
+            # 同事务写 Windows 只读业务副本（合法业务本体；person_event 不写）
+            if rt in _BUSINESS_CARRIERS and isinstance(business, dict):
+                _write_business_copy(tx, rt, sid, business, recv_iso)
             return "synced"
         if row["content_hash"] == ch:
             return "already_synced"

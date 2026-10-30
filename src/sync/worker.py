@@ -15,6 +15,9 @@ from src.database import canonical
 from src.database.db import Database
 from src.sync import bridge
 
+# 业务数据同步：reading/sensor_alert 在 HTTP 载荷携带完整业务本体（服务端写只读副本）
+_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert"})
+
 
 class OutboxWorker:
     """发送 Outbox 记录到服务端接收接口, 并据回执推进状态。"""
@@ -55,14 +58,18 @@ class OutboxWorker:
             row = self.db.get_reading(source_record_id)
             if not row:
                 return None
-            return {"sensor_id": row["sensor_id"], "temperature": row.get("temperature"),
-                    "humidity": row.get("humidity"), "device_captured_at": row.get("device_captured_at")}
+            return {"sensor_id": row["sensor_id"],
+                    "temperature": bridge.exact_number(row.get("temperature")),
+                    "humidity": bridge.exact_number(row.get("humidity")),
+                    "device_captured_at": row.get("device_captured_at")}
         if record_type == "sensor_alert":
             row = self.db.get_sensor_alert(source_record_id)
             if not row:
                 return None
-            return {"type": row["type"], "temperature": row.get("temperature"),
-                    "humidity": row.get("humidity"), "threshold": row.get("threshold"),
+            return {"type": row["type"],
+                    "temperature": bridge.exact_number(row.get("temperature")),
+                    "humidity": bridge.exact_number(row.get("humidity")),
+                    "threshold": bridge.exact_number(row.get("threshold")),
                     "severity": row.get("severity"), "device_captured_at": row.get("device_captured_at"),
                     "reading_id": row.get("reading_id"), "occurred_at": row.get("occurred_at")}
         return None
@@ -134,7 +141,12 @@ class OutboxWorker:
         h, reasons = self._hash_for(rt, sid, biz)
         if not h:
             return self._to_verify(oid, gen, rt, sid, reasons, biz)
-        payload = {"records": [{"record_type": rt, "source_record_id": sid, "content_hash": h}]}
+        rec = {"record_type": rt, "source_record_id": sid, "content_hash": h}
+        # 业务数据同步：reading/sensor_alert 携带完整业务本体（精确表示），供服务端写只读副本。
+        # person_event 继续沿用旧协议(无 business)；media_evidence 永不入 Outbox/载荷。
+        if rt in _BUSINESS_CARRIERS and isinstance(biz, dict):
+            rec["business"] = biz
+        payload = {"records": [rec]}
         headers = {"Authorization": f"Bearer {self.token}"}
         try:
             resp = self._post(self.base_url + "/api/v1/c4/records", json=payload,

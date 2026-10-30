@@ -2258,6 +2258,204 @@ class Database:
         return [dict(r) for r in rows]
 
 
+
+    # ------------------------------------------------------------------
+    # V4.4 微信用户认证 DAO (login / me / logout)
+    # - users: openid 唯一; 并发重复 openid → INSERT OR IGNORE 保证一 openid 一用户
+    # - sessions: 只存 session_token 的 SHA-256 哈希; revoked_at 非空=已撤销
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _user_id() -> str:
+        """内部用户 ID: U-<YYYYMMDD>-<uuid8>（沿用既有业务 ID 风格）。"""
+        return ("U-" + datetime.now().strftime("%Y%m%d") + "-" + uuid.uuid4().hex[:8].upper())
+
+    @staticmethod
+    def _session_id() -> str:
+        """会话 ID: S-<YYYYMMDD>-<uuid8>。"""
+        return ("S-" + datetime.now().strftime("%Y%m%d") + "-" + uuid.uuid4().hex[:8].upper())
+
+    def get_user_by_openid(self, wechat_openid: str) -> dict | None:
+        """按微信 OpenID 查询内部用户（不存在返回 None）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT user_id, wechat_openid, created_at FROM users WHERE wechat_openid = ?",
+                (wechat_openid,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def get_user_by_id(self, user_id: str) -> dict | None:
+        """按内部 user_id 查询用户（不存在返回 None）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT user_id, wechat_openid, created_at FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def create_user(self, wechat_openid: str, *, user_id: str | None = None) -> str:
+        """按 OpenID 创建内部用户，返回 user_id。
+
+        幂等/并发安全：对同一 OpenID 用 INSERT OR IGNORE + 唯一约束，两个并发登录
+        也只能落一个内部用户；已存在时返回既有 user_id。
+        """
+        uid = user_id if user_id else self._user_id()
+        now = self._now_iso()
+        with self.with_transaction() as tx:
+            tx.execute(
+                "INSERT OR IGNORE INTO users (user_id, wechat_openid, created_at) VALUES (?, ?, ?)",
+                (uid, wechat_openid, now),
+            )
+            row = tx.execute(
+                "SELECT user_id FROM users WHERE wechat_openid = ?",
+                (wechat_openid,),
+            ).fetchone()
+        return row["user_id"]
+
+    def create_session(self, user_id: str, session_token_hash: str, *,
+                       expires_at: str, session_id: str | None = None) -> str:
+        """创建会话并返回 session_id。
+
+        expires_at 由调用方计算（登录时 = 创建时刻 + 86400s，带时区 ISO 8601）；
+        只存 session_token 的 SHA-256 哈希，不存明文 Token。
+        """
+        sid = session_id if session_id else self._session_id()
+        now = self._now_iso()
+        with self.with_transaction() as tx:
+            tx.execute(
+                "INSERT INTO sessions "
+                "(session_id, user_id, session_token_hash, created_at, expires_at, revoked_at) "
+                "VALUES (?, ?, ?, ?, ?, NULL)",
+                (sid, user_id, session_token_hash, now, expires_at),
+            )
+        return sid
+
+    def get_session_by_hash(self, session_token_hash: str) -> dict | None:
+        """按 Token 哈希查询会话（含用户信息 join；不存在返回 None）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT s.session_id, s.user_id, s.created_at, s.expires_at, s.revoked_at "
+                "FROM sessions s WHERE s.session_token_hash = ?",
+                (session_token_hash,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def revoke_session(self, session_id: str) -> bool:
+        """撤销指定会话（幂等：已撤销/不存在也安全返回）。返回是否实际更新。"""
+        now = self._now_iso()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE sessions SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL",
+                (now, session_id),
+            )
+            return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # V4.4 E7-07: 传感器设备状态与故障历史 DAO（A3）
+    # - sensor_status: 每传感器当前状态；重启后据此恢复。
+    # - sensor_fault_events: 故障/恢复历史。
+    # - 参数化 SQL；更新用 ON CONFLICT upsert；时间统一带时区 ISO。
+    # ------------------------------------------------------------------
+    def get_sensor_status(self, sensor_id: str) -> dict | None:
+        """查询传感器当前状态（不存在返回 None）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM sensor_status WHERE sensor_id = ?",
+                (sensor_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def save_sensor_status(
+        self,
+        *,
+        sensor_id: str,
+        status: str,
+        fault_type: str | None = None,
+        last_error: str | None = None,
+        first_fault_at: str | None = None,
+        last_fault_at: str | None = None,
+        recovered_at: str | None = None,
+        consecutive_failures: int = 0,
+        quality_failures: int = 0,
+        updated_at: str | None = None,
+    ) -> None:
+        """写入/更新传感器当前状态（幂等 upsert，按 sensor_id 主键）。"""
+        if status not in ("online", "degraded", "offline"):
+            raise ValueError(f"非法传感器状态: {status!r}")
+        now = updated_at or self._now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sensor_status
+                  (sensor_id, status, fault_type, last_error,
+                   first_fault_at, last_fault_at, recovered_at,
+                   consecutive_failures, quality_failures, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(sensor_id) DO UPDATE SET
+                  status=excluded.status,
+                  fault_type=excluded.fault_type,
+                  last_error=excluded.last_error,
+                  first_fault_at=excluded.first_fault_at,
+                  last_fault_at=excluded.last_fault_at,
+                  recovered_at=excluded.recovered_at,
+                  consecutive_failures=excluded.consecutive_failures,
+                  quality_failures=excluded.quality_failures,
+                  updated_at=excluded.updated_at
+                """,
+                (sensor_id, status, fault_type, last_error,
+                 first_fault_at, last_fault_at, recovered_at,
+                 consecutive_failures, quality_failures, now),
+            )
+
+    def record_sensor_fault_event(
+        self,
+        *,
+        sensor_id: str,
+        status: str,
+        fault_type: str | None = None,
+        detail: str | None = None,
+        occurred_at: str | None = None,
+        recovered_at: str | None = None,
+    ) -> int:
+        """追加一条传感器故障/恢复历史，返回事件 id。"""
+        if status not in ("online", "degraded", "offline"):
+            raise ValueError(f"非法传感器状态: {status!r}")
+        ts = occurred_at or self._now_iso()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO sensor_fault_events
+                  (sensor_id, status, fault_type, detail, occurred_at, recovered_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (sensor_id, status, fault_type, detail, ts, recovered_at),
+            )
+            return int(cur.lastrowid)
+
+    def list_sensor_fault_events(self, sensor_id: str, limit: int = 100) -> list[dict]:
+        """查询传感器故障历史（按 occurred_at 递减）。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sensor_fault_events WHERE sensor_id = ? "
+                "ORDER BY occurred_at DESC, id DESC LIMIT ?",
+                (sensor_id, int(limit)),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_sensor_fault_event_recovered(
+        self, event_id: int, recovered_at: str | None = None,
+    ) -> bool:
+        """给一条未恢复的故障历史回填恢复时间。返回是否实际更新。"""
+        ts = recovered_at or self._now_iso()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE sensor_fault_events SET recovered_at = ? "
+                "WHERE id = ? AND (recovered_at IS NULL OR recovered_at = '')",
+                (ts, int(event_id)),
+            )
+            return cur.rowcount > 0
+
+
+
 # ====================================================================
 # Standalone test
 # ====================================================================

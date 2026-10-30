@@ -36,6 +36,15 @@ class SensorConfig:
     recovery_threshold: float | None = None
     read_retry_count: int = 0
     offline_after_failures: int = 1
+    # ---- E7-02 读数量程（A1；开发默认，真实规格以配置为准）----
+    temperature_min: float = -40.0
+    temperature_max: float = 85.0
+    humidity_min: float = 0.0
+    humidity_max: float = 100.0
+    # ---- E7-01 读取器选择（A2）："fake" 或 "ds18b20" ----
+    reader: str = "fake"
+    device_id: str | None = None
+    device_dir: str | None = None
 
 
 def _is_num(v: Any) -> bool:
@@ -68,6 +77,26 @@ def validate_config(cfg: SensorConfig) -> SensorConfig:
     ):
         if isinstance(val, bool) or not isinstance(val, int) or val < lo:
             raise SensorConfigError(f"配置非法(需整数>= {lo}): {name}={val!r}")
+    # 量程交叉校验（E7-02）
+    if not (_is_num(cfg.temperature_min) and _is_num(cfg.temperature_max)
+            and cfg.temperature_min < cfg.temperature_max):
+        raise SensorConfigError(
+            f"配置非法: 温度量程需 min<max 且为有限数值 "
+            f"(min={cfg.temperature_min!r} max={cfg.temperature_max!r})")
+    if not (_is_num(cfg.humidity_min) and _is_num(cfg.humidity_max)
+            and cfg.humidity_min < cfg.humidity_max):
+        raise SensorConfigError(
+            f"配置非法: 湿度量程需 min<max 且为有限数值 "
+            f"(min={cfg.humidity_min!r} max={cfg.humidity_max!r})")
+    if cfg.reader not in ("fake", "ds18b20"):
+        raise SensorConfigError(f"配置非法: reader 仅支持 fake|ds18b20, got {cfg.reader!r}")
+    if cfg.device_id is not None and (
+        not isinstance(cfg.device_id, str) or not cfg.device_id.strip()
+    ):
+        raise SensorConfigError(
+            f"配置非法: device_id 须为非空字符串或 None, got {cfg.device_id!r}")
+    if cfg.device_dir is not None and not isinstance(cfg.device_dir, str):
+        raise SensorConfigError(f"配置非法: device_dir 须为字符串或 None, got {cfg.device_dir!r}")
     return cfg
 
 
@@ -117,6 +146,21 @@ def sensor_config_from_dict(data: Mapping[str, Any]) -> SensorConfig:
             if "offline_after_failures" in data
             else 1
         ),
+        temperature_min=(
+            req_num("temperature_min") if "temperature_min" in data else -40.0
+        ),
+        temperature_max=(
+            req_num("temperature_max") if "temperature_max" in data else 85.0
+        ),
+        humidity_min=(
+            req_num("humidity_min") if "humidity_min" in data else 0.0
+        ),
+        humidity_max=(
+            req_num("humidity_max") if "humidity_max" in data else 100.0
+        ),
+        reader=str(data.get("reader", "fake")),
+        device_id=data.get("device_id") if isinstance(data.get("device_id"), str) else None,
+        device_dir=data.get("device_dir") if isinstance(data.get("device_dir"), str) else None,
     ))
 
 

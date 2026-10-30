@@ -1,11 +1,13 @@
-"""E7 采样调度循环（V4.4 E7a）。
+"""E7 采样调度循环（V4.4 E7a / E7-07，A3）。
 
 职责：
 - 按配置周期采样、调用读取适配器；
-- 区分 有效样本 / 读取异常(读取失败/无效)；
-- 有效样本 → save_reading（仅有效读数持久化）并交 HighTempAlarm 判定；
-- 读取异常 → 故障计数/离线判定，并通知告警模块(on_read_fault)重置计数（不作为恢复）；
-- 结束时按约定关闭适配器资源（若有 close()）。
+- 区分三类结果：
+  * 正常有效读数 → 存 readings + 交 HighTempAlarm 判定（并落 ONLINE 状态）；
+  * 读取故障（设备断链/CRC/文件缺失/驱动异常）→ 设备级故障持久化 + 离线判定；
+  * 数据无效（越界/NaN/Inf/类型非法）→ 不持久化 readings、不触发告警；
+    记录为 degraded（数据质量问题，不视为设备断线、不判离线）。
+- 支持从数据库恢复离线/降质状态（重启后），并记录恢复时间与故障历史。
 
 时钟/等待可注入（sleep），保证 Windows 离线测试无需真实等待与硬件。
 """
@@ -13,6 +15,8 @@
 from __future__ import annotations
 
 import time
+import warnings
+from datetime import datetime
 from typing import Callable
 
 from src.database.db import Database
@@ -20,6 +24,12 @@ from src.sensor.alarm import HighTempAlarm, SensorPersistError
 from src.sensor.config import SensorConfig
 from src.sensor.reader import SensorReader, Reading
 from src.sensor.sensor_errors import SensorReadError
+from src.sensor.validate import is_valid_sample
+
+
+def _now_iso() -> str:
+    """带时区的 ISO 8601 时间（与 E9 数据层一致）。"""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 class SampledSensorLoop:
@@ -36,28 +46,126 @@ class SampledSensorLoop:
         self.alarm = alarm
         self.db = db
         self._sleep = sleep
-        self.fault_count = 0
-        self.offline = False
+        self.fault_count = 0          # 设备级连续读取失败（离线判定）
+        self.quality_failures = 0     # 数据质量异常计数（不参与离线判定）
+        self.offline = False          # 设备级离线（重启后经 restore_state 恢复）
 
-    def step(self, now: Callable[[], str] | None = None) -> dict:
-        """执行一次采样。返回 {status, offline, fault_count, event, reason?}。"""
+    # ------------------------------------------------------------------
+    # 状态持久化辅助（E7-07；故障写入失败时告警、绝不静默假装成功）
+    # ------------------------------------------------------------------
+    def _persist(self, fn: Callable[[], object], what: str) -> None:
         try:
-            reading: Reading = self.reader.read(now=now)
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"[SensorLoop] {what} 持久化失败({type(exc).__name__}: {exc})")
+
+    def _set_offline(self, reason: str, ts: str) -> None:
+        def _do() -> None:
+            prev = self.db.get_sensor_status(self.cfg.sensor_id)
+            first_at = prev.get("first_fault_at") if prev else None
+            self.db.save_sensor_status(
+                sensor_id=self.cfg.sensor_id,
+                status="offline", fault_type="device", last_error=reason,
+                first_fault_at=first_at or ts, last_fault_at=ts,
+                consecutive_failures=self.fault_count,
+                quality_failures=self.quality_failures,
+                updated_at=ts,
+            )
+            self.db.record_sensor_fault_event(
+                sensor_id=self.cfg.sensor_id, status="offline",
+                fault_type="device", detail=reason, occurred_at=ts,
+            )
+        self._persist(_do, "设备故障状态")
+
+    def _set_degraded(self, reason: str, ts: str) -> None:
+        def _do() -> None:
+            prev = self.db.get_sensor_status(self.cfg.sensor_id)
+            first_at = prev.get("first_fault_at") if prev else None
+            self.db.save_sensor_status(
+                sensor_id=self.cfg.sensor_id,
+                status="degraded", fault_type="data_quality", last_error=reason,
+                first_fault_at=first_at or ts, last_fault_at=ts,
+                consecutive_failures=self.fault_count,
+                quality_failures=self.quality_failures,
+                updated_at=ts,
+            )
+            self.db.record_sensor_fault_event(
+                sensor_id=self.cfg.sensor_id, status="degraded",
+                fault_type="data_quality", detail=reason, occurred_at=ts,
+            )
+        self._persist(_do, "数据质量状态")
+
+    def _mark_recovered(self, ts: str) -> None:
+        """从故障/降质恢复到 ONLINE：状态归零并记录恢复历史（幂等：已恢复不再覆盖）。"""
+        def _do() -> None:
+            prev = self.db.get_sensor_status(self.cfg.sensor_id)
+            was_bad = prev is not None and prev.get("status") in ("offline", "degraded")
+            self.db.save_sensor_status(
+                sensor_id=self.cfg.sensor_id,
+                status="online", fault_type=None, last_error=None,
+                first_fault_at=None, last_fault_at=None, recovered_at=ts,
+                consecutive_failures=0, quality_failures=0, updated_at=ts,
+            )
+            # 历史事件回填恢复时间（仅未恢复项；已恢复不覆盖）
+            if was_bad and prev:
+                for ev in self.db.list_sensor_fault_events(self.cfg.sensor_id, limit=1):
+                    if ev.get("status") in ("offline", "degraded") and not ev.get("recovered_at"):
+                        self.db.mark_sensor_fault_event_recovered(int(ev["id"]), recovered_at=ts)
+            self.db.record_sensor_fault_event(
+                sensor_id=self.cfg.sensor_id, status="online",
+                fault_type=None, detail="recovered", occurred_at=ts,
+            )
+        self._persist(_do, "恢复状态")
+
+    # ------------------------------------------------------------------
+    # 一次采样
+    # ------------------------------------------------------------------
+    def step(self, now: Callable[[], str] | None = None) -> dict:
+        ts = (now or _now_iso)()
+        try:
+            reading: Reading = self.reader.read(now=lambda: ts)
         except SensorReadError as exc:
+            # ---- 设备级读取故障：离线判定 + 故障持久化 ----
             self.fault_count += 1
-            self.offline = self.fault_count >= self.cfg.offline_after_failures
+            became_offline = self.fault_count >= self.cfg.offline_after_failures
+            self.offline = self.offline or became_offline
             self.alarm.on_read_fault()
+            self._set_offline(str(exc), ts)
             return {
-                "status": "error",
+                "status": "offline" if self.offline else "error",
                 "offline": self.offline,
                 "fault_count": self.fault_count,
                 "event": None,
                 "reason": str(exc),
             }
 
+        # ---- 数据无效（越界/NaN/inf/类型）：不入 readings、不告警、不判离线 ----
+        if not is_valid_sample(
+            reading.temperature_c,
+            reading.humidity_pct,
+            temperature_min=self.cfg.temperature_min,
+            temperature_max=self.cfg.temperature_max,
+            humidity_min=self.cfg.humidity_min,
+            humidity_max=self.cfg.humidity_max,
+        ):
+            self.quality_failures += 1
+            self._set_degraded("样本超出允许量程", ts)
+            return {
+                "status": "invalid",
+                "offline": self.offline,
+                "fault_count": self.fault_count,
+                "quality_failures": self.quality_failures,
+                "event": None,
+                "reason": "样本超出允许量程",
+            }
+
+        # ---- 正常有效读数：恢复在线 + 持久化 reading + 告警 ----
         self.fault_count = 0
+        self.quality_failures = 0
+        was_offline = self.offline
         self.offline = False
-        # 仅有效读数持久化；写库失败不推进告警(也不吞错)。经 C4 bridge 单一事务写入并分流。
+        self._mark_recovered(ts)
+
         try:
             from src.sync import bridge as c4_bridge
             c4_bridge.create_sync_record(
@@ -65,8 +173,8 @@ class SampledSensorLoop:
                 record_type="reading",
                 business={
                     "sensor_id": self.cfg.sensor_id,
-                    "temperature": reading.temperature_c,
-                    "humidity": reading.humidity_pct,
+                    "temperature": c4_bridge.exact_number(reading.temperature_c),
+                    "humidity": c4_bridge.exact_number(reading.humidity_pct),
                     "device_captured_at": reading.captured_at,
                 },
             )
@@ -82,8 +190,25 @@ class SampledSensorLoop:
             "status": "valid",
             "offline": False,
             "fault_count": 0,
+            "quality_failures": 0,
             "event": event,
+            "was_offline": was_offline,
+            "recovered": was_offline,
         }
+
+    def restore_state(self) -> dict:
+        """从数据库恢复上次持久化的设备状态（重启后）。返回恢复摘要。
+
+        幂等：已恢复(online/degraded)不会被错误还原为 offline；只有 last 状态为 offline
+        才把本实例拉成离线/复位故障计数。
+        """
+        st = self.db.get_sensor_status(self.cfg.sensor_id)
+        if not st:
+            return {"restored": False, "status": None}
+        self.fault_count = int(st.get("consecutive_failures") or 0)
+        self.quality_failures = int(st.get("quality_failures") or 0)
+        self.offline = st.get("status") == "offline"
+        return {"restored": True, "status": st.get("status"), "offline": self.offline}
 
     def run(self, steps: int, now: Callable[[], str] | None = None) -> list[dict]:
         results: list[dict] = []
