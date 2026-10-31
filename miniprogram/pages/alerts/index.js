@@ -1,3 +1,4 @@
+const { markLatestByCategory } = require('../../utils/home-focus');
 const { createDefaultService } = require('../../services/index');
 const { createAlertsListController } = require('../../logic/alerts-list-controller');
 const { buildAlertListViews, decorateListGroups } = require('../../utils/view');
@@ -9,6 +10,7 @@ const net = require('../../utils/net');
 
 Page({
   data: {
+    showAdvancedFilters: false,
     mockMode: false,
     mockNotice: '',
     tabs: [
@@ -49,6 +51,10 @@ Page({
     filterEmpty: false,
     showBackTop: false,
     offline: false
+  },
+
+  toggleAdvancedFilters() {
+    this.setData({ showAdvancedFilters: !this.data.showAdvancedFilters });
   },
 
   onLoad(query) {
@@ -104,7 +110,7 @@ Page({
 
   applyState(state) {
     const nowMs = Date.now();
-    this._rawViews = buildAlertListViews(state.items, { nowMs: nowMs });
+    this._rawViews = markLatestByCategory(buildAlertListViews(state.items, { nowMs: nowMs }));
     this.setData({
       category: state.category,
       showStatusFilter: state.category === 'sensor_environment',

@@ -1,3 +1,4 @@
+const { buildHomeFocus } = require('../../utils/home-focus');
 const { createDefaultService } = require('../../services/index');
 const { createHomeController } = require('../../logic/home-controller');
 const { buildAlertListViews } = require('../../utils/view');
@@ -6,6 +7,10 @@ const net = require('../../utils/net');
 
 Page({
   data: {
+    showSystemDetails: false,
+    expandedAlerts: false,
+    focusAlerts: [],
+    remainingAlerts: [],
     mockMode: false,
     mockNotice: '',
     loading: false,
@@ -15,6 +20,14 @@ Page({
     person: { loading: false, error: null, items: [], views: [], total: null },
     sensor: { loading: false, error: null, items: [], views: [], total: null },
     summary: { personText: '—', sensorText: '—' }
+  },
+
+  toggleAlerts() {
+    this.setData({ expandedAlerts: !this.data.expandedAlerts });
+  },
+
+  toggleSystemDetails() {
+    this.setData({ showSystemDetails: !this.data.showSystemDetails });
   },
 
   onLoad() {
@@ -47,8 +60,11 @@ Page({
   applyState(state) {
     // 相对时间只是展示层派生值，每次渲染取当前时间即可。
     const nowMs = Date.now();
+    const focus = buildHomeFocus(buildAlertListViews(state.person.items.concat(state.sensor.items), { nowMs: nowMs }));
     this.setData(
       {
+        focusAlerts: focus.focus,
+        remainingAlerts: focus.remaining,
         loading: state.loading,
         status: state.status,
         person: Object.assign({}, state.person, {

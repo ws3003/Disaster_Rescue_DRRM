@@ -41,6 +41,10 @@ const SENSOR_BASE = 10 * 3600 + 40 * 60 + 0; // 10:40:00
 function buildPersonAlerts() {
   const items = [];
   for (let i = 0; i < 23; i += 1) {
+    const state = PERSON_STATES[i % PERSON_STATES.length];
+    // 用户确认：Lying 不作为人员告警；不补造替代条目。
+    if (state === 'Lying') continue;
+    const wavingHelp = state === 'Help-Waving';
     const minutesBack = i * 7;
     const eventId = 1100 - i;
     items.push({
@@ -48,12 +52,12 @@ function buildPersonAlerts() {
       source: 'person',
       category: 'person',
       type: 'high_risk_alert',
-      severity: i % 4 === 3 ? null : (i % 3 === 0 ? 'high' : 'medium'),
+      severity: wavingHelp ? 'HIGH' : (i % 4 === 3 ? null : (i % 3 === 0 ? 'high' : 'medium')),
       ts: naiveTime(PERSON_BASE, minutesBack),
       person_id: i % 7 === 6 ? null : 100 + i,
-      title: i % 4 === 0 ? null : '示例：检测到人员状态 ' + PERSON_STATES[i % PERSON_STATES.length],
-      state: i % 6 === 5 ? null : PERSON_STATES[i % PERSON_STATES.length],
-      priority: i % 4 === 2 ? null : PRIORITIES[i % PRIORITIES.length],
+      title: wavingHelp ? '人员求助 · Help-Waving' : (i % 4 === 0 ? null : '示例：检测到人员状态 ' + state),
+      state: wavingHelp ? 'Help-Waving' : (i % 6 === 5 ? null : state),
+      priority: wavingHelp ? 'HIGH' : (i % 4 === 2 ? null : PRIORITIES[i % PRIORITIES.length]),
       risk_score: i % 5 === 0 ? null : round1(95 - i * 1.7)
     });
   }

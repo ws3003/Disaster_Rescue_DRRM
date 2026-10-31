@@ -1,0 +1,18 @@
+<view class="scene-media">
+  <view class="section-head"><text class="section-title">现场影像</text><text class="source-tag">待接入</text></view>
+  <view class="media-notice">当前接口未提供现场影像，以下仅支持本机文件预览。</view>
+  <view class="media-slot">
+    <view class="slot-heading"><text>现场图片</text><button class="pick-button" data-kind="image" bindtap="choosePreview" disabled="{{choosing}}">{{imagePath ? '更换图片' : '本机预览'}}</button></view>
+    <image wx:if="{{imagePath}}" class="media-image" src="{{imagePath}}" mode="aspectFit" bindtap="previewImage" data-kind="image" binderror="handleMediaError" />
+    <view wx:else class="media-empty"><view class="camera-icon"><view class="camera-lens"></view></view><text>暂无现场图片</text></view>
+    <button wx:if="{{imagePath}}" class="fullscreen-button photo-zoom-button" bindtap="previewImage">查看大图</button>
+  </view>
+  <view class="media-slot">
+    <view class="slot-heading"><text>人员状况视频</text><button class="pick-button" data-kind="video" bindtap="choosePreview" disabled="{{choosing}}">{{videoPath ? '更换视频' : '本机预览'}}</button></view>
+    <video wx:if="{{videoPath}}" id="sceneVideo" class="media-video" src="{{videoPath}}" controls="{{true}}" autoplay="{{false}}" show-fullscreen-btn="{{true}}" enable-play-gesture="{{true}}" object-fit="contain" data-kind="video" binderror="handleMediaError" />
+    <view wx:else class="media-empty"><view class="video-icon"><view class="play-icon"></view></view><text>暂无人员状况视频</text></view>
+    <button wx:if="{{videoPath}}" class="fullscreen-button" bindtap="expandVideo">全屏播放</button>
+  </view>
+  <view wx:if="{{imagePath || videoPath}}" class="local-label">仅本机预览 · 未上传 · 未关联告警</view>
+  <button wx:if="{{imagePath || videoPath}}" class="clear-button" bindtap="clearPreview">清除本机预览</button>
+</view>

@@ -44,7 +44,7 @@ test('Mock 模式不调用 wx.request', async () => {
     });
     const result = await service.listAlerts({ page: 1, page_size: 5 });
     assert.equal(result.items.length, 5);
-    assert.equal(result.meta.total, 40);
+    assert.equal(result.meta.total, fixtures.personAlerts.length + fixtures.sensorAlerts.length);
     await service.getSystemStatus();
     await service.getAlertDetail(fixtures.personAlerts[0].alert_key);
     await service.getAlertRelated(fixtures.sensorAlerts[0].alert_key);

@@ -1,1 +1,122 @@
-/* 告警详情页样式复用 app.wxss。 */
+/* Reading surface: larger system text, stronger contrast, room for long values. */
+page { background-image: none; }
+
+.container {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.65;
+}
+
+.container .detail-headline {
+  font-family: inherit;
+  font-size: 50rpx;
+  font-weight: 600;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.container .def-row {
+  align-items: flex-start;
+  gap: 20rpx;
+  padding: 24rpx 12rpx;
+  background: rgba(255, 255, 255, .72);
+  border-bottom-color: #ccd6e1;
+}
+
+.container .def-label {
+  flex: 0 0 34%;
+  max-width: 34%;
+  box-sizing: border-box;
+  margin-right: 0;
+  padding-right: 16rpx;
+  font-size: 36rpx;
+  font-weight: 500;
+  line-height: 1.65;
+  letter-spacing: 0;
+  color: #293e55;
+}
+
+.container .def-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 40rpx;
+  font-weight: 500;
+  line-height: 1.65;
+  letter-spacing: 0;
+  color: #0b1728;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.container .group-title {
+  margin-top: 36rpx;
+  padding-bottom: 12rpx;
+  font-family: inherit;
+  font-size: 38rpx;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: #263e58;
+}
+
+.container .group-no { font-size: 32rpx; }
+.container .detail-time, .container .detail-tags .tag,
+.container .detail-tags .sev-badge, .container .metric-label,
+.container .metric-note, .container .note, .container .state-block,
+.container .masthead-meta .muted {
+  font-size: 36rpx;
+  line-height: 1.7;
+  letter-spacing: 0;
+}
+.container .note, .container .state-block, .container .detail-time {
+  color: #293e55;
+}
+.container .metric-value {
+  font-family: inherit;
+  font-size: 46rpx;
+  font-weight: 600;
+}
+.container .metric-head { flex-wrap: wrap; gap: 12rpx; }
+.container .metric-note.metric-over-text { color: #b42318; }
+.container .metric { margin-bottom: 36rpx; }
+
+.container .copy-key {
+  min-width: 0;
+  font-size: 36rpx;
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: #263b53;
+}
+.container .action-row { align-items: center; }
+.container .nav-inline { flex-wrap: wrap; align-items: center; gap: 16rpx; }
+.container .action-btn, .container .copy-btn,
+.container .nav-btn, .container .btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 88rpx;
+  font-size: 36rpx;
+  line-height: 1.5;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.container .nav-pos { font-size: 32rpx; font-family: inherit; color: #293e55; }
+.container .nav-disabled { color: #66778b; }
+.container .detail-cross { opacity: .12; }
+.container .icon-label .ui-icon { width: 34rpx; height: 34rpx; flex-basis: 34rpx; }
+
+@media (max-width: 350px) {
+  .container { padding-left: 28rpx; padding-right: 28rpx; }
+  .container .def-row { flex-direction: column; gap: 6rpx; }
+  .container .def-label { flex: auto; max-width: 100%; border-right: 0; padding-right: 0; }
+  .container .def-value { width: 100%; text-align: left; }
+}
+
+/* Large reading mode: values lead, labels stay distinct. */
+.container .def-value { font-size: 40rpx; font-weight: 600; line-height: 1.6; }
+.container .def-label { font-size: 36rpx; font-weight: 500; line-height: 1.65; }
+.container .group-title { font-size: 40rpx; font-weight: 700; }
+.container .metric-value { font-size: 48rpx; font-weight: 700; }
+.container .detail-headline { font-size: 52rpx; font-weight: 700; }
+.container .def-row { padding-top: 28rpx; padding-bottom: 28rpx; }
+.container .copy-bar { align-items: center; }
+.container .nav-inline { flex-wrap: wrap; row-gap: 0; }
+.container .nav-btn { padding-left: 8rpx; padding-right: 8rpx; }
+.container .note, .container .metric-note { line-height: 1.8; }

@@ -1,3 +1,4 @@
+@import "./styles/iconography.wxss";
 /* 方案：杂志式大标题 · 冷调蓝图编辑排版
    浅冷底 + 细网格 + 墨色文字 + 衬线大字号 + 等宽微标签 + 线稿图形。
    层级由字号、留白与发丝线建立；科技感来自网格、HUD 角标与扫描动效，而非霓虹。
@@ -10,8 +11,8 @@ page {
     repeating-linear-gradient(90deg, rgba(15, 23, 32, 0.055) 0, rgba(15, 23, 32, 0.055) 1rpx, transparent 1rpx, transparent 48rpx),
     repeating-linear-gradient(0deg, rgba(14, 116, 144, 0.10) 0, rgba(14, 116, 144, 0.10) 1rpx, transparent 1rpx, transparent 240rpx),
     repeating-linear-gradient(90deg, rgba(14, 116, 144, 0.10) 0, rgba(14, 116, 144, 0.10) 1rpx, transparent 1rpx, transparent 240rpx);
-  color: #0f1720;
-  font-size: 28rpx;
+  color: #0b1728;
+  font-size: 36rpx;
   line-height: 1.6;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -31,20 +32,20 @@ page {
 }
 
 .eyebrow {
-  font-size: 20rpx;
+  font-size: 30rpx;
   letter-spacing: 4rpx;
-  color: #5b6773;
+  color: #30445b;
   text-transform: uppercase;
 }
 
 .display-title {
   margin-top: 12rpx;
   font-family: Georgia, "Times New Roman", "Songti SC", "STSong", serif;
-  font-size: 88rpx;
+  font-size: 96rpx;
   font-weight: 700;
   line-height: 1.0;
   letter-spacing: 0;
-  color: #0f1720;
+  color: #0b1728;
 }
 
 .masthead-meta {
@@ -58,7 +59,7 @@ page {
 }
 
 .masthead-meta .muted {
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 1rpx;
 }
 
@@ -77,11 +78,11 @@ page {
 
 .stat-num {
   font-family: Georgia, "Times New Roman", "Songti SC", "STSong", serif;
-  font-size: 124rpx;
+  font-size: 132rpx;
   font-weight: 500;
   line-height: 0.98;
   letter-spacing: -3rpx;
-  color: #0f1720;
+  color: #0b1728;
   white-space: nowrap;
 }
 
@@ -95,16 +96,16 @@ page {
 
 .stat-cap {
   margin-top: 14rpx;
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 3rpx;
-  color: #5b6773;
+  color: #30445b;
 }
 
 .note {
   padding: 16rpx 0 0;
-  font-size: 22rpx;
+  font-size: 30rpx;
   line-height: 1.6;
-  color: #66717d;
+  color: #3d5065;
 }
 
 /* ---------- 区块 ---------- */
@@ -128,27 +129,27 @@ page {
 }
 
 .block-title {
-  font-size: 32rpx;
+  font-size: 40rpx;
   font-weight: 700;
   letter-spacing: 1rpx;
-  color: #0f1720;
+  color: #0b1728;
 }
 
 .block-tag {
-  font-size: 20rpx;
+  font-size: 30rpx;
   letter-spacing: 3rpx;
-  color: #66717d;
+  color: #3d5065;
 }
 
 .text-link {
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
   color: #0e7490;
 }
 
 .muted {
-  color: #5b6773;
-  font-size: 23rpx;
+  color: #30445b;
+  font-size: 30rpx;
 }
 
 .mono {
@@ -178,17 +179,17 @@ page {
 
 .row-label {
   flex: 0 0 auto;
-  font-size: 24rpx;
+  font-size: 30rpx;
   letter-spacing: 1rpx;
-  color: #5b6773;
+  color: #30445b;
 }
 
 .row-value {
   flex: 1 1 auto;
   text-align: right;
   word-break: break-all;
-  font-size: 26rpx;
-  color: #0f1720;
+  font-size: 32rpx;
+  color: #0b1728;
 }
 
 /* ---------- 条目（告警行） ---------- */
@@ -212,9 +213,9 @@ page {
   flex: 0 0 auto;
   width: 52rpx;
   font-family: Georgia, "Times New Roman", "Songti SC", "STSong", serif;
-  font-size: 24rpx;
+  font-size: 30rpx;
   line-height: 1.6;
-  color: #66717d;
+  color: #3d5065;
   letter-spacing: 1rpx;
 }
 
@@ -224,11 +225,11 @@ page {
 }
 
 .entry-title {
-  font-size: 31rpx;
+  font-size: 38rpx;
   font-weight: 600;
   line-height: 1.45;
   letter-spacing: 0.2rpx;
-  color: #0f1720;
+  color: #0b1728;
   word-break: break-all;
 }
 
@@ -238,8 +239,8 @@ page {
   align-items: baseline;
   flex-wrap: wrap;
   gap: 14rpx;
-  font-size: 22rpx;
-  color: #5b6773;
+  font-size: 30rpx;
+  color: #30445b;
   letter-spacing: 0.5rpx;
 }
 
@@ -254,8 +255,8 @@ page {
 .entry-arrow {
   flex: 0 0 auto;
   align-self: center;
-  font-size: 26rpx;
-  color: #66717d;
+  font-size: 32rpx;
+  color: #3d5065;
 }
 
 /* ---------- 标签（杂志式：纯文字 + 颜色） ---------- */
@@ -264,9 +265,9 @@ page {
   padding: 0;
   border: none;
   background: none;
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
-  color: #5b6773;
+  color: #30445b;
 }
 
 .tag-person {
@@ -286,7 +287,7 @@ page {
 }
 
 .status-unknown {
-  color: #5b6773;
+  color: #30445b;
 }
 
 .status-known {
@@ -310,7 +311,7 @@ page {
   padding: 0;
   border: none;
   background: none;
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
 }
 
@@ -319,7 +320,7 @@ page {
   padding: 16rpx 0 16rpx 20rpx;
   margin-bottom: 24rpx;
   border-left: 3rpx solid #d7dee7;
-  font-size: 23rpx;
+  font-size: 30rpx;
   line-height: 1.6;
   color: #3d4854;
 }
@@ -343,8 +344,8 @@ page {
 .state-block {
   padding: 40rpx 0;
   text-align: center;
-  color: #66717d;
-  font-size: 24rpx;
+  color: #3d5065;
+  font-size: 30rpx;
   letter-spacing: 1rpx;
 }
 
@@ -358,7 +359,7 @@ page {
   border-radius: 0;
   background: none;
   color: #0e7490;
-  font-size: 24rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
   box-shadow: none;
 }
@@ -375,7 +376,7 @@ page {
   width: 100%;
   margin-top: 0;
   padding: 28rpx 0;
-  font-size: 30rpx;
+  font-size: 38rpx;
   letter-spacing: 2rpx;
 }
 
@@ -388,19 +389,19 @@ page {
   padding: 30rpx 0;
   border-top: 1rpx solid #d7dee7;
   border-bottom: 1rpx solid #d7dee7;
-  font-size: 30rpx;
+  font-size: 38rpx;
   letter-spacing: 2rpx;
-  color: #0f1720;
+  color: #0b1728;
 }
 
 .cta-arrow {
   color: #0e7490;
-  font-size: 32rpx;
+  font-size: 40rpx;
 }
 
 .link {
   color: #0e7490;
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
 }
 
@@ -414,15 +415,15 @@ page {
 
 .text-tab {
   padding: 10rpx 0 20rpx;
-  font-size: 26rpx;
+  font-size: 32rpx;
   letter-spacing: 2rpx;
-  color: #66717d;
+  color: #3d5065;
   border-bottom: 2rpx solid transparent;
   margin-bottom: -1rpx;
 }
 
 .text-tab-active {
-  color: #0f1720;
+  color: #0b1728;
   border-bottom-color: #0e7490;
 }
 
@@ -438,26 +439,26 @@ page {
 
 .search-input {
   flex: 1 1 auto;
-  font-size: 26rpx;
-  color: #0f1720;
+  font-size: 32rpx;
+  color: #0b1728;
   min-height: 44rpx;
 }
 
 .search-placeholder {
-  color: #98a2b3;
+  color: #526478;
 }
 
 .search-clear {
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
   color: #0e7490;
   padding: 4rpx 0;
 }
 
 .search-hint {
-  font-size: 22rpx;
+  font-size: 30rpx;
   line-height: 1.6;
-  color: #66717d;
+  color: #3d5065;
   margin-bottom: 20rpx;
 }
 
@@ -475,9 +476,9 @@ page {
 
 .filter-label {
   display: inline-block;
-  font-size: 20rpx;
+  font-size: 30rpx;
   letter-spacing: 3rpx;
-  color: #66717d;
+  color: #3d5065;
 }
 
 .fchip {
@@ -487,9 +488,9 @@ page {
   border-bottom: 1rpx solid transparent;
   border-radius: 0;
   background: none;
-  font-size: 24rpx;
+  font-size: 30rpx;
   letter-spacing: 1rpx;
-  color: #5b6773;
+  color: #30445b;
 }
 
 .fchip-active {
@@ -503,7 +504,7 @@ page {
   border: none;
   border-bottom: 1rpx dotted #c3ccd8;
   background: none;
-  font-size: 23rpx;
+  font-size: 30rpx;
   color: #3d4854;
 }
 
@@ -515,9 +516,9 @@ page {
   padding: 16rpx 0 18rpx;
   border-bottom: 1rpx solid #d7dee7;
   margin-bottom: 8rpx;
-  font-size: 20rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
-  color: #66717d;
+  color: #3d5065;
 }
 
 .ledger-item {
@@ -528,8 +529,8 @@ page {
 
 .ledger-num {
   font-family: Georgia, "Times New Roman", "Songti SC", "STSong", serif;
-  font-size: 30rpx;
-  color: #0f1720;
+  font-size: 38rpx;
+  color: #0b1728;
   letter-spacing: 0;
   margin-right: 6rpx;
 }
@@ -541,14 +542,14 @@ page {
 /* ---------- 日期 / 类别分隔 ---------- */
 .date-sep {
   padding: 26rpx 0 10rpx;
-  font-size: 20rpx;
+  font-size: 30rpx;
   letter-spacing: 4rpx;
-  color: #66717d;
+  color: #3d5065;
 }
 
 .category-sep {
   padding: 26rpx 0 6rpx;
-  font-size: 20rpx;
+  font-size: 30rpx;
   letter-spacing: 4rpx;
   color: #0e7490;
 }
@@ -592,8 +593,8 @@ page {
 /* ---------- 底部状态 ---------- */
 .footer-state {
   text-align: center;
-  color: #66717d;
-  font-size: 22rpx;
+  color: #3d5065;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
   padding: 32rpx 0;
 }
@@ -624,10 +625,10 @@ page {
 
 .detail-headline {
   font-family: Georgia, "Times New Roman", "Songti SC", "STSong", serif;
-  font-size: 56rpx;
+  font-size: 64rpx;
   font-weight: 600;
   line-height: 1.25;
-  color: #0f1720;
+  color: #0b1728;
 }
 
 .detail-tags {
@@ -640,9 +641,9 @@ page {
 
 .detail-time {
   margin-top: 14rpx;
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 1rpx;
-  color: #5b6773;
+  color: #30445b;
   font-variant-numeric: tabular-nums;
 }
 
@@ -653,9 +654,9 @@ page {
 
 .group-title {
   margin: 34rpx 0 6rpx;
-  font-size: 20rpx;
+  font-size: 30rpx;
   letter-spacing: 4rpx;
-  color: #66717d;
+  color: #3d5065;
 }
 
 .def-row {
@@ -669,16 +670,16 @@ page {
 
 .def-label {
   flex: 0 0 auto;
-  font-size: 23rpx;
+  font-size: 30rpx;
   letter-spacing: 1rpx;
-  color: #5b6773;
+  color: #30445b;
 }
 
 .def-value {
   flex: 1 1 auto;
   text-align: right;
-  font-size: 26rpx;
-  color: #0f1720;
+  font-size: 32rpx;
+  color: #0b1728;
   word-break: break-all;
 }
 
@@ -694,15 +695,15 @@ page {
 
 .copy-key {
   flex: 1 1 auto;
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 0.5rpx;
-  color: #5b6773;
+  color: #30445b;
   word-break: break-all;
 }
 
 .copy-btn {
   flex: 0 0 auto;
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
   color: #0e7490;
 }
@@ -719,9 +720,9 @@ page {
 }
 
 .action-btn {
-  font-size: 23rpx;
+  font-size: 30rpx;
   letter-spacing: 1rpx;
-  color: #5b6773;
+  color: #30445b;
 }
 
 .action-active {
@@ -735,19 +736,19 @@ page {
 }
 
 .nav-btn {
-  font-size: 23rpx;
+  font-size: 30rpx;
   letter-spacing: 1rpx;
   color: #3d4854;
 }
 
 .nav-pos {
   font-family: Georgia, "Times New Roman", "Songti SC", "STSong", serif;
-  font-size: 22rpx;
-  color: #66717d;
+  font-size: 30rpx;
+  color: #3d5065;
 }
 
 .nav-disabled {
-  color: #c3ccd8;
+  color: #718094;
 }
 
 .reading-card {
@@ -773,15 +774,15 @@ page {
 }
 
 .metric-label {
-  font-size: 22rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
-  color: #5b6773;
+  color: #30445b;
 }
 
 .metric-value {
   font-family: Georgia, "Times New Roman", "Songti SC", "STSong", serif;
-  font-size: 30rpx;
-  color: #0f1720;
+  font-size: 38rpx;
+  color: #0b1728;
   font-variant-numeric: tabular-nums;
 }
 
@@ -811,9 +812,9 @@ page {
 
 .metric-note {
   margin-top: 10rpx;
-  font-size: 21rpx;
+  font-size: 30rpx;
   letter-spacing: 1rpx;
-  color: #66717d;
+  color: #3d5065;
 }
 
 .metric-over-text {
@@ -832,8 +833,8 @@ page {
   justify-content: center;
   background: #ffffff;
   border: 1rpx solid #c3ccd8;
-  color: #5b6773;
-  font-size: 26rpx;
+  color: #30445b;
+  font-size: 32rpx;
   z-index: 10;
 }
 
@@ -913,7 +914,7 @@ page {
 
 .block-no {
   font-family: "SFMono-Regular", Consolas, "Courier New", monospace;
-  font-size: 20rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
   color: #0e7490;
   margin-right: 14rpx;
@@ -967,13 +968,13 @@ page {
 
 .hud-seg {
   font-family: "SFMono-Regular", Consolas, "Courier New", monospace;
-  font-size: 18rpx;
+  font-size: 30rpx;
   letter-spacing: 3rpx;
   color: #0e7490;
 }
 
 .hud-seg-dim {
-  color: #66717d;
+  color: #3d5065;
 }
 
 /* ---------- 面板切角 ---------- */

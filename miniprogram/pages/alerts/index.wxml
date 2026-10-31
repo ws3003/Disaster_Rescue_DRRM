@@ -26,7 +26,7 @@ module.exports.pad = function (n) {
     <view class="eyebrow">ALERT FEED</view>
     <view class="display-title">告警</view>
     <view class="masthead-meta">
-      <text class="muted">按类别分组 · 服务端分页</text>
+      <text class="muted">浏览告警，查看详情</text>
       <text class="text-link" bindtap="onResetFilters">重置筛选</text>
     </view>
   </view>
@@ -43,6 +43,7 @@ module.exports.pad = function (n) {
   </view>
 
   <view class="search-line">
+    <view class="ui-icon icon-search"></view>
     <input
       class="search-input"
       placeholder="筛选已加载告警（key / 标题 / 设备）"
@@ -55,7 +56,7 @@ module.exports.pad = function (n) {
     <text wx:if="{{keyword}}" class="search-clear" bindtap="onClearKeyword">清除</text>
   </view>
 
-  <scroll-view wx:if="{{keywords.length}}" class="chip-scroll" scroll-x="true">
+  <scroll-view wx:if="{{showAdvancedFilters && keywords.length}}" class="chip-scroll" scroll-x="true">
     <view class="chip-line">
       <text class="filter-label">历史</text>
       <view
@@ -70,6 +71,13 @@ module.exports.pad = function (n) {
     </view>
   </scroll-view>
 
+  <view class="filter-toolbar">
+    <view class="filter-trigger" bindtap="toggleAdvancedFilters" aria-role="button" aria-expanded="{{showAdvancedFilters}}">
+      <view class="ui-icon icon-filter"></view><text>{{showAdvancedFilters ? '收起筛选' : '筛选条件'}}</text><view wx:if="{{filtering}}" class="filter-indicator"></view>
+    </view>
+    <text class="muted">仅筛选已加载告警</text>
+  </view>
+  <block wx:if="{{showAdvancedFilters}}">
   <scroll-view class="chip-scroll" scroll-x="true">
     <view class="chip-line">
       <text class="filter-label">严重</text>
@@ -104,12 +112,13 @@ module.exports.pad = function (n) {
     </view>
   </scroll-view>
 
+  </block>
   <view class="search-hint">
     <block wx:if="{{filtering}}">
       本地筛选已加载 {{loadedCount}} 条，命中 {{filteredCount}} 条（非服务端搜索）
     </block>
     <block wx:else>
-      排序与 has_more 以服务端为准，客户端不合并、不重排
+      向上滑动加载更多告警
     </block>
   </view>
 

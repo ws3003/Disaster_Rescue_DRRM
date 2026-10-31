@@ -25,20 +25,18 @@ module.exports.pad = function (n) {
     <view class="eyebrow">ALERT DETAIL · S4-03</view>
     <view class="display-title">告警详情</view>
     <view class="masthead-meta">
-      <text class="muted">{{detailView ? detailView.categoryLabel : '契约字段完整展示'}}</text>
-      <text wx:if="{{detailView}}" class="text-link" bindtap="copyAlertKey">复制标识</text>
+      <text class="muted">{{detailView ? detailView.categoryLabel : '查看告警详情'}}</text>
+
     </view>
   </view>
 
   <view wx:if="{{alertKey}}" class="copy-bar">
     <text class="copy-key mono">{{alertKey}}</text>
-    <text class="copy-btn" bindtap="copyAlertKey">复制</text>
+    <view class="copy-btn icon-label" bindtap="copyAlertKey"><view class="ui-icon icon-copy"></view><text>复制</text></view>
   </view>
 
   <view wx:if="{{alertKey}}" class="action-row">
-    <text class="action-btn {{followed ? 'action-active' : ''}}" bindtap="toggleFollow">
-      {{followed ? '★ 已关注（仅本机）' : '☆ 关注（仅本机）'}}
-    </text>
+    <view class="action-btn icon-label {{followed ? 'action-active' : ''}}" bindtap="toggleFollow"><view class="ui-icon icon-star"></view><text>{{followed ? '已关注（仅本机）' : '关注（仅本机）'}}</text></view>
     <view wx:if="{{nav.inContext}}" class="nav-inline">
       <text class="nav-btn {{nav.hasPrev ? '' : 'nav-disabled'}}" bindtap="goPrev">上一条</text>
       <text class="nav-pos">{{nav.position}} / {{nav.total}}</text>
@@ -76,6 +74,8 @@ module.exports.pad = function (n) {
         <text wx:if="{{detailView.relativeText}}" class="relative">{{detailView.relativeText}}</text>
       </view>
     </view>
+
+    <scene-media context-key="{{alertKey}}" />
 
     <!-- 触发快照对比（仅传感器） -->
     <block wx:if="{{detailView.metrics.length}}">
@@ -128,7 +128,7 @@ module.exports.pad = function (n) {
 
     <!-- 关联数据 S4-04 -->
     <view class="group-title">RELATED · 关联数据</view>
-    <view class="note">关联环境读数（最多 1 条，仅经 sensor_alerts.reading_id 关联）</view>
+    <view class="note">仅显示与当前告警关联的环境读数</view>
 
     <view wx:if="{{relatedLoading}}" class="state-block">
       <text class="spinner"></text>加载关联数据

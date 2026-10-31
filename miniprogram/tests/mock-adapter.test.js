@@ -22,61 +22,32 @@ function numericId(key) {
   return Number(key.split(':')[1]);
 }
 
-test('默认列表：人员组优先、跨组分页、has_more 由公式决定', async () => {
+test('默认列表：删除不报警状态后，人员优先且分页无缺失或重复', async () => {
   const page1 = await adapter.request('/api/v1/alerts', { page: 1, page_size: 20 });
-  assert.equal(page1.statusCode, 200);
-  const parsed1 = parseEnvelope(page1.body);
-  assert.equal(parsed1.status, 'success');
-  assert.equal(page1.body.data.length, 20);
-  assert.equal(page1.body.meta.total, 40);
-  assert.equal(page1.body.meta.has_more, true);
-  assert.ok(page1.body.data.every(function (item) {
-    return item.category === 'person';
-  }));
-
   const page2 = await adapter.request('/api/v1/alerts', { page: 2, page_size: 20 });
-  assert.equal(page2.body.data.length, 20);
-  assert.equal(page2.body.meta.total, 40);
-  assert.equal(page2.body.meta.has_more, false);
-  assert.equal(
-    page2.body.data.filter(function (item) { return item.category === 'person'; }).length,
-    3
-  );
-  assert.equal(page2.body.data[3].category, 'sensor_environment');
+  const expected = sortPersonAlerts(fixtures.personAlerts).concat(sortSensorAlerts(fixtures.sensorAlerts));
+  assert.equal(page1.statusCode, 200);
+  assert.equal(parseEnvelope(page1.body).status, 'success');
+  assert.deepEqual(page1.body.data, expected.slice(0,20));
+  assert.deepEqual(page2.body.data, expected.slice(20,40));
+  assert.equal(page1.body.meta.total, expected.length);
+  assert.equal(page2.body.meta.total, expected.length);
+  assert.equal(page1.body.meta.has_more, 20 < expected.length);
+  assert.equal(page2.body.meta.has_more, 40 < expected.length);
+  assert.equal(new Set(page1.body.data.concat(page2.body.data).map(x => x.alert_key)).size, expected.length);
 });
 
-test('category 筛选只返回对应组，total 与 has_more 按该组计算', async () => {
-  const person1 = await adapter.request('/api/v1/alerts', {
-    category: 'person',
-    page: 1,
-    page_size: 20
-  });
-  assert.equal(person1.body.data.length, 20);
-  assert.equal(person1.body.meta.total, 23);
-  assert.equal(person1.body.meta.has_more, true);
-  assert.ok(person1.body.data.every(function (item) {
-    return item.category === 'person';
-  }));
-
-  const person2 = await adapter.request('/api/v1/alerts', {
-    category: 'person',
-    page: 2,
-    page_size: 20
-  });
-  assert.equal(person2.body.data.length, 3);
-  assert.equal(person2.body.meta.has_more, false);
-
-  const sensor = await adapter.request('/api/v1/alerts', {
-    category: 'sensor_environment',
-    page: 1,
-    page_size: 100
-  });
-  assert.equal(sensor.body.data.length, 17);
-  assert.equal(sensor.body.meta.total, 17);
-  assert.equal(sensor.body.meta.has_more, false);
-  assert.ok(sensor.body.data.every(function (item) {
-    return item.category === 'sensor_environment';
-  }));
+test('category 筛选的总数及分页与实际示例条数一致', async () => {
+  for (const [category, data] of [['person',fixtures.personAlerts],['sensor_environment',fixtures.sensorAlerts]]) {
+    const first = await adapter.request('/api/v1/alerts', { category, page:1, page_size:20 });
+    const second = await adapter.request('/api/v1/alerts', { category, page:2, page_size:20 });
+    assert.equal(first.body.data.length, Math.min(data.length,20));
+    assert.equal(first.body.meta.total,data.length);
+    assert.equal(first.body.meta.has_more,20 < data.length);
+    assert.equal(second.body.data.length, Math.max(0,data.length-20));
+    assert.equal(second.body.meta.has_more,false);
+    assert.ok(first.body.data.every(item => item.category === category));
+  }
 });
 
 test('组内排序：人员按 ts DESC + event_id DESC；传感器按 occurred_at DESC + alert_id DESC', () => {
@@ -209,4 +180,21 @@ test('全部 Mock 数据通过契约校验（L3）', async () => {
       alert.alert_key
     );
   }
+});
+
+test('人员告警无 Lying；Help-Waving 的标题、状态、严重程度和优先级一致', async () => {
+  const all = await adapter.request('/api/v1/alerts',{category:'person',page:1,page_size:100});
+  assert.equal(all.body.meta.total,18);
+  assert.ok(all.body.data.every(item => !/lying/i.test((item.state || '') + (item.title || ''))));
+  const help = all.body.data.filter(item => item.state === 'Help-Waving');
+  assert.ok(help.length > 0);
+  for (const item of help) {
+    assert.equal(item.severity,'HIGH');
+    assert.equal(item.priority,'HIGH');
+    const detail = await adapter.request('/api/v1/alerts/'+encodeURIComponent(item.alert_key),{});
+    assert.equal(detail.body.data.severity,'HIGH');
+    assert.equal(detail.body.data.state,'Help-Waving');
+  }
+  const removed = await adapter.request('/api/v1/alerts/person%3A1099',{});
+  assert.equal(removed.statusCode,404);
 });

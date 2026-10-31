@@ -1,5 +1,8 @@
 {
   "navigationBarTitleText": "系统总览",
   "enablePullDownRefresh": true,
-  "backgroundTextStyle": "dark"
+  "backgroundTextStyle": "dark",
+  "usingComponents": {
+    "scene-media": "/components/scene-media/index"
+  }
 }
