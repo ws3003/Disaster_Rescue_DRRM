@@ -100,3 +100,14 @@ sensor:
   confirm_high_count: 3
   confirm_recovery_count: 3
   cooldown_seconds: 600.0
+
+# V4.4 E8 视频取证（S1）。enabled=false 时禁用真实录像（不会伪造成功）；
+# 每次告警触发录像时新建一个 PicameraFrameSource，录毕由 CameraRecorder 释放。
+e8:
+  enabled: false               # 生产接线前默认关闭；true 后才尝试真实摄像头录像
+  record_seconds: 10           # 取证录像时长（秒）
+  width: 1280                  # 录像分辨率
+  height: 720
+  fps: 15.0                    # 采集帧率
+  codec: "mp4v"                # 视频编码（cv2.VideoWriter fourcc）
+  tmp_dir: ""                  # 证据临时目录；空=系统临时目录

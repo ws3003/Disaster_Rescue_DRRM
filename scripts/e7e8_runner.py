@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""V4.4 B 线 E7+E8 生产装配入口（S1，方案 A）。
+
+- E7：真实 DS18B20 采样 → readings/sensor_alerts → C4 Outbox（同一事务，先落库）。
+- E8：仅当 edge.yaml e8.enabled=true 且摄像头可初始化时，用
+  CameraRecorder(capture_factory=lambda: PicameraFrameSource(...)) 装配真实录像；
+  每次告警触发录像新建一个 PicameraFrameSource，录毕由 CameraRecorder release（方案 A）。
+- e8.enabled=false 或摄像头不可用时：**不**用 FakeRecorder 伪装成功，而是回退为 E7-only
+  （SampledSensorLoop 直连，不创建录像器/OSS），告警与 C4 照常。
+- C4 Outbox Worker 应独立进程运行（scripts/c4_worker.py），本进程不占摄像头之外共享资源。
+- 信号：SIGINT/SIGTERM 优雅退出并关闭采样循环与摄像头资源。
+
+注意到不使用 build_runner() 便捷构造：其无法把 record_seconds/tmp_dir 透传给 EvidenceRecorder，
+为尊重 e8 配置而在此用既有类直接装配（不改 runner.py 核心）。
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import signal
+import sys
+import threading
+import time
+from dataclasses import dataclass, field as _field
+from pathlib import Path
+from typing import Optional
+
+# 使 src 可导入（cwd=项目根或部署目录）
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+import yaml  # noqa: E402
+
+from src.database.db import Database  # noqa: E402
+from src.sensor.alarm import HighTempAlarm  # noqa: E402
+from src.sensor.config import load_sensor_config  # noqa: E402
+from src.sensor.loop import SampledSensorLoop  # noqa: E402
+from src.sensor.runner import SensorRunner, build_sensor_reader  # noqa: E402
+
+_LOGGER = logging.getLogger("e7e8.runner")
+
+
+class E8ConfigError(ValueError):
+    """edge.yaml e8 段缺字段/类型非法。"""
+
+
+@dataclass
+class E8Config:
+    enabled: bool = False
+    record_seconds: int = 10
+    width: int = 1280
+    height: int = 720
+    fps: float = 15.0
+    codec: str = "mp4v"
+    tmp_dir: Optional[str] = None
+
+
+def _require_bool(v, key):
+    if isinstance(v, bool):
+        return v
+    raise E8ConfigError(f"e8.{key} 须为 bool, got {v!r}")
+
+
+def _require_int(v, key, lo):
+    if isinstance(v, int) and not isinstance(v, bool) and v >= lo:
+        return v
+    raise E8ConfigError(f"e8.{key} 须为 int>= {lo}, got {v!r}")
+
+
+def _require_float(v, key, lo):
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and float(v) >= lo:
+        return float(v)
+    raise E8ConfigError(f"e8.{key} 须为数值>= {lo}, got {v!r}")
+
+
+def load_e8_config(edge_yaml: str) -> E8Config:
+    """读取 edge.yaml 的 e8 段；缺失字段用默认值；类型非法抛 E8ConfigError。"""
+    try:
+        raw = yaml.safe_load(Path(edge_yaml).read_text(encoding="utf-8")) or {}
+    except OSError as exc:
+        raise E8ConfigError(f"读取 {edge_yaml} 失败: {exc}") from exc
+    sec = raw.get("e8") if isinstance(raw, dict) else {}
+    if sec is None:
+        sec = {}
+    if not isinstance(sec, dict):
+        raise E8ConfigError("e8 段须为映射(dict)")
+    cfg = E8Config()
+    cfg.enabled = _require_bool(sec.get("enabled", cfg.enabled), "enabled")
+    cfg.record_seconds = _require_int(sec.get("record_seconds", cfg.record_seconds), "record_seconds", 1)
+    cfg.width = _require_int(sec.get("width", cfg.width), "width", 1)
+    cfg.height = _require_int(sec.get("height", cfg.height), "height", 1)
+    cfg.fps = _require_float(sec.get("fps", cfg.fps), "fps", 1.0)
+    cfg.codec = str(sec.get("codec", cfg.codec)).strip() or cfg.codec
+    tmp = sec.get("tmp_dir")
+    cfg.tmp_dir = str(tmp).strip() if isinstance(tmp, str) and tmp.strip() else None
+    return cfg
+
+
+def make_capture_factory(e8: E8Config):
+    """返回一个每次调用都创建新 PicameraFrameSource 的工厂（方案 A：每录新建，录毕 release）。"""
+    from src.evidence.picamera_capture import PicameraFrameSource
+
+    def _factory():
+        return PicameraFrameSource(width=e8.width, height=e8.height, fps=e8.fps)
+
+    return _factory
+
+
+def build_camera_recorder(e8: E8Config):
+    """构造真实 CameraRecorder（capture_factory 每录新建帧源）。"""
+    from src.evidence.camera_recorder import CameraRecorder
+
+    return CameraRecorder(capture_factory=make_capture_factory(e8), codec=e8.codec, fps=e8.fps)
+
+
+def build_uploader(storage_config: str = "config/storage.yaml"):
+    """构造 OSS/存储 uploader（遵循 config/storage.yaml provider）。"""
+    from src.storage import create_storage
+
+    return create_storage(storage_config)
+
+
+def _probe_picamera(e8: E8Config) -> Optional[str]:
+    """启动探针：尝试建一次帧源并释放；失败返回错误原因（摄像头被占/初始化失败），成功 None。"""
+    try:
+        src = make_capture_factory(e8)()
+    except Exception as exc:  # noqa: BLE001
+        return f"picamera 初始化失败: {type(exc).__name__}: {exc}"
+    try:
+        src.release()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def run_e7_only(cfg, reader, db, stop: threading.Event, sleep=time.sleep) -> None:
+    """e8 禁用/摄像头不可用时回退：仅 E7 采样（不创建录器/OSS，不伪造录像）。"""
+    loop = SampledSensorLoop(cfg, reader, HighTempAlarm(cfg, db), db, sleep=sleep)
+    loop.restore_state()
+    try:
+        while not stop.is_set():
+            loop.step()
+            sleep(cfg.sample_period_seconds)
+    finally:
+        loop.close()
+
+
+def run_e7e8(cfg, reader, db, e8: E8Config, stop: threading.Event,
+             sleep=time.sleep, uploader=None) -> None:
+    from src.evidence.recorder import EvidenceRecorder
+
+    cam = build_camera_recorder(e8)
+    recorder = EvidenceRecorder(
+        db, recorder=cam, uploader=uploader,
+        record_seconds=e8.record_seconds, tmp_dir=e8.tmp_dir,
+    )
+    loop = SampledSensorLoop(cfg, reader, HighTempAlarm(cfg, db), db, sleep=sleep)
+    loop.restore_state()
+    runner = SensorRunner(loop, recorder, sleep=sleep)
+    th = threading.Thread(target=runner.run, kwargs={"steps_per_cycle": 1}, daemon=True, name="e7-e8-run")
+    th.start()
+    try:
+        while not stop.is_set():
+            sleep(0.5)
+    finally:
+        runner.stop()
+        runner.close()
+        th.join(timeout=5.0)
+
+
+def main(argv=None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    ap = argparse.ArgumentParser(description="V4.4 E7+E8 生产装配入口")
+    ap.add_argument("--config", default="config/edge.yaml")
+    ap.add_argument("--db", default=None)
+    ap.add_argument("--storage", default="config/storage.yaml")
+    ap.add_argument("--uploader", default="oss", choices=["oss", "none"])
+    a = ap.parse_args(argv)
+
+    try:
+        e8 = load_e8_config(a.config)
+        cfg = load_sensor_config(a.config)
+    except ValueError as exc:
+        _LOGGER.error("配置错误: %s", exc)
+        return 2
+
+    db = Database(db_path=a.db or os.environ.get("DRRM_DB", "data/drrm.db"))
+    reader = build_sensor_reader(cfg)
+
+    stop = threading.Event()
+
+    def _h(_s, _f):
+        _LOGGER.info("收到信号 %s，优雅退出", _s)
+        stop.set()
+
+    signal.signal(signal.SIGINT, _h)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _h)
+
+    if not e8.enabled:
+        _LOGGER.info("e8.enabled=false：仅运行 E7 采样（不创建录像器）")
+        run_e7_only(cfg, reader, db, stop)
+        return 0
+
+    probe_err = _probe_picamera(e8)
+    if probe_err:
+        _LOGGER.error("摄像头不可用（%s）→ 回退 E7-only，不伪造录像；告警/C4 照常", probe_err)
+        run_e7_only(cfg, reader, db, stop)
+        return 1
+
+    uploader = build_uploader(a.storage) if a.uploader != "none" else None
+    _LOGGER.info("E8 启动：record=%ss %dx%d@%s codec=%s uploader=%s",
+                 e8.record_seconds, e8.width, e8.height, e8.fps, e8.codec, a.uploader)
+    run_e7e8(cfg, reader, db, e8, stop, uploader=uploader)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
