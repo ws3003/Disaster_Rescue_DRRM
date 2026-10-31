@@ -95,27 +95,40 @@ class SampledSensorLoop:
             )
         self._persist(_do, "数据质量状态")
 
-    def _mark_recovered(self, ts: str) -> None:
-        """从故障/降质恢复到 ONLINE：状态归零并记录恢复历史（幂等：已恢复不再覆盖）。"""
+    def _mark_recovered(self, ts: str) -> bool:
+        """维护 online 状态；仅当从 degraded/offline 真实恢复才原子地记一条恢复事件并回填。
+
+        - 已在 online / 首次：不写 recovered 事件、不刷新、不清历史 recovered_at（保留 prev）。
+        - 真实转移：调用 db.apply_sensor_online（同一事务：状态更新 + 回填 + 恢复事件）。
+        返回是否发生真实恢复转移（局部闭包容器，不新增实例状态；写异常时保守返回 False）。
+        """
+        box = [False]  # 闭包结果容器
+
         def _do() -> None:
             prev = self.db.get_sensor_status(self.cfg.sensor_id)
             was_bad = prev is not None and prev.get("status") in ("offline", "degraded")
-            self.db.save_sensor_status(
-                sensor_id=self.cfg.sensor_id,
-                status="online", fault_type=None, last_error=None,
-                first_fault_at=None, last_fault_at=None, recovered_at=ts,
-                consecutive_failures=0, quality_failures=0, updated_at=ts,
-            )
-            # 历史事件回填恢复时间（仅未恢复项；已恢复不覆盖）
-            if was_bad and prev:
-                for ev in self.db.list_sensor_fault_events(self.cfg.sensor_id, limit=1):
-                    if ev.get("status") in ("offline", "degraded") and not ev.get("recovered_at"):
-                        self.db.mark_sensor_fault_event_recovered(int(ev["id"]), recovered_at=ts)
-            self.db.record_sensor_fault_event(
-                sensor_id=self.cfg.sensor_id, status="online",
-                fault_type=None, detail="recovered", occurred_at=ts,
-            )
+            prev_rec = prev.get("recovered_at") if prev else None
+            if was_bad:
+                # 原子恢复：状态 online + 回填未恢复故障事件 + 一条 recovered 事件（同事务）
+                self.db.apply_sensor_online(
+                    sensor_id=self.cfg.sensor_id, status="online",
+                    fault_type=None, last_error=None,
+                    first_fault_at=None, last_fault_at=None, recovered_at=ts,
+                    consecutive_failures=0, quality_failures=0, updated_at=ts,
+                    rec_occurred_at=ts, backfill_event_id=None,  # 在事务内自动选未恢复故障
+                )
+            else:
+                # 首次/已在 online：仅维护状态；保留历史 recovered_at，不记事件
+                self.db.save_sensor_status(
+                    sensor_id=self.cfg.sensor_id, status="online",
+                    fault_type=None, last_error=None,
+                    first_fault_at=None, last_fault_at=None, recovered_at=prev_rec,
+                    consecutive_failures=0, quality_failures=0, updated_at=ts,
+                )
+            box[0] = was_bad
+
         self._persist(_do, "恢复状态")
+        return box[0]
 
     # ------------------------------------------------------------------
     # 一次采样
@@ -164,7 +177,7 @@ class SampledSensorLoop:
         self.quality_failures = 0
         was_offline = self.offline
         self.offline = False
-        self._mark_recovered(ts)
+        transitioned = self._mark_recovered(ts)
 
         try:
             from src.sync import bridge as c4_bridge
@@ -193,7 +206,7 @@ class SampledSensorLoop:
             "quality_failures": 0,
             "event": event,
             "was_offline": was_offline,
-            "recovered": was_offline,
+            "recovered": transitioned,
         }
 
     def restore_state(self) -> dict:

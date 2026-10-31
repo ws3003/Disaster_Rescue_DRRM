@@ -256,3 +256,129 @@ class TestDeviceFaultPersistence:
         # 重启后首次有效读数 → 恢复 online（不会把已恢复误判为未恢复）
         r = loop2.step()
         assert r["status"] == "valid" and db.get_sensor_status("dht11-01")["status"] == "online"
+
+
+# ---- E7 修复：恢复事件只在真实 degraded/offline -> online 转移时记一次，正常采样不产虚假恢复 ----
+
+def _rec_count(db, detail="recovered"):
+    with db._connect() as c:
+        return c.execute("SELECT COUNT(*) FROM sensor_fault_events WHERE detail=?", (detail,)).fetchone()[0]
+
+
+def _rec_at(db):
+    st = db.get_sensor_status("dht11-01")
+    return st.get("recovered_at") if st else None
+
+
+class TestRecoveryNoFakeEvent:
+    def _loop(self, db, provider=lambda: (25.0, 40.0)):
+        return SampledSensorLoop(_cfg(high=1), _reader.FakeReader(provider),
+                                 HighTempAlarm(_cfg(high=1), db), db, sleep=_no_sleep)
+
+    def test_first_normal_no_recovered_event(self, db):
+        self._loop(db).step()
+        assert _rec_count(db) == 0                 # 首次正常采样不产生 recovered
+        assert db.get_sensor_status("dht11-01")["status"] == "online"
+
+    def test_10_normal_no_recovered_event(self, db):
+        loop = self._loop(db)
+        for _ in range(10):
+            r = loop.step()
+            assert r["recovered"] is False
+        assert _rec_count(db) == 0
+
+    def test_degraded_recovers_once(self, db):
+        loop = self._loop(db)
+        # 进 degraded
+        loop.reader = _RawReader(120.0, 40.0); loop.step()
+        assert db.get_sensor_status("dht11-01")["status"] == "degraded"
+        # 恢复：一次 recovered
+        loop.reader = _reader.FakeReader(lambda: (25.0, 40.0))
+        r = loop.step()
+        assert r["recovered"] is True and r["was_offline"] is False
+        assert _rec_count(db) == 1
+        assert db.get_sensor_status("dht11-01")["status"] == "online"
+        # 后续正常 10 次不重复
+        for _ in range(10):
+            assert loop.step()["recovered"] is False
+        assert _rec_count(db) == 1
+
+    def test_offline_recovers_once_backfill(self, db):
+        def fail():
+            raise SensorReadError("crc fail")
+        loop = self._loop(db, provider=fail)       # offline_after_failures=2
+        loop.step(); r2 = loop.step()
+        assert r2["offline"] is True and db.get_sensor_status("dht11-01")["status"] == "offline"
+        # 未恢复的 offline 故障事件存在
+        ev_id = db.list_sensor_fault_events("dht11-01")[0]["id"]
+        # 恢复：离线 -> online，恢复一次，回填 recovered_at
+        loop.reader = _reader.FakeReader(lambda: (25.0, 40.0))
+        r = loop.step()
+        assert r["recovered"] is True and r["was_offline"] is True
+        assert _rec_count(db) == 1
+        st = db.get_sensor_status("dht11-01")
+        assert st["status"] == "online" and st["consecutive_failures"] == 0 and st["recovered_at"]
+        with db._connect() as c:
+            got = c.execute("SELECT recovered_at FROM sensor_fault_events WHERE id=?",
+                            (ev_id,)).fetchone()
+        assert got is not None and got[0]          # 原 fault 事件 recovered_at 已回填
+
+    def test_normal_preserves_historical_recovered_at(self, db):
+        def fail():
+            raise SensorReadError("x")
+        loop = self._loop(db, provider=fail)
+        loop.step(); loop.step()                   # offline
+        loop.reader = _reader.FakeReader(lambda: (25.0, 40.0))
+        loop.step()                                # 恢复 -> recovered_at = T1
+        t1 = _rec_at(db)
+        assert t1
+        for _ in range(10):
+            loop.step()                            # 正常采样不刷新/不清 recovered_at
+        assert _rec_at(db) == t1
+        assert _rec_count(db) == 1
+
+
+class TestAtomicRecovery:
+    def test_apply_sensor_online_rollback(self, db, monkeypatch):
+        """恢复事务内任一步失败 -> 三项(状态/回填/恢复事件)整体回滚。"""
+        import contextlib
+        from src.database.db import Database as _DB
+        db.save_sensor_status(sensor_id="s1", status="offline", last_error="crc",
+                              consecutive_failures=2, updated_at="2026-10-30T00:00:00+08:00")
+        ev_id = db.record_sensor_fault_event(sensor_id="s1", status="offline",
+                                             detail="crc", occurred_at="2026-10-30T00:00:10+08:00")
+        orig = _DB.with_transaction
+
+        class _Boom:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def execute(self, sql, params=None):
+                params = params or ()
+                # 在"写 online/recovered 事件"这步注入失败
+                if "sensor_fault_events" in sql and any(
+                        isinstance(x, str) and x == "recovered" for x in params):
+                    raise RuntimeError("boom on recovery event write")
+                return self.conn.execute(sql, params)
+
+        @contextlib.contextmanager
+        def boom_tx(dbself):
+            with orig(dbself) as conn:
+                yield _Boom(conn)
+
+        monkeypatch.setattr(_DB, "with_transaction", boom_tx)
+        with pytest.raises(RuntimeError):
+            db.apply_sensor_online(sensor_id="s1", status="online", recovered_at="2026-10-30T00:00:20+08:00",
+                                   updated_at="2026-10-30T00:00:20+08:00",
+                                   rec_occurred_at="2026-10-30T00:00:20+08:00")
+        # 三项全部回滚：状态仍 offline（无部分更新）、故障事件未回填、无恢复事件、总数不变
+        st = db.get_sensor_status("s1")
+        assert st["status"] == "offline"
+        assert st["consecutive_failures"] == 2                 # 与失败前初始状态一致（无部分更新）
+        assert st["last_error"] == "crc"                       # 与失败前初始状态一致
+        with db._connect() as c:
+            assert c.execute("SELECT COUNT(*) FROM sensor_fault_events WHERE detail='recovered'").fetchone()[0] == 0
+            # 限定 s1 的事件总数不变：失败前 1 条 offline，失败后仍 1 条
+            assert c.execute("SELECT COUNT(*) FROM sensor_fault_events WHERE sensor_id='s1'").fetchone()[0] == 1
+            row = c.execute("SELECT recovered_at FROM sensor_fault_events WHERE id=?", (ev_id,)).fetchone()
+            assert (row[0] is None or row[0] == "")   # 未回填

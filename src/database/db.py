@@ -2431,6 +2431,80 @@ class Database:
             )
             return int(cur.lastrowid)
 
+    def apply_sensor_online(
+        self,
+        *,
+        sensor_id: str,
+        status: str = "online",
+        fault_type: str | None = None,
+        last_error: str | None = None,
+        first_fault_at: str | None = None,
+        last_fault_at: str | None = None,
+        recovered_at: str | None = None,
+        consecutive_failures: int = 0,
+        quality_failures: int = 0,
+        updated_at: str | None = None,
+        backfill_event_id: int | None = None,
+        rec_occurred_at: str | None = None,
+    ) -> None:
+        """原子地把 sensor 置为 online：同一事务内完成
+        ① sensor_status 状态更新 ② 未恢复故障事件 recovered_at 回填 ③ online/recovered 历史事件写入。
+        任一失败整体回滚（不出现"状态已 online 但恢复事件丢失/半写"）。
+        仅用于"从 degraded/offline 真实恢复"的转移路径；正常采样用 save_sensor_status 维护状态即可。
+        backfill_event_id 为 None 时，在事务内自动选取该 sensor 最新一条未恢复的
+        offline/degraded 故障事件进行回填（保证选场与其余两写同一事务）。
+        """
+        if status != "online":
+            raise ValueError(f"apply_sensor_online 仅用于恢复 online, got {status!r}")
+        now = updated_at or self._now_iso()
+        ts = rec_occurred_at or self._now_iso()
+        with self.with_transaction() as tx:
+            tx.execute(
+                """
+                INSERT INTO sensor_status
+                  (sensor_id, status, fault_type, last_error,
+                   first_fault_at, last_fault_at, recovered_at,
+                   consecutive_failures, quality_failures, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(sensor_id) DO UPDATE SET
+                  status=excluded.status,
+                  fault_type=excluded.fault_type,
+                  last_error=excluded.last_error,
+                  first_fault_at=excluded.first_fault_at,
+                  last_fault_at=excluded.last_fault_at,
+                  recovered_at=excluded.recovered_at,
+                  consecutive_failures=excluded.consecutive_failures,
+                  quality_failures=excluded.quality_failures,
+                  updated_at=excluded.updated_at
+                """,
+                (sensor_id, status, fault_type, last_error,
+                 first_fault_at, last_fault_at, recovered_at,
+                 consecutive_failures, quality_failures, now),
+            )
+            if backfill_event_id is None:
+                row = tx.execute(
+                    "SELECT id FROM sensor_fault_events "
+                    "WHERE sensor_id=? AND status IN ('offline','degraded') "
+                    "AND (recovered_at IS NULL OR recovered_at = '') "
+                    "ORDER BY occurred_at DESC, id DESC LIMIT 1",
+                    (sensor_id,),
+                ).fetchone()
+                backfill_event_id = int(row["id"]) if row else None
+            if backfill_event_id is not None:
+                tx.execute(
+                    "UPDATE sensor_fault_events SET recovered_at = ? "
+                    "WHERE id = ? AND (recovered_at IS NULL OR recovered_at = '')",
+                    (ts, int(backfill_event_id)),
+                )
+            tx.execute(
+                """
+                INSERT INTO sensor_fault_events
+                  (sensor_id, status, fault_type, detail, occurred_at, recovered_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (sensor_id, "online", fault_type, "recovered", ts, None),
+            )
+
     def list_sensor_fault_events(self, sensor_id: str, limit: int = 100) -> list[dict]:
         """查询传感器故障历史（按 occurred_at 递减）。"""
         with self._connect() as conn:
