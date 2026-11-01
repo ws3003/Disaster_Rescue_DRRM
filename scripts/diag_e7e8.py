@@ -100,12 +100,14 @@ _CAM_SENTINEL = object()
 # ---------------------------------------------------------------------------
 class _DiagFakeCam:
     capture_count = 0
+    FPS_LIMIT = 0.0   # 0=无节流(A1); >0 = 目标帧率(A2 限帧用，不影响其他)
 
     def __init__(self):
         self.started = False
         self.closed = False
         self._i = 0
         self.main = None
+        self._next_at = None
 
     def create_video_configuration(self, main=None, controls=None):
         self.main = main
@@ -124,6 +126,22 @@ class _DiagFakeCam:
         self.closed = True
 
     def capture_array(self):
+        # A2 限帧：仅在 FPS_LIMIT>0 时按 time.monotonic() 控制帧间隔(≈1/FPS)，
+        # 避免紧循环忙占 CPU；FPS_LIMIT==0 保持 A1 无节流忙循环。不改变返回内容。
+        lim = _DiagFakeCam.FPS_LIMIT
+        if lim and lim > 0:
+            import time as _t
+            now = _t.monotonic()
+            if self._next_at is None:
+                self._next_at = now
+            delay = self._next_at - now
+            if delay > 0:
+                _t.sleep(delay)
+                now = _t.monotonic()
+            self._next_at = self._next_at + 1.0 / lim
+            # 落后过多(追帧)则重置基准，避免一次调度尖刺导致连续补帧/紧循环
+            if self._next_at - now > 1.0 / lim:
+                self._next_at = now + 1.0 / lim
         import numpy as np
         _DiagFakeCam.capture_count += 1
         self._i += 1
@@ -241,13 +259,15 @@ def _ok(cond: bool) -> str:
     return "是" if cond else "否"
 
 
-def _start_camera(width, height, fps, queue_size):
+def _start_camera(width, height, fps, queue_size, fps_limit: float = 0.0):
     """按测试 cam_service fixture 等价方式启动 CameraService（Picamera2 用 mock）。
 
-    返回 (camera_service, 采集线程句柄)。注入 sys.modules["picamera2"] 仅本进程内生效；
-    启动 Service 会惰性 import picamera2，故先用 mock 模块取代，再 start。
+    fps_limit>0 时开启 FakeCamera 帧率限速(约 fps_limit FPS)；fps_limit<=0 保持 A1
+    无节流忙循环。返回 (camera_service, 采集线程句柄)。注入 sys.modules["picamera2"]
+    仅本进程内生效；启动 Service 会惰性 import picamera2，故先用 mock 模块取代再 start。
     """
     _DiagFakeCam.capture_count = 0
+    _DiagFakeCam.FPS_LIMIT = float(fps_limit)
     mod = types.ModuleType("picamera2")
     mod.Picamera2 = _DiagFakeCam
     sys.modules["picamera2"] = mod
@@ -256,7 +276,7 @@ def _start_camera(width, height, fps, queue_size):
     return svc, getattr(svc, "_thread", None)
 
 
-def run_one(mode: str, with_camera: bool = False) -> dict:
+def run_one(mode: str, with_camera: bool = False, camera_fps_limit: float = 0.0) -> dict:
     """跑一种模式，返回结果字典（内部完成临时库/线程/相机清理）。"""
     out: dict = {}
     started_wall = time.time()
@@ -291,7 +311,8 @@ def run_one(mode: str, with_camera: bool = False) -> dict:
         try:
             # --camera：与测试 cam_service 等价启动真实 CameraService 采集线程
             if with_camera:
-                camera_service, cam_thread = _start_camera(8, 6, 30.0, 8)
+                camera_service, cam_thread = _start_camera(8, 6, 30.0, 8,
+                                                           fps_limit=camera_fps_limit)
                 out["cam_started_ok"] = camera_service.state in ("RUNNING", "STOPPING")
                 out["cam_thread_started"] = cam_thread is not None
 
@@ -371,6 +392,7 @@ def run_one(mode: str, with_camera: bool = False) -> dict:
             elapsed=elapsed_total,
             db_path=db_path,
             with_camera=with_camera,
+            camera_fps_limit=camera_fps_limit,
             reader=reader, metric=metric,
             stage=stage,
             dropped=dropped, cons_exc=cons_exc, qsize=qsize,
@@ -473,7 +495,11 @@ def _report(out: dict) -> None:
           f"非SQLite锁异常真实发生次数；观测盲区见下方，不能据此排除所有锁竞争 |")
 
     if out.get("with_camera"):
+        _frames = float(out.get("cam_capture_frames", 0) or 0)
+        _el = float(out.get("elapsed", 0) or 0)
+        _avg = (_frames / _el) if _el > 0 else 0.0
         print("| 相机采集帧数 | {0} | 非E7采样次数 |".format(out.get("cam_capture_frames", "?")))
+        print("| 相机平均采集频率 | {0:.1f} 帧/s | 口径=capture_array调用数/实际观测时长({1:.2f}s)；非硬件真实FPS |".format(_avg, _el))
         print("| 相机启动 | started_ok={0} thread_started={1} | state={2} |".format(
             _ok(out.get("cam_started_ok", False)), _ok(out.get("cam_thread_started", False)),
             out.get("cam_state_at_end", "?")))
@@ -534,9 +560,16 @@ def main() -> int:
                     help="low=1s采样周期; fast=~1ms采样周期(模拟测试 _fast_sleep)")
     ap.add_argument("--camera", action="store_true",
                     help="启动与测试 cam_service 等价的 CameraService 采集线程(实验A)")
+    ap.add_argument("--camera-fps-limit", action="store_true",
+                    help="A2: FakeCamera 按约30FPS限帧(须与 --camera 同用)")
     args = ap.parse_args()
 
-    out = run_one(args.mode, with_camera=args.camera)
+    if args.camera_fps_limit and not args.camera:
+        print("[参数错误] --camera-fps-limit 必须与 --camera 同时使用。", file=sys.stderr)
+        return 2
+
+    out = run_one(args.mode, with_camera=args.camera,
+                  camera_fps_limit=(30.0 if args.camera_fps_limit else 0.0))
     if out.get("error"):
         print(f"\n[装配失败] mode={out.get('mode')} db={out.get('db_path')} 临时库清理={out.get('cleaned')}")
         print(out["error"])
