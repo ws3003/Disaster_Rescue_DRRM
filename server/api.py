@@ -581,8 +581,7 @@ app.include_router(c4_module.router)
 
 # ----------------------------------------------------------------------
 # V4.4 媒体访问授权（D-0）— 已解耦至 server.media：
-# 仅当 auth 依赖存在时挂载媒体路由（保留 get_current_user 鉴权，绝不公开匿名）；
-# 微信登录 router 不在此自动挂载（是否挂载由未来独立集成任务决定）。
+# 仅当 auth 依赖存在时挂载媒体路由（保留 get_current_user 鉴权，绝不公开匿名）。
 # 使用精确模块存在性检查：server.media 存在但含真实错误时不会吞掉异常。
 # ----------------------------------------------------------------------
 import importlib.util as _ilu  # noqa: E402
@@ -594,5 +593,14 @@ if (
     from server import media as media_module
     media_module.install(app)
     app.include_router(media_module.router)
+
+# ----------------------------------------------------------------------
+# V4.4 微信用户认证（server.auth）：登录 / 当前用户 / 退出已在此挂载。
+# 仅当 server.auth 存在时注册（保持干净部署可独立启动）；
+# 认证 Session Token 语义与 S4 服务 Token 相互独立，不改变 S4 鉴权。
+# ----------------------------------------------------------------------
+if _ilu.find_spec("server.auth") is not None:
+    from server import auth as auth_module
+    app.include_router(auth_module.router)
 
 # ======================================================================
