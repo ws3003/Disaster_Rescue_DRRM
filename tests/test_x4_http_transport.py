@@ -179,6 +179,7 @@ class TestSendPredictToken:
         assert calls[0]["headers"] == {"Authorization": "Bearer s3cr3t"}
 
     def test_no_token_no_authorization_header(self, monkeypatch):
+        monkeypatch.delenv("X4_API_TOKEN", raising=False)
         calls = self._stub(monkeypatch)
         ht.send_predict("http://cloud/predict", _bgr(), "m")   # 未设置 token，环境为空
         assert calls[0]["headers"] is None

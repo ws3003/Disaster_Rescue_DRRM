@@ -302,7 +302,7 @@ class TestRealHttpStub:
         }
         srv.shutdown(); srv.server_close()
 
-    def _client(self, stub, timeout_s):
+    def _client(self, monkeypatch, stub, timeout_s):
         cfg = X4Config(enabled=True,
                        cloud_endpoint=f"http://127.0.0.1:{stub['port']}/predict",
                        model_id="yolov26l", max_attempts=1,
@@ -311,13 +311,12 @@ class TestRealHttpStub:
         # 断言 endpoint 严格为本地回环
         assert cfg.cloud_endpoint.startswith("http://127.0.0.1:")
         from src.x4.http_transport import new_http_client
-        import os
-        os.environ["X4_API_TOKEN"] = stub["token"]
+        monkeypatch.setenv("X4_API_TOKEN", stub["token"])
         return cfg, new_http_client(cfg)
 
-    def test_real_http_success_maps_ok(self, stub):
+    def test_real_http_success_maps_ok(self, stub, monkeypatch):
         """真实 HTTP 200 + 合法 JSON → 检测解析成功（非 fake）。"""
-        cfg, real = self._client(stub, 5.0)
+        cfg, real = self._client(monkeypatch, stub, 5.0)
         dets = real.infer(_frame(), timeout=5.0)
         assert len(dets) == 1 and dets[0].class_name == "civilian"
         assert stub["count"]() == 1
@@ -326,20 +325,20 @@ class TestRealHttpStub:
         ("500", "CloudConnectionError", 500),
         ("badjson", "CloudInvalidResponseError", 200),
     ])
-    def test_real_http_error_maps(self, stub, mode, exc_name, http):
+    def test_real_http_error_maps(self, stub, monkeypatch, mode, exc_name, http):
         """真实 HTTP 500 / 非法 JSON → 映射为预期云端异常（非 fake）。"""
         from src.x4 import cloud_yolo as cy
         stub["set"](mode)
-        cfg, real = self._client(stub, 5.0)
+        cfg, real = self._client(monkeypatch, stub, 5.0)
         with pytest.raises(getattr(cy, exc_name)):
             real.infer(_frame(), timeout=5.0)
         assert stub["count"]() == 1
 
-    def test_real_http_timeout_maps(self, stub):
+    def test_real_http_timeout_maps(self, stub, monkeypatch):
         """真实 HTTP 延迟超时 → CloudTimeoutError；已发 1 次请求；不宣称严格墙钟上界。"""
         from src.x4.cloud_yolo import CloudTimeoutError
         stub["set"]("timeout")
-        cfg, real = self._client(stub, 1.0)   # 客户端超时 1s，stub 延迟 4s
+        cfg, real = self._client(monkeypatch, stub, 1.0)   # 客户端超时 1s，stub 延迟 4s
         with pytest.raises(CloudTimeoutError):
             real.infer(_frame(), timeout=1.0)
         assert stub["count"]() == 1
