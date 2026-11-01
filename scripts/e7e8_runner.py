@@ -148,11 +148,31 @@ def run_e7_only(cfg, reader, db, stop: threading.Event, sleep=time.sleep) -> Non
         loop.close()
 
 
+def build_shared_camera_recorder(service, e8: E8Config):
+    """共享模式（Mode B）：用已启动的 CameraService 构建 CameraRecorder。
+
+    每次录像新建一个 E8CameraAdapter（订阅该 service 的独立 FrameReader），
+    录毕由 CameraRecorder release（只解订阅，不关摄像头服务）。
+    """
+    from src.e8_camera_adapter import E8CameraAdapter
+    from src.evidence.camera_recorder import CameraRecorder
+
+    return CameraRecorder(
+        capture_factory=lambda: E8CameraAdapter(service),
+        codec=e8.codec, fps=e8.fps,
+    )
+
+
 def run_e7e8(cfg, reader, db, e8: E8Config, stop: threading.Event,
-             sleep=time.sleep, uploader=None) -> None:
+             sleep=time.sleep, uploader=None, camera_service=None) -> None:
     from src.evidence.recorder import EvidenceRecorder
 
-    cam = build_camera_recorder(e8)
+    if camera_service is not None:
+        # Mode B：共享 CameraService，不再自建第二个 Picamera2
+        cam = build_shared_camera_recorder(camera_service, e8)
+    else:
+        # Mode A：独立模式（每次录像新建 PicameraFrameSource，兼容既有）
+        cam = build_camera_recorder(e8)
     recorder = EvidenceRecorder(
         db, recorder=cam, uploader=uploader,
         record_seconds=e8.record_seconds, tmp_dir=e8.tmp_dir,

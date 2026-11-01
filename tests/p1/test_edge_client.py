@@ -333,20 +333,17 @@ class PreviewOnlyTest(unittest.TestCase):
         import src.edge_client as ec
         from unittest import mock
 
-        class _DummyCam:
-            def __init__(self, **kwargs):
-                pass
-
-            def close(self):
-                pass
-
-        with mock.patch.object(ec, "EdgeCam", _DummyCam), \
+        dummy = mock.MagicMock()
+        with mock.patch.object(ec, "_open_camera", return_value=(None, dummy)) as oc, \
+             mock.patch.object(ec, "_close_camera") as closecam, \
              mock.patch.object(ec, "EdgeUploader") as uploader, \
              mock.patch.object(ec, "run_preview_only", return_value=7) as preview:
             code = ec.main(["--preview-only"])
         self.assertEqual(code, 0)
         uploader.assert_not_called()          # 不触发上传器
         preview.assert_called_once()          # 只跑纯预览
+        oc.assert_called_once()               # 经统一 CameraService 装配打开
+        closecam.assert_called_once()         # 统一释放(订阅→stop→close)
 
 
 if __name__ == "__main__":

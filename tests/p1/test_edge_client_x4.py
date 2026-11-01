@@ -105,6 +105,9 @@ def test_edge_client_main_uses_composition_root(monkeypatch):
 
     monkeypatch.setattr(ec, "EdgeUploader", fake_upload_ctor)
     monkeypatch.setattr(ec, "EdgeCam", fake_cam_ctor)
+    # main 经 _open_camera 建唯一 CameraService：测试规避真实硬件
+    monkeypatch.setattr(ec, "_open_camera", lambda _cfg: (None, _FakeCam()))
+    monkeypatch.setattr(ec, "_close_camera", lambda svc, cam: None)
     # 组合根构建函数被替换为记录调用并返回 stub
     monkeypatch.setattr("src.x4.composition.build_x4_perception", fake_build)
     # 让 main 走到感知构造（不要求 api_url 真实）
@@ -137,6 +140,8 @@ def test_edge_client_main_composition_failure_falls_back(monkeypatch):
 
     monkeypatch.setattr(ec, "EdgeUploader", fake_upload_ctor)
     monkeypatch.setattr(ec, "EdgeCam", fake_cam_ctor)
+    monkeypatch.setattr(ec, "_open_camera", lambda _cfg: (None, _FakeCam()))
+    monkeypatch.setattr(ec, "_close_camera", lambda svc, cam: None)
     # 构造失败：组合根抛 RuntimeException，main 的 try/except 捕获后置 None
     monkeypatch.setattr("src.x4.composition.build_x4_perception", fail_build)
     monkeypatch.delenv("X4_API_TOKEN", raising=False)

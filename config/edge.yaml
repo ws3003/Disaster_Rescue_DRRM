@@ -81,11 +81,17 @@ rescue:
 # V4.4 E7 传感器配置（开发联调参数，非现场安全认证标准）
 # 供 src.sensor.config.load_sensor_config 读取；两级高温+恢复阈值。
 # ============================================================
+# ============================================================
+# V4.4 B 第二批：E7/E8 与 EdgeClient 感知共享 CameraService（EdgeClient 进程内组合）。
+# enabled=false 时 EdgeClient 保持纯感知（E7 采样与 E8 取证均不启动）；
+# 置 true 后由 EdgeClient 启动 E7 采样，并按 e8.enabled 决定是否开启 E8 录像（共享摄像头）。
+# ============================================================
 sensor:
-  sensor_id: "dht11-01"
+  sensor_id: "ds18b20-01"          # 告警日志/数据库中的传感器逻辑 ID（实际硬件为 DS18B20）
+  enabled: false                     # E7 采样开关（EdgeClient 主入口按此启用）
   # 读取器选择: "ds18b20"=真实 One-Wire 温度; "fake"=测试/离线 Mock(需显式 provider)
   reader: "ds18b20"
-  # DS18B20 One-Wire 设备 (Raspberry Pi 已识别: 28-0224e33f1e4e, GPIO4)
+  # DS18B20 One-Wire 设备 (Raspberry Pi 已确认存在; 已识别: 28-0224e33f1e4e, GPIO4)
   device_id: "28-0224e33f1e4e"
   device_dir: "/sys/bus/w1/devices"
   # E7-02 读数量程（开发默认；以真实硬件规格为准可改）

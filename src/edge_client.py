@@ -182,11 +182,14 @@ def load_config(path: str = CONFIG_PATH) -> Dict[str, Any]:
 # 摄像头 (Picamera2)
 # ----------------------------------------------------------------------
 class EdgeCam:
-    """兼容包装: 复用 V0.1 已验证摄像头链路 src/camera.py 的 CameraFrameReader。
+    """兼容包装: 保证既有 EdgeClient 感知/上传的取帧接口（``iter_frames``/``capture``/``stop``）。
 
-    内部不再创建 Picamera2; 采集格式/背压/旋转等均由 CameraFrameReader 统一负责
-    (create_video_configuration, 与 V0.2 实时视频链路一致)。
-    capture() 返回单帧 BGR (供 cv2/JPEG 编码), 保持 edge_client 原有接口。
+    帧源两种：
+    - ``reader=`` 注入（测试/Fake）；
+    - ``service=``（S1 CameraService）：经 EdgeCamAdapter 订阅取帧——图像处理与旧
+      ``src/camera.py::CameraFrameReader`` 语义一致（独立副本 + 180° 旋转，不做 RGB→BGR）。
+    仅订阅、不拥有摄像头生命周期；release 不影响其他订阅者。
+    capture() 返回单帧 ndarray（保持旧 CameraFrameReader 的通道序与 180° 旋转）。
     """
 
     def __init__(
@@ -195,8 +198,17 @@ class EdgeCam:
         height: int = 720,
         fps: float = 15.0,
         reader: Any = None,
+        service: Any = None,
     ):
-        """入参 width/height/fps 供真实 reader 初始化; reader 可注入(Fake 测试)。"""
+        """入参 width/height/fps 供真实 reader 初始化; reader 可注入(Fake 测试); service 可注入 S1 CameraService。
+
+        - 不提供 reader 且不提供 service：懒加载 src/camera.py CameraFrameReader（既有行为）。
+        - 提供 service（S1 CameraService）：经 EdgeCamAdapter 订阅取帧（BGR+180°+copy），
+          仅订阅、不拥有摄像头生命周期；release 不影响其他订阅者。
+        """
+        if reader is None and service is not None:
+            from src.edge_cam_adapter import EdgeCamAdapter
+            reader = EdgeCamAdapter(service, width=int(width), height=int(height), fps=float(fps))
         if reader is None:
             # 懒加载: 仅真实实例化时引入 src/camera.py (脚本/测试可摆脱 Pi 依赖)
             from camera import CameraFrameReader
@@ -219,6 +231,91 @@ class EdgeCam:
             self._reader.stop()
         except Exception:
             pass
+
+
+# ----------------------------------------------------------------------
+# 摄像头生命周期（V4.4 B：统一 CameraService 唯一硬件持有者）
+# ----------------------------------------------------------------------
+class CameraInitError(RuntimeError):
+    """摄像头初始化失败。"""
+
+
+def _camera_spec(camera_cfg: dict, default_fps: float = 15.0):
+    """从 edge.yaml camera 段取宽/高/fps（缺省与旧 CameraFrameReader 默认一致）。"""
+    w = int(camera_cfg.get("width", 1280))
+    h = int(camera_cfg.get("height", 720))
+    f = float(camera_cfg.get("fps", default_fps))
+    return w, h, f
+
+
+def _open_camera(camera_cfg: dict):
+    """创建并启动唯一 CameraService，返回 (CameraService, EdgeCam)。
+
+    - CameraService.start() 失败/故障 → 抛 CameraInitError（不伪造、不建第二个实例）。
+    - EdgeCam(service=...) 订阅同一 CameraService（仅订阅，不拥有硬件）。
+    - 任一步失败都 close 已创建的 CameraService，避免遗留摄像头资源。
+    """
+    from src.camera_service import CameraService
+    w, h, f = _camera_spec(camera_cfg)
+    svc = CameraService(width=w, height=h, fps=f)
+    try:
+        svc.start()
+        if svc.fault():
+            raise CameraInitError(f"摄像头初始化失败: {svc.fault()}")
+        cam = EdgeCam(service=svc, width=w, height=h, fps=f)
+    except Exception:
+        try:
+            svc.close()
+        except Exception:
+            pass
+        raise
+    return svc, cam
+
+
+def _close_camera(svc, cam) -> None:
+    """逆序幂等释放：先解 EdgeClient 订阅，再停采集，最后统一关闭 CameraService。"""
+    try:
+        if cam is not None:
+            cam.close()          # EdgeCam.close → EdgeCamAdapter.release（只解自身订阅）
+    except Exception:
+        print("[EdgeClient] EdgeCam release failed (ignored, idempotent)")
+    if svc is not None:
+        try:
+            svc.stop()
+        except Exception:
+            print("[EdgeClient] CameraService.stop failed (ignored)")
+        try:
+            svc.close()
+        except Exception:
+            print("[EdgeClient] CameraService.close failed (ignored)")
+
+
+def _build_e7e8(cfg, camera_service, config_path):
+    """按配置在 EdgeClient 进程内启动 E7(+可选 E8) 组合，共享传入的唯一 CameraService。
+
+    - ``sensor.enabled=false`` → 不启用（EdgeClient 保持纯感知兼容）。
+    - 复用 SensorRunner/EvidenceRecorder/E8CameraAdapter；E8 订阅与感知同一 camera_service。
+    - 本轮不连接真实 OSS：uploader=None（EvidenceRecorder 不伪造成功；Pi 真机由部署接线）。
+    - 返回已 start 的 EdgeE7E8，或 None（未启用）；初始化失败由调用方捕获降级为纯感知。
+    """
+    section = cfg.get("sensor")
+    if not isinstance(section, dict) or not bool(section.get("enabled")):
+        return None
+    from src.e7e8_integration import EdgeE7E8
+    from src.sensor.config import load_sensor_config
+    from src.database.db import Database
+    from scripts.e7e8_runner import load_e8_config   # 复用 e8 配置校验
+    sensor_cfg = load_sensor_config(config_path)
+    e8_cfg = load_e8_config(config_path)
+    db = Database(db_path=str((cfg.get("db") or {}).get("path") or "data/drrm.db"))
+    obj = EdgeE7E8(
+        sensor_cfg, e8_cfg, db,
+        camera_service=camera_service,
+        uploader=None,
+        sleep=time.sleep,
+    )
+    obj.start()
+    return obj
 
 
 # ----------------------------------------------------------------------
@@ -681,13 +778,11 @@ def main(argv: Optional[list] = None) -> int:
 
     # 纯预览调试: 不需要 api_url / uploader / perception, 独立于上传链路提前返回
     if args.preview_only:
-        cam = EdgeCam(
-            width=cam_cfg.get("width", 1280), height=cam_cfg.get("height", 720)
-        )
+        svc, cam = _open_camera(cam_cfg)
         try:
             frames = run_preview_only(cam)
         finally:
-            cam.close()
+            _close_camera(svc, cam)
         print(f"[PreviewOnly] preview ended, shown {frames} frames")
         return 0
 
@@ -697,9 +792,19 @@ def main(argv: Optional[list] = None) -> int:
         return 1
 
     uploader = EdgeUploader(api_url)
-    cam = EdgeCam(
-        width=cam_cfg.get("width", 1280), height=cam_cfg.get("height", 720)
-    )
+    svc, cam = _open_camera(cam_cfg)
+
+    # V4.4-B 第二批：E7/E8 组合（可选）共享同一 CameraService。
+    # 配置/初始化失败只降级为纯感知，不拖垮检测主循环。
+    e7e8 = None
+    try:
+        e7e8 = _build_e7e8(cfg, svc, args.config)
+        if e7e8 is not None:
+            print(f"[EdgeClient] E7/E8 enabled: mode={e7e8.mode}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[EdgeClient][E7/E8] init failed, continue detection only: {exc}")
+        traceback.print_exc()
+        e7e8 = None
     interval = args.interval if args.interval is not None else up_cfg.get("interval", 10)
     quality = args.quality if args.quality is not None else up_cfg.get("jpeg_quality", 90)
 
@@ -787,7 +892,12 @@ def main(argv: Optional[list] = None) -> int:
             probe_scheduler=probe_scheduler,
         )
     finally:
-        cam.close()
+        if e7e8 is not None:
+            try:
+                e7e8.close()      # 先停 E7/E8，释放 E8 订阅
+            except Exception as exc2:  # noqa: BLE001
+                print(f"[EdgeClient][E7/E8] close failed: {exc2}")
+        _close_camera(svc, cam)    # 再释放 EdgeCamAdapter 订阅 + 统一关 CameraService
     return 0
 
 
