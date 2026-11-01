@@ -62,6 +62,7 @@ class _FakeCam:
         self.started = False
         self.closed = False
         self._i = 0
+        self._next_at = None   # 下一帧应到达的单调时钟点（用于模拟约 30 FPS 帧间隔）
 
     def create_video_configuration(self, main=None, controls=None):
         self.main = main
@@ -80,6 +81,20 @@ class _FakeCam:
         self.closed = True
 
     def capture_array(self):
+        # 模拟约 30 FPS（单帧 ~1/30s）。原因：若立即返回，CameraService 采集线程会在 Pi 上
+        # 高速忙循环，严重挤占 E7 采样调度，导致原始测试 40s 仍收不到录像（A1/A2 对照证实）。
+        # 用 time.monotonic() 计算下一帧、time.sleep() 等待；不得用 while 忙循环等待帧时间。
+        # 落后超过一帧则重置基准，避免连续追帧形成高速忙循环。
+        now = time.monotonic()
+        if self._next_at is None:
+            self._next_at = now
+        delay = self._next_at - now
+        if delay > 0:
+            time.sleep(delay)
+            now = time.monotonic()
+        self._next_at = self._next_at + (1.0 / 30.0)
+        if self._next_at - now > (1.0 / 30.0):
+            self._next_at = now + (1.0 / 30.0)
         import numpy as np
         self._i += 1
         h, w = self.main["size"][1], self.main["size"][0]
