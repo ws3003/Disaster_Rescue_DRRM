@@ -347,8 +347,20 @@ def run(config_path: str | Path, input_path: str | Path | None = None,
 
     # Demo V0.1: 实时摄像头模式 (Raspberry Pi 5 + Picamera2), 优先于文件输入
     if use_camera or str(cfg.get("input", {}).get("type", "")).lower() == "camera":
-        return run_camera(cfg, det, pe, clf, rk, device,
-                          agent_runner=agent_runner, vision_tool=vision_tool)
+        from src.camera_lifecycle import RunCameraSharedReader, camera_session, release_consumers
+        ccfg = cfg.get("camera", {}) or {}
+        w = int(ccfg.get("width", 1280))
+        h = int(ccfg.get("height", 720))
+        f = float(ccfg.get("fps", 15.0))
+        # S4：本进程内唯一 CameraService（单一所有权，with 退出即 stop/close）
+        with camera_session(width=w, height=h, fps=f) as _service:
+            reader = RunCameraSharedReader(_service, width=w, height=h, fps=f)
+            try:
+                return run_camera(cfg, det, pe, clf, rk, device, reader=reader,
+                                  agent_runner=agent_runner, vision_tool=vision_tool)
+            finally:
+                release_consumers(reader)
+        # 不可达（with 退出已 return/释放）
 
     src = Path(input_path) if input_path else Path(cfg["input"]["path"])
 
