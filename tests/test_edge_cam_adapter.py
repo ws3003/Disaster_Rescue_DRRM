@@ -22,6 +22,7 @@ class _FakeCam:
         _FakeCam.instances.append(self)
         self.started = False
         self.i = 0
+        self._next_at = None   # 下一帧应到达的单调时钟点（模拟约 30 FPS，避免 Pi 上忙循环抢 CPU）
 
     def create_video_configuration(self, main=None, controls=None):
         self.main = main
@@ -40,6 +41,18 @@ class _FakeCam:
         self.closed = True
 
     def capture_array(self):
+        # 约 30 FPS 限速：用 time.monotonic() 控制帧间隔(~1/30s)，time.sleep() 等待，
+        # 避免无 sleep 忙循环挤占 Pi 上测试/导入线程。落后超过一帧则重置基准，不连续追帧。
+        now = time.monotonic()
+        if self._next_at is None:
+            self._next_at = now
+        delay = self._next_at - now
+        if delay > 0:
+            time.sleep(delay)
+            now = time.monotonic()
+        self._next_at = self._next_at + (1.0 / 30.0)
+        if self._next_at - now > (1.0 / 30.0):
+            self._next_at = now + (1.0 / 30.0)
         import numpy as np
         self.i += 1
         h, w = self.main["size"][1], self.main["size"][0]
