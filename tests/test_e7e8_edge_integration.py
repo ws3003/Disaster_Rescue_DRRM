@@ -482,3 +482,52 @@ class TestLifecycleGaps:
         assert close_ok is True              # 启动竞态下仍安全完成关闭
         assert reader.close_calls == 1       # reader 只关一次
         assert prov["n"] == 0                # 采样从未在 reader 关闭后重启
+
+
+class TestRecoveryOrdering:
+    """恢复时序：新 E8 事件先于启动恢复被消费，pending 恢复随后仍触发（runner 单点修复回归）。"""
+
+    def test_consume_handles_new_event_before_recovery(self, db):
+        from src.sensor.runner import SensorRunner
+        from src.sensor.loop import SampledSensorLoop
+        from src.sensor.alarm import HighTempAlarm
+
+        class _Stub:
+            def __init__(self):
+                self.order = []
+                self.handled = threading.Event()
+                self.recovered = threading.Event()
+
+            def decide_from_event(self, event):
+                if (isinstance(event, dict) and event.get("type") == "alert_created"
+                        and event.get("level") == 2):
+                    return event.get("alert_id")
+                return None
+
+            def handle_event(self, event):
+                self.order.append(("handle", event["alert_id"]))
+                self.handled.set()
+                return {"handled": True}
+
+            def recover(self, max_tasks=10):
+                self.order.append(("recover",))
+                self.recovered.set()
+                return []
+
+        stub = _Stub()
+        sensor_cfg = sensor_config_from_dict(_SENSOR)
+        loop = SampledSensorLoop(sensor_cfg, _hot_reader(),
+                                 HighTempAlarm(sensor_cfg, db), db, sleep=_fast_sleep)
+        runner = SensorRunner(loop, stub, sleep=_fast_sleep, recover_interval_seconds=60.0)
+        runner.enqueue({"type": "alert_created", "level": 2, "alert_id": "A1"})  # 入队先于启动
+        runner.start()
+        try:
+            assert stub.handled.wait(3.0)        # 新事件已被消费（不必等启动恢复）
+            assert stub.recovered.wait(3.0)      # 恢复入口仍被触发
+            handle_idx = [i for i, e in enumerate(stub.order) if e[0] == "handle"]
+            recover_idx = [i for i, e in enumerate(stub.order) if e[0] == "recover"]
+            assert handle_idx and recover_idx
+            assert handle_idx[0] < recover_idx[0]       # 新事件先于恢复
+            assert stub.order.count(("handle", "A1")) == 1   # 不重复消费
+        finally:
+            runner.close(timeout=1.0)

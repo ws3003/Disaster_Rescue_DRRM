@@ -286,9 +286,9 @@ class TestRecoverScheduling:
         orig = r.recorder.recover
         r.recorder.recover = lambda **kw: (calls.__setitem__("n", calls["n"] + 1) or orig(**kw))
         r.start()
-        time.sleep(0.4)
+        time.sleep(0.7)          # 足够多次空转：首空转执行一次恢复，此后按 recover_interval 节流多次（不再含启动同步一次）
         r.stop()
-        assert calls["n"] >= 2                           # 启动一次 + 间隔触发多次
+        assert calls["n"] >= 2   # 空转+间隔触发多次恢复
 
     def test_recover_exception_continues(self, db):
         r = _mk(db, [], uploader=OkUploader(), recover_interval_seconds=0.05)
@@ -303,6 +303,6 @@ class TestRecoverScheduling:
 
         r.recorder.recover = flaky
         r.start()
-        time.sleep(0.4)
+        time.sleep(0.7)          # 多次空转：首空转失败一次(如前)后按 interval 继续
         assert r.stop() is True
-        assert calls["n"] >= 2                           # 一次失败后仍继续调度
+        assert calls["n"] >= 2   # 一次失败后仍继续调度

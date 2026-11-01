@@ -6,7 +6,7 @@
   保证录像/上传不阻塞采样循环。
 - 事件投递直接复用 `EvidenceRecorder.decide_from_event()` 判定（不复制告警规则），
   同 `alert_id` 的去重由 `handle_event()` 以 `media_evidence.ref_id` 幂等保证。
-- 消费者线程：启动时先 `recover()` 一次，之后按 `recover_interval_seconds` 间隔调度（不在每个采样步骤触发）。
+- 消费者线程：进入事件消费循环后按 `recover_interval_seconds` 间隔调度恢复（不在每个采样步骤触发，也不在启动时同步阻塞事件消费）。
 - 队列满：`put_nowait` 丢弃并记录诊断（含 alert_id/事件类型/原因），不假报已接受/已录像。
 - 关闭：先停采样 → 消费者继续排空已接受事件 → join（带超时）→ `loop.close()`。避免无限等待。
 - 依赖（Reader / Recorder适配器 / Uploader / Clock / Sleep）全部经构造或 `build_runner` 注入，
@@ -126,7 +126,6 @@ class SensorRunner:
     # 消费者线程
     # ------------------------------------------------------------------
     def _consume(self) -> None:
-        self._recover_once()                       # 启动时一次
         while True:
             try:
                 ev = self._queue.get(timeout=_QUEUE_GET_TIMEOUT)
