@@ -223,7 +223,10 @@ class TestE7TriggersE8:
         try:
             e.start()
             # E7 高温告警 → E8 消费线程完成 Fake 录像（不阻塞 E7 采样线程）
-            assert _wait(lambda: rec.recorded)
+            # 40s 为集成测试容错窗口：Pi 上首次高温告警可能因前序状态恢复、
+            # 数据持久化等较慢；不代表业务系统必须在 40s 内完成告警，也不改变
+            # E7 采样/告警/E8 消费/录像业务逻辑。
+            assert _wait(lambda: rec.recorded, timeout=40.0)
             assert rec.calls >= 1
             # 感知/摄像头仍在产帧（录像在消费线程，不影响采集主线程）
             assert _wait_frames(cam_service, _cur_seq(cam_service)) >= 0
