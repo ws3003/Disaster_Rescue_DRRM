@@ -8,14 +8,20 @@
 - low  : 正常 1s 采样周期（time.sleep）
 - fast : 模拟 `_fast_sleep` 的 1ms 语义（time.sleep(min(x, 0.001))）
 
+可选 `--camera`：额外启动一个与原始测试 `cam_service` 等价的真实 `CameraService`
+采集线程，用于隔离验证"CameraService 采集线程是否影响 E7→E8 链路"（实验 A）。
+不带 `--camera` 时行为与之前完全一致（使用 `_CAM_SENTINEL`，不启相机）。
+
 用法：
     python scripts/diag_e7e8.py --mode low
     python scripts/diag_e7e8.py --mode fast
+    python scripts/diag_e7e8.py --mode fast --camera
 
 约束：
 - 独立临时 SQLite；不触正式库 data/drrm.db。
 - FakeReader + FakeRecorder（包装），uploader=None（无真实 OSS）。
-- 不 monkey patch 生产类、不改业务执行顺序、不触真实 GPIO / 相机 / DingTalk。
+- 不 monkey patch 生产类、不改业务执行顺序；`--camera` 仅按官方 CameraService
+  start/close 接口启停采集线程（Picamera2 用与测试等价的 FakeCam mock，只注 sys.modules）。
 - 固定限时 DIAG_WINDOW_SECONDS；fast 即使首拍成功也续跑到窗口满，观察高频稳态。
 - 退出前必须确认采样/消费线程退出；线程未退则**不删除**临时数据库，并明确报告。
 
@@ -33,6 +39,7 @@ import tempfile
 import shutil
 import threading
 import time
+import types
 import traceback as _tb
 from pathlib import Path
 
@@ -46,6 +53,7 @@ from src.sensor.config import sensor_config_from_dict  # noqa: E402
 from src.sensor.reader import FakeReader  # noqa: E402
 from src import e7e8_integration as integ  # noqa: E402
 from src.evidence.recorder import FakeRecorder as _BusinessFakeRecorder  # noqa: E402
+from src.camera_service import CameraService  # noqa: E402
 from scripts.e7e8_runner import E8Config  # noqa: E402
 
 WINDOWS = (os.name == "nt")
@@ -80,9 +88,47 @@ def _sleep_for(mode: str):
 
 
 # EdgeE7E8 仅当 camera_service is None 才报错；recorder 非 None 时 build_evidence
-# 不再用它（e7e8_integration.build_evidence recorder 优先）。传哨兵即可完整复现
-# 集成测试装配，又不启动真相机/采集线程。
+# 不再用它（e7e8_integration.build_evidence recorder 优先）。不使用 --camera 时传哨兵
+# 即可完整复现集成测试装配，又不启动真相机/采集线程。
 _CAM_SENTINEL = object()
+
+
+# ---------------------------------------------------------------------------
+# 与原始测试 `_FakeCam`（tests/test_e7e8_edge_integration.py:57-87）等价的
+# Picamera2 mock：方法逐一对照测试实现，另加 `capture_count` 类级计数器用于观测。
+# 仅 --camera 时经 sys.modules["picamera2"] 注入。
+# ---------------------------------------------------------------------------
+class _DiagFakeCam:
+    capture_count = 0
+
+    def __init__(self):
+        self.started = False
+        self.closed = False
+        self._i = 0
+        self.main = None
+
+    def create_video_configuration(self, main=None, controls=None):
+        self.main = main
+        return {"main": main}
+
+    def configure(self, c):
+        pass
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.started = False
+
+    def close(self):
+        self.closed = True
+
+    def capture_array(self):
+        import numpy as np
+        _DiagFakeCam.capture_count += 1
+        self._i += 1
+        h, w = self.main["size"][1], self.main["size"][0]
+        return np.zeros((h, w, 3), dtype=np.uint8) + (self._i % 255)
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +241,23 @@ def _ok(cond: bool) -> str:
     return "是" if cond else "否"
 
 
-def run_one(mode: str) -> dict:
-    """跑一种模式，返回结果字典（内部完成临时库/线程清理）。"""
+def _start_camera(width, height, fps, queue_size):
+    """按测试 cam_service fixture 等价方式启动 CameraService（Picamera2 用 mock）。
+
+    返回 (camera_service, 采集线程句柄)。注入 sys.modules["picamera2"] 仅本进程内生效；
+    启动 Service 会惰性 import picamera2，故先用 mock 模块取代，再 start。
+    """
+    _DiagFakeCam.capture_count = 0
+    mod = types.ModuleType("picamera2")
+    mod.Picamera2 = _DiagFakeCam
+    sys.modules["picamera2"] = mod
+    svc = CameraService(width=width, height=height, fps=fps, queue_size=queue_size)
+    svc.start()
+    return svc, getattr(svc, "_thread", None)
+
+
+def run_one(mode: str, with_camera: bool = False) -> dict:
+    """跑一种模式，返回结果字典（内部完成临时库/线程/相机清理）。"""
     out: dict = {}
     started_wall = time.time()
     t0 = time.monotonic()
@@ -204,9 +265,12 @@ def run_one(mode: str) -> dict:
     db_path = os.path.join(tmp_dir, "e7e8_diag.db")
     db = Database(db_path=db_path)
     edge = None
+    camera_service = None
+    cam_thread = None
     excepthook_orig = threading.excepthook
     thread_exc: dict = {"tb": None, "name": None}
     dest_paths_cleanup = []
+    cam_cleanup_err: str | None = None
 
     def _hook(args):
         try:
@@ -225,12 +289,18 @@ def run_one(mode: str) -> dict:
 
         cfg = sensor_config_from_dict(_SENSOR)
         try:
+            # --camera：与测试 cam_service 等价启动真实 CameraService 采集线程
+            if with_camera:
+                camera_service, cam_thread = _start_camera(8, 6, 30.0, 8)
+                out["cam_started_ok"] = camera_service.state in ("RUNNING", "STOPPING")
+                out["cam_thread_started"] = cam_thread is not None
+
             edge = integ.EdgeE7E8(
                 cfg,
                 E8Config(enabled=True, record_seconds=0, width=8, height=6,
                          fps=30.0, codec="mp4v", tmp_dir=tmp_dir),
                 db,
-                camera_service=_CAM_SENTINEL,          # 占位：recorder 注入时不建共享录制器
+                camera_service=(camera_service if with_camera else _CAM_SENTINEL),
                 reader=reader,
                 recorder=metric,                        # E8 录像后端 → 包装 FakeRecorder
                 uploader=None,                          # 无真实 OSS
@@ -242,11 +312,8 @@ def run_one(mode: str) -> dict:
             out["mode"] = mode
             out["db_path"] = db_path
             out["failed"] = True
-            # 装配失败：except 只包住**构造语句**，外层 try 主体内它之后的 start/观测
-            # 仍会执行（edge=None 会崩溃）——因此这里必须 return。
-            # Python 保证 return 前先执行 finally：finally 对 edge=None 判 alive 全 False，
-            # 走 else 分支 rmtree 临时库并回填 cleaned=True / cleanup_note，故此处直接返回
-            # 也能把清理结果正确带回。thread_tb 无线程异常，置 None 以免缺键。
+            # finally 会关闭相机并清理临时库；此处直接返回，cleaned 由 finally 回填。
+            # thread_tb 无线程异常，置 None 以免缺键。
             out.setdefault("thread_tb", None)
             return out
 
@@ -292,10 +359,18 @@ def run_one(mode: str) -> dict:
         except Exception:
             qsize = -1
 
+        # 相机观测快照（观测结束、关闭前）
+        if with_camera:
+            out["cam_capture_frames"] = _DiagFakeCam.capture_count
+            out["cam_state_at_end"] = camera_service.state
+            out["cam_fault_at_end"] = camera_service.fault()
+            out["cam_thread_alive_at_end"] = cam_thread is not None and cam_thread.is_alive()
+
         out.update(
             mode=mode,
             elapsed=elapsed_total,
             db_path=db_path,
+            with_camera=with_camera,
             reader=reader, metric=metric,
             stage=stage,
             dropped=dropped, cons_exc=cons_exc, qsize=qsize,
@@ -312,11 +387,23 @@ def run_one(mode: str) -> dict:
         out["consumer_alive_after_run"] = (consumer is not None and consumer.is_alive())
     finally:
         threading.excepthook = excepthook_orig
+        # 关停：先关 E7/E8（edge），再关 CameraService；各自独立记录异常，避免互相覆盖
         try:
             if edge is not None:
                 edge.close(timeout=2.0)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            out["edge_close_err"] = f"{type(exc).__name__}: {exc}"
+        if camera_service is not None:
+            prev_state = camera_service.state
+            try:
+                camera_service.close(timeout=2.0)
+            except Exception as exc:  # noqa: BLE001
+                cam_cleanup_err = f"{type(exc).__name__}: {exc}"
+            out["camera_close_ok"] = (camera_service.state == "CLOSED")
+            out["camera_cleanup_err"] = cam_cleanup_err
+            out["cam_state_before_close"] = prev_state
+            out["cam_thread_alive_final"] = (cam_thread is not None and cam_thread.is_alive())
+
         # 关停后判定线程最终状态，并据此决定是否删除临时资源
         try:
             sampler = edge._thread if edge is not None else None
@@ -328,13 +415,15 @@ def run_one(mode: str) -> dict:
             consumer = None
         alive_s = sampler is not None and sampler.is_alive()
         alive_c = consumer is not None and consumer.is_alive()
+        alive_cam = cam_thread is not None and cam_thread.is_alive()
         out["final_alive_sample"] = alive_s
         out["final_alive_consumer"] = alive_c
+        out["final_alive_camera"] = alive_cam
 
-        if alive_s or alive_c:
+        if alive_s or alive_c or alive_cam:
             out["cleaned"] = False
-            out["cleanup_note"] = (f"线程仍未退出(sample={alive_s},consumer={alive_c})；"
-                                   f"保留临时目录/数据库: {tmp_dir}")
+            out["cleanup_note"] = (f"线程仍未退出(sample={alive_s},consumer={alive_c},"
+                                   f"camera={alive_cam})；保留临时目录/数据库: {tmp_dir}")
         else:
             removed = False
             try:
@@ -362,7 +451,7 @@ def _report(out: dict) -> None:
     thread_tb = out.get("thread_tb")
     mode = out["mode"]
 
-    print("\n===== 诊断结果 " + f"[mode={mode}] =====")
+    print("\n===== 诊断结果 " + f"[mode={mode}" + (" +camera" if out.get("with_camera") else "") + "] =====")
     print(f"采样周期模式    : {'fast(~1ms)' if mode == 'fast' else 'low(1s)'}  "
           f"限时={DIAG_WINDOW_SECONDS}s 实际={out['elapsed']:.2f}s")
     print(f"运行时平台      : {'Windows' if WINDOWS else 'Pi/其他'}")
@@ -383,6 +472,18 @@ def _report(out: dict) -> None:
     print(f"| SQLITE 锁证据(可捕获, 去重) | 不同锁相关traceback数={out['lock_hits']} | "
           f"非SQLite锁异常真实发生次数；观测盲区见下方，不能据此排除所有锁竞争 |")
 
+    if out.get("with_camera"):
+        print("| 相机采集帧数 | {0} | 非E7采样次数 |".format(out.get("cam_capture_frames", "?")))
+        print("| 相机启动 | started_ok={0} thread_started={1} | state={2} |".format(
+            _ok(out.get("cam_started_ok", False)), _ok(out.get("cam_thread_started", False)),
+            out.get("cam_state_at_end", "?")))
+        print("| 相机关闭 | close_ok={0} 关闭后线程alive={1} | state_before={2} fault={3} |".format(
+            _ok(out.get("camera_close_ok", False)), _ok(out.get("cam_thread_alive_final", True)),
+            out.get("cam_state_before_close", "?"),
+            out.get("cam_fault_at_end", "无") if not out.get("cam_fault_at_end") else out.get("cam_fault_at_end")))
+        if out.get("camera_cleanup_err"):
+            print(f"| 相机关闭异常 | {out['camera_cleanup_err']} | 单独记录，不覆盖原始诊断异常 |")
+
     print("---- 观测盲区说明 ----")
     print("- loop._persist 会把部分 sensor_status 等写入异常转为 warning（src/sensor/loop.py _persist），"
           "这些 warning 不会进入线程 excepthook。")
@@ -402,7 +503,7 @@ def _report(out: dict) -> None:
 
     labels = []
     if rd.read_errors > 0 or (thread_tb is not None):
-        labels.append("A(采样/读取异常或采样线程终止)")
+        labels.append("A(采样/读取异常)")
     if f["readings"] == 0 and rd.read_ok > 0:
         labels.append("B(reading 持久化未推进)")
     if f["alerts"] == 0 and rd.read_ok > 0:
@@ -420,18 +521,22 @@ def _report(out: dict) -> None:
     print(f"\n---- 定位建议 ----\n{'；'.join(labels)}")
 
     print("\n---- 线程退出状态 ----")
-    print(f"采样线程存活(最后判定并清理后)={out['final_alive_sample']}  "
-          f"消费线程存活={out['final_alive_consumer']}")
-    print(f"临时资源清理: cleaned={out['cleaned']}");
+    cam_alive_str = "-" if not out.get("with_camera") else str(out.get("final_alive_camera"))
+    print(f"采样线程存活={out['final_alive_sample']}  "
+          f"消费线程存活={out['final_alive_consumer']}  "
+          f"相机线程存活={cam_alive_str}")
+    print(f"临时资源清理: cleaned={out['cleaned']} {out.get('cleanup_note','')}")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="E7→E8 高频采样根因验证（Pi）")
     ap.add_argument("--mode", choices=["low", "fast"], default="low",
                     help="low=1s采样周期; fast=~1ms采样周期(模拟测试 _fast_sleep)")
+    ap.add_argument("--camera", action="store_true",
+                    help="启动与测试 cam_service 等价的 CameraService 采集线程(实验A)")
     args = ap.parse_args()
 
-    out = run_one(args.mode)
+    out = run_one(args.mode, with_camera=args.camera)
     if out.get("error"):
         print(f"\n[装配失败] mode={out.get('mode')} db={out.get('db_path')} 临时库清理={out.get('cleaned')}")
         print(out["error"])
