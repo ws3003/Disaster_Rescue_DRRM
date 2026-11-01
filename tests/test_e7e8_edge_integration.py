@@ -109,10 +109,24 @@ def cam_service():
 
 @pytest.fixture()
 def db():
-    tmp = tempfile.TemporaryDirectory()
-    d = Database(db_path=os.path.join(tmp.name, "e7e8.db"))
-    d._tmpdir = tmp
-    yield d
+    import shutil as _sh
+    import tempfile as _t
+    _dir = _t.mkdtemp(prefix="e7e8db_")
+
+    class _TmpPath:
+        name = _dir
+
+    d = Database(db_path=os.path.join(_dir, "e7e8.db"))
+    d._tmpdir = _TmpPath()
+    try:
+        yield d
+    finally:
+        # Windows 下 SQLite 文件锁可能导致 TemporaryDirectory 清理报 NotADirectoryError；
+        # 隔离测试用 ignore_errors 清理，不影响功能断言。
+        try:
+            _sh.rmtree(_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def _wait(cond, timeout=5.0):
@@ -339,3 +353,132 @@ class _FakeRecorder:
             self.in_record = False
             self.recorded = True
             self._ev.set()
+
+
+# ---------------------------------------------------------------------------
+# E7/E8 生命周期缺口（只读审查 §5 / 本轮任务 §八）
+# ---------------------------------------------------------------------------
+class _CloseCountReader(FakeReader):
+    """可计数的 close，用于验证 E7-only 关闭顺序（reader 不被提前关）。"""
+
+    def __init__(self, provider):
+        super().__init__(provider)
+        self.close_calls = 0
+
+    def close(self):
+        self.close_calls += 1
+
+
+class TestLifecycleGaps:
+    def test_e7_only_close_timeout_keeps_reader_and_retry(self, db):
+        calls = {"n": 0}
+
+        def _prov():
+            calls["n"] += 1
+            return (55.0, 50.0)
+
+        reader = _CloseCountReader(_prov)
+        entered = threading.Event()
+
+        def _uninterruptible_wait(p):
+            entered.set()
+            time.sleep(0.3)          # 模拟采样线程处于不可中断等待
+
+        e = integ.EdgeE7E8(sensor_config_from_dict(_SENSOR), E8Config(enabled=False), db,
+                           reader=reader, sleep=_fast_sleep, wait=_uninterruptible_wait)
+        e.start()
+        assert entered.wait(2.0)              # 采样线程已进入不可中断等待
+        assert e.close(timeout=0.05) is False  # 超时 → 未完全关闭
+        assert reader.close_calls == 0         # 未提前关 reader
+        assert e._thread is not None           # 保留线程引用供重试
+        assert e.close(timeout=2.0) is True    # wait 结束后退出，重试关闭成功
+        assert reader.close_calls == 1
+        assert e.close(timeout=2.0) is True    # 幂等
+
+    def test_e7e8_runner_false_propagates(self, db, monkeypatch):
+        rec = _FakeRecorder()
+        e = integ.EdgeE7E8(sensor_config_from_dict(_SENSOR),
+                           E8Config(enabled=True, record_seconds=0, width=8, height=6,
+                                    fps=30.0, codec="mp4v", tmp_dir=None),
+                           db, camera_service=object(), reader=_hot_reader(),
+                           sleep=_fast_sleep, recorder=rec)
+        monkeypatch.setattr(e.runner, "close", lambda timeout=5.0: False)
+        assert e.close(timeout=0.2) is False   # runner.close False → 外层 False
+
+    def test_shutdown_edge_camera_safe(self):
+        from src import edge_client as ec
+
+        class _S:
+            def __init__(self):
+                self.closed = False
+
+            def stop(self):
+                pass
+
+            def close(self):
+                self.closed = True
+
+        class _E8:
+            def __init__(self, ok):
+                self._ok = ok
+                self.called = False
+
+            def close(self, timeout=5.0):
+                self.called = True
+                return self._ok
+
+        # e7e8 关闭失败 → 不关闭共享 CameraService
+        svc = _S()
+        assert ec._shutdown_edge(svc, None, _E8(False)) is False
+        assert svc.closed is False
+        # 无 e7e8 → 正常关
+        svc2 = _S()
+        assert ec._shutdown_edge(svc2, None, None) is True
+        assert svc2.closed is True
+        # e7e8 关闭成功 → 正常关
+        svc3 = _S()
+        assert ec._shutdown_edge(svc3, None, _E8(True)) is True
+        assert svc3.closed is True
+
+    def test_close_idempotent_e7e8(self, db, cam_service):
+        rec = _FakeRecorder()
+        e = integ.EdgeE7E8(sensor_config_from_dict(_SENSOR),
+                           E8Config(enabled=True, record_seconds=0, width=8, height=6,
+                                    fps=30.0, codec="mp4v", tmp_dir=str(db._tmpdir.name)),
+                           db, camera_service=cam_service, reader=_hot_reader(),
+                           sleep=_fast_sleep, recorder=rec)
+        e.start()
+        assert e.close(timeout=2.0) is True
+        assert e.close(timeout=2.0) is True    # 幂等
+
+    def test_start_immediately_then_close(self, db, monkeypatch):
+        from src.sensor.runner import SensorRunner as _SR
+        gate = threading.Event()
+
+        class _GateRunner(_SR):
+            def start(self):
+                gate.wait()                 # 采样线程卡在 runner.start 前（close 先行）
+                super().start()
+
+        monkeypatch.setattr(integ, "SensorRunner", _GateRunner)
+        prov = {"n": 0}
+
+        def _p():
+            prov["n"] += 1
+            return (55.0, 50.0)
+
+        reader = _CloseCountReader(_p)
+        e = integ.EdgeE7E8(sensor_config_from_dict(_SENSOR),
+                           E8Config(enabled=True, record_seconds=0, width=8, height=6,
+                                    fps=30.0, codec="mp4v", tmp_dir=None),
+                           db, camera_service=object(), reader=reader,
+                           sleep=_fast_sleep, recorder=_FakeRecorder())
+        e.start()                            # 采样线程进入 _GateRunner.start，被 gate 拦住
+        close_ok = e.close(timeout=2.0)      # close 先执行；采样 start 将被停止态拒绝
+        gate.set()                           # 放行 → 采样 start 被拒，不再重启采样
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and (e._thread is not None and e._thread.is_alive()):
+            time.sleep(0.01)
+        assert close_ok is True              # 启动竞态下仍安全完成关闭
+        assert reader.close_calls == 1       # reader 只关一次
+        assert prov["n"] == 0                # 采样从未在 reader 关闭后重启

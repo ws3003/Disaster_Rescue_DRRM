@@ -53,6 +53,8 @@ class SensorRunner:
         self._max_recover = int(max_recover_attempts)
         self._sleep = sleep
         self._stop = threading.Event()
+        self._life_lock = threading.Lock()   # 生命周期状态/资源关闭保护
+        self._lifecycle = "new"              # new / running / stopping / closed
         self._thread: Optional[threading.Thread] = None
         self._last_recover: Optional[float] = None
         self._dropped: list[dict] = []      # 队列满/消费者异常 诊断（有界）
@@ -142,12 +144,22 @@ class SensorRunner:
             self._maybe_recover()
 
     def start(self) -> None:
-        """启动单一消费者线程（同一实例不得重复启动）。"""
-        if self._thread is not None and self._thread.is_alive():
-            raise RuntimeError("runner consumer already started")
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._consume, daemon=True, name="sensor-runner-e8")
-        self._thread.start()
+        """启动单一消费者线程（首次/运行态可启动；已停止或已关闭则拒绝重启）。
+
+        生命周期：``new → running → stopping → closed``。
+        - 已 stopping/closed：直接返回（**不** clear 停止标志、不重启采样/消费者线程）。
+        - 首次/运行态：才 clear 停止标志并启动消费者线程（保证正常首次启动仍可用）。
+        """
+        with self._life_lock:
+            if self._lifecycle in ("stopping", "closed"):
+                return                       # 已请求停止/已关闭：不得重启
+            if self._thread is not None and self._thread.is_alive():
+                raise RuntimeError("runner consumer already started")
+            self._stop.clear()               # 仅允许启动时才清除停止标志
+            self._lifecycle = "running"
+            th = threading.Thread(target=self._consume, daemon=True, name="sensor-runner-e8")
+            self._thread = th
+        th.start()
 
     # ------------------------------------------------------------------
     # 生产采样主循环 / 关闭
@@ -160,9 +172,11 @@ class SensorRunner:
         """
         self.start()
         self._sampling_done.clear()
-        self._sampling_active = True
+        with self._life_lock:
+            # 仅当生命周期允许且未请求停止才真正采样；否则本线程只确认退出（不再触碰 reader）
+            self._sampling_active = (self._lifecycle == "running" and not self._stop.is_set())
         try:
-            while not self._stop.is_set():
+            while self._sampling_active and not self._stop.is_set():
                 self.sample(steps_per_cycle, now=now)
                 self._sleep(self.loop.cfg.sample_period_seconds)
         finally:
@@ -174,7 +188,10 @@ class SensorRunner:
 
         注意：本方法只等待**消费者线程**；`run()` 采样循环（调用方线程）由 `close()` 另行确认。
         """
-        self._stop.set()
+        with self._life_lock:
+            self._stop.set()
+            if self._lifecycle != "closed":
+                self._lifecycle = "stopping"
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=float(timeout))
             if self._thread.is_alive():
@@ -183,26 +200,38 @@ class SensorRunner:
         return True
 
     def close(self, timeout: float = 5.0) -> bool:
-        """停止 + 关闭 Reader（仅当采样循环已退出才关 reader；reader 只关一次，幂等）。
+        """停止 + 关闭 Reader。**仅当采样线程与消费者线程均已确认退出**才关 reader。
 
-        返回 False 表示未完全关闭（消费者 join 超时，或采样线程仍运行而拒绝提前关闭 reader）；
-        该状态下 reader 不会被提前关闭，调用方应在采样线程退出后再次调用 close()。
+        生命周期：``new/running → stopping → closed``；closed 后不可再 start（start 会被拒）。
+        返回 True=完全关闭；False=超时或仍有线程未退出（**不关 reader**、保留引用、可重试）。
+        Reader 只关闭一次（幂等）；重复 close 安全。
         """
-        ok = self.stop(timeout=timeout)
-        if self._sampling_active:
-            # 采样线程可能仍在 loop.step()：等待其退出（有界），确认后才可安全关 reader
-            self._sampling_done.wait(timeout=float(timeout))
-            if self._sampling_active:
-                self._note_drop({"type": "close"}, "sampling_still_running")
-                return False
+        # 幂等：已 closed → 直接返回成功
+        with self._life_lock:
+            if self._lifecycle == "closed":
+                return True
+        ok = self.stop(timeout=timeout)   # 置 stopping + set stop + 有界等待消费者线程
+        # 采样线程：正常进入 run() 后无论 start 被拦还是采样后退出，都必须在 run() finally 置
+        # sampling_done；从未启动 run() 时 sampling_done 为预设 set。有界等待其证实退出。
+        sampled_done = self._sampling_done.wait(timeout=float(timeout))
+        if not ok:
+            self._note_drop({"type": "close"}, "consumer_still_running")
+            return False
+        if not sampled_done:
+            self._note_drop({"type": "close"}, "sampling_still_running")
+            return False
+        # 采样与消费者均确认退出 → 安全关 reader（只关一次）
         if not self._reader_closed:
             try:
                 self.loop.close()
             except Exception as exc:  # noqa: BLE001
                 self._note_drop({"type": "close"}, f"reader_close_exception:{exc}")
                 return False
-            self._reader_closed = True
-        return ok
+            with self._life_lock:
+                self._reader_closed = True
+        with self._life_lock:
+            self._lifecycle = "closed"
+        return True
 
 
 def build_sensor_reader(cfg: SensorConfig, *, provider: Any = None):

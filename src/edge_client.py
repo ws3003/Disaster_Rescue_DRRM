@@ -290,6 +290,24 @@ def _close_camera(svc, cam) -> None:
             print("[EdgeClient] CameraService.close failed (ignored)")
 
 
+def _shutdown_edge(svc, cam, e7e8=None) -> bool:
+    """EdgeClient 退出清理：先关闭 E7/E8（若存在），仅当其完全关闭才关闭共享 CameraService。
+
+    返回 CameraService 是否已关闭。e7e8 未完全关闭时保持摄像头存活、保留引用，交由进程退出回收。
+    """
+    if e7e8 is not None:
+        try:
+            if not e7e8.close():
+                print("[EdgeClient][E7/E8] 关闭未完成；保留共享 CameraService（不提前关闭），"
+                      "交由进程退出回收")
+                return False
+        except Exception as exc:  # noqa: BLE001
+            print(f"[EdgeClient][E7/E8] close failed: {exc}；保留 CameraService")
+            return False
+    _close_camera(svc, cam)
+    return True
+
+
 def _build_e7e8(cfg, camera_service, config_path):
     """按配置在 EdgeClient 进程内启动 E7(+可选 E8) 组合，共享传入的唯一 CameraService。
 
@@ -892,12 +910,7 @@ def main(argv: Optional[list] = None) -> int:
             probe_scheduler=probe_scheduler,
         )
     finally:
-        if e7e8 is not None:
-            try:
-                e7e8.close()      # 先停 E7/E8，释放 E8 订阅
-            except Exception as exc2:  # noqa: BLE001
-                print(f"[EdgeClient][E7/E8] close failed: {exc2}")
-        _close_camera(svc, cam)    # 再释放 EdgeCamAdapter 订阅 + 统一关 CameraService
+        _shutdown_edge(svc, cam, e7e8)
     return 0
 
 
