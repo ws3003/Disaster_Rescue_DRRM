@@ -134,6 +134,24 @@ def _wait_frames(svc, prev_seq, timeout=3.0):
     return -1
 
 
+def _cur_seq(svc):
+    """当前帧号（seq）作等待基准；session_id 是会话号，不可当帧 seq 用。"""
+    latest = svc.latest()
+    return latest.seq if latest is not None else 0
+
+
+def _evidence_row(db):
+    """取最近一条 media_evidence 记录的状态三元组，供 OSS 失败持久化断言。"""
+    try:
+        with db._connect() as c:
+            r = c.execute(
+                "SELECT status, upload_status, retry_count FROM media_evidence "
+                "ORDER BY media_id DESC LIMIT 1").fetchone()
+        return (r[0], r[1], r[2]) if r else None
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Test A：共享摄像头（E8CameraAdapter 订阅与感知同一 CameraService）
 # ---------------------------------------------------------------------------
@@ -152,7 +170,7 @@ class TestSharedCamera:
             assert len(_FakeCam.instances) == 1              # 唯一硬件持有者
             # 两个订阅者：Edge(感知) + E8(取证) 同一 CameraService
             edge = EdgeCamAdapter(cam_service)
-            _wait_frames(cam_service, cam_service.session_id - 1)
+            _wait_frames(cam_service, _cur_seq(cam_service))
             assert e8_adapter.read()[0] is True        # E8 订阅可读帧 (E8CameraAdapter.read->(ok,frame))
             assert edge.capture() is not None           # Edge(感知) 订阅可读帧
             e8_adapter.release()                # E8 释放自身订阅
@@ -194,7 +212,7 @@ class TestE7TriggersE8:
             assert _wait(lambda: rec.recorded)
             assert rec.calls >= 1
             # 感知/摄像头仍在产帧（录像在消费线程，不影响采集主线程）
-            assert _wait_frames(cam_service, cam_service.session_id - 1) >= 0
+            assert _wait_frames(cam_service, _cur_seq(cam_service)) >= 0
         finally:
             e.close()
 
@@ -214,7 +232,7 @@ class TestPerceptionNotBlocked:
             e.start()
             _wait(lambda: rec.in_record, timeout=5.0)
             # 录像进行中：CameraService 仍持续产帧（慢录像不阻塞采集）
-            base = cam_service.session_id
+            base = _cur_seq(cam_service)
             later = _wait_frames(cam_service, base, timeout=3.0)
             assert later > base
             # 采样仍在推进（E7 未被录像卡住）——以循环仍在产帧为证（消费线程独立）
@@ -236,14 +254,20 @@ class TestErrorsAndShutdown:
 
     def test_e7_only_works_without_e8(self, db):
         # e8 disabled：仅 E7 采样告警，不建 E8 订阅、不录像
+        calls = {"n": 0}
+
+        def _prov():
+            calls["n"] += 1
+            return (55.0, 50.0)
+
         e = integ.EdgeE7E8(sensor_config_from_dict(_SENSOR),
-                           E8Config(enabled=False), db, reader=_hot_reader(),
+                           E8Config(enabled=False), db, reader=FakeReader(_prov),
                            sleep=_fast_sleep)
         assert e.mode == "e7"
         e.start()
-        _wait(lambda: True)   # 跑几拍不报错
+        assert _wait(lambda: calls["n"] >= 2)   # E7 采样真实执行 ≥2 次（不是无效等待）
         e.close()
-        e.close()             # 幂等
+        e.close()                               # 幂等
 
     def test_oss_upload_failure_does_not_break(self, cam_service, db):
         rec = _FakeRecorder()
@@ -259,9 +283,13 @@ class TestErrorsAndShutdown:
                            sleep=_fast_sleep, recorder=rec, uploader=_boom_uploader)
         try:
             e.start()
-            _wait(lambda: rec.recorded)   # 录像完成；OSS 失败被 EvidenceRecorder 捕获为 failed
-            assert _wait(lambda: True)
-            # 组合未崩：还能正常关闭
+            _wait(lambda: rec.recorded)   # 录像完成；OSS 失败被 EvidenceRecorder 捕获
+            # OSS 上传失败：media_evidence 应持久化为 failed-awaiting-retry / upload_status=failed
+            assert _wait(lambda: _evidence_row(db) is not None
+                         and _evidence_row(db)[0] == "failed-awaiting-retry")
+            row = _evidence_row(db)
+            assert row is not None and row[1] == "failed" and int(row[2]) >= 1
+            assert cam_service.state == "RUNNING"   # OSS 失败不拖垮检测/采样
         finally:
             e.close()
 
