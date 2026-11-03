@@ -1,6 +1,6 @@
 """V4.4 S3 —— E8CameraAdapter 测试（Mock Picamera2 & CameraService，不连真机）。
 
-覆盖：RGB→BGR（不对称彩帧验证通道不颠倒）、无 180° 旋转、ndarray/独立副本、
+覆盖：原始通道保留、180° 安装方向修正、ndarray/独立副本、
 CameraRecorder 兼容（read 契约/多帧录制/释放）、订阅隔离（不 close 摄像头、
 Edge/A8 并存、release 幂等）。
 """
@@ -14,7 +14,7 @@ import pytest
 
 
 class _DotCam:
-    """生成不对称彩帧（左、上=R；下、右=G；全通道右下角=纯B）以同时捕捉通道颠倒与旋转。"""
+    """生成 BGR 不对称彩帧，同时捕捉错误通道交换与方向。"""
 
     instances = []
 
@@ -41,9 +41,9 @@ class _DotCam:
         import numpy as np
         h, w = self.main["size"][1], self.main["size"][0]
         f = np.zeros((h, w, 3), dtype=np.uint8)
-        f[0, 0, 0] = 255          # 左上 R
+        f[0, 0, 0] = 255          # 左上 B
         f[0, w - 1, 1] = 255      # 右上 G
-        f[h - 1, w - 1, 2] = 255  # 右下 B
+        f[h - 1, w - 1, 2] = 255  # 右下 R
         return f
 
 
@@ -86,16 +86,17 @@ class TestConversion:
         assert isinstance(f, np.ndarray) and f.ndim == 3 and f.shape[2] == 3
         assert f.dtype == np.uint8
 
-    def test_rgb_bgr_no_rotate(self, service):
+    def test_preserves_channels_and_corrects_mount_rotation(self, service):
         from src.e8_camera_adapter import E8CameraAdapter
         a = E8CameraAdapter(service)
         ok, f = _first(a)
         assert ok
-        # 原帧 RGB: 左上R=255 右上G=255 右下B=255；转 BGR 后通道对调
-        assert int(f[0, 0, 2]) == 255    # BGR index2=R=255（未经旋转→仍在左上）
-        assert int(f[0, 7, 1]) == 255    # BGR index1=G=255（右上仍右上→未旋转）
-        assert int(f[5, 7, 0]) == 255    # BGR index0=B=255（右下仍右下→未旋转）
-        # 若误用 180：这些点位通道会错位（本适配器不旋转，应原位成立）
+        import numpy as np
+        expected = np.zeros((6, 8, 3), dtype=np.uint8)
+        expected[5, 7, 0] = 255  # 蓝色从左上移至右下，通道不变
+        expected[5, 0, 1] = 255  # 绿色从右上移至左下
+        expected[0, 0, 2] = 255  # 红色从右下移至左上
+        np.testing.assert_array_equal(f, expected)
 
     def test_independent_copy(self, service):
         from src.e8_camera_adapter import E8CameraAdapter

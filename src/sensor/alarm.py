@@ -125,6 +125,7 @@ class HighTempAlarm:
             trigger = l2 if two_level else l1
             if T >= trigger:
                 self.recovery_count = 0
+                self.state = STATE_ACTIVE
                 if two_level and T >= l2:
                     self.level2_count += 1
                     if self.active_level is not None and self.active_level < 2 \
@@ -140,7 +141,10 @@ class HighTempAlarm:
                 return None  # 单级已活动 / 两级·一级区间持续：去重
             if T >= rv:
                 self.level2_count = 0
-                return None  # 邻近阈值（≥恢复阈值但<触发）: 仍活动, 不推进也不恢复
+                # 恢复要求连续低于 rv；回到滞回区间也必须打断恢复计数。
+                self.recovery_count = 0
+                self.state = STATE_ACTIVE
+                return None  # ≥恢复阈值但<触发：仍活动，不满足恢复条件
             # T < rv: 恢复判定
             self.high_count = 0
             self.level2_count = 0

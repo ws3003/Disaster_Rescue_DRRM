@@ -1,6 +1,6 @@
 """V4.4 S2 EdgeCamAdapter 测试（Mock CameraService/Picamera，不连真机）。
 
-覆盖：RGB→BGR、180°旋转、独立副本、失败契约、订阅隔离、release 不关摄像头、
+覆盖：原始通道保留、180°旋转、独立副本、失败契约、订阅隔离、release 不关摄像头、
 EdgeClient 兼容（EdgeCam(service=…)）。
 """
 
@@ -57,10 +57,10 @@ class _FakeCam:
         self.i += 1
         h, w = self.main["size"][1], self.main["size"][0]
         frame = np.zeros((h, w, 3), dtype=np.uint8)
-        # R=100+i, G=50, B=0 之类的非灰值，便于验证 BGR 通道位置与旋转
-        frame[:, :, 0] = 200 + (self.i % 20)   # R 通道
+        # 模拟 RGB888 捕获的实际 BGR 数组，不能仅凭格式名称重新解释通道。
+        frame[:, :, 0] = 200 + (self.i % 20)   # B 通道
         frame[:, :, 1] = 100                    # G 通道
-        frame[:, :, 2] = 0                      # B 通道
+        frame[:, :, 2] = 0                      # R 通道
         return frame
 
 
@@ -104,39 +104,38 @@ class TestBasic:
         assert isinstance(f, np.ndarray) and f.ndim == 3 and f.shape[2] == 3
 
     def test_bgr_contract_red_blue_not_swapped(self, service):
-        # 输入来自 _FakeCam: RGB888 index0=R高(≈200), index1=G=100, index2=B低(0)。
-        # 修复后 EdgeCamAdapter 执行 RGB→BGR：输出 BGR，index0=B(≈0)、index2=R(≈200)，红蓝不颠倒。
+        # 实际数组 index0=B高、index1=G、index2=R低，输出须保持这些通道。
         import numpy as np
         from src.edge_cam_adapter import EdgeCamAdapter
         a = EdgeCamAdapter(service, width=8, height=6)
         ok, f = _await(a)
         assert ok
-        assert float(f[:, :, 0].mean()) < 50    # BGR index0=B（原 index2=0）—— 蓝色分量
-        assert float(f[:, :, 2].mean()) > 150   # BGR index2=R（原 index0≈200）—— 红色分量
-        assert float(f[:, :, 2].mean()) > float(f[:, :, 0].mean())  # 红 > 蓝
+        assert float(f[:, :, 0].mean()) > 150
+        assert float(f[:, :, 2].mean()) == 0
+        assert float(f[:, :, 0].mean()) > float(f[:, :, 2].mean())
         assert float(f[:, :, 1].mean()) == 100  # G 通道不受交换影响
 
-    def test_bgr_plus_rotate_matches_open_cv_contract_and_differs_from_legacy(self):
-        """同一模拟帧，EdgeCamAdapter 处理段 = cvtColor(RGB2BGR) → ROTATE_180 → copy（新契约）。
-
-        旧 src/camera.py::CameraFrameReader 是"只旋转、不转通道"；修复后 EdgeCamAdapter 的
-        颜色契约与 main( RunCameraSharedReader ) / E8( E8CameraAdapter ) 对齐（输出 BGR），
-        并显式不同于旧语义，确保确实执行了 RGB→BGR。
-        """
+    def test_same_frame_matches_legacy_and_preserves_channels(self):
+        """实际调用新适配器，逐像素验证保留 V4.3 的颜色和方向。"""
         import numpy as np
         import cv2
         rng = np.random.default_rng(7)
         src = rng.integers(0, 256, (12, 10, 3), dtype=np.uint8)
-        # EdgeCamAdapter 新契约（_read_bgr）：cvtColor(RGB2BGR) → ROTATE_180 → copy
-        expected = cv2.rotate(cv2.cvtColor(src, cv2.COLOR_RGB2BGR), cv2.ROTATE_180)
-        # 旧 CameraFrameReader 语义：仅 ROTATE_180，不转通道
-        legacy = cv2.rotate(src, cv2.ROTATE_180)
-        assert not np.array_equal(np.asarray(expected), np.asarray(legacy))  # 确实执行了 RGB→BGR
-        # 红/蓝角点验证：RGB(R=200,B=0) 转 BGR 后 index2=R=200、index0=B=0
-        corner = np.zeros((2, 2, 3), dtype=np.uint8)
-        corner[:, :, 0] = 200            # RGB index0 = R
-        cb = cv2.cvtColor(corner.astype(np.uint8), cv2.COLOR_RGB2BGR)
-        assert int(cb[0, 0, 2]) == 200 and int(cb[0, 0, 0]) == 0
+        from src.edge_cam_adapter import EdgeCamAdapter
+
+        class Reader:
+            def read(self):
+                return True, src
+
+        class Service:
+            def subscribe(self):
+                return Reader()
+
+        actual = EdgeCamAdapter(Service()).capture()
+        np.testing.assert_array_equal(actual, src[::-1, ::-1])
+        assert not np.shares_memory(actual, src)
+        swapped = cv2.rotate(cv2.cvtColor(src, cv2.COLOR_RGB2BGR), cv2.ROTATE_180)
+        assert not np.array_equal(actual, swapped)
 
     def test_rotate_180_flips_space(self, service):
         import numpy as np

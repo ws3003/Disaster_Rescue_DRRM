@@ -3,7 +3,7 @@
 让既有 EdgeClient（其 EdgeCam 依赖 reader 提供 ``iter_frames()``/``stop()``/``width``/``height``，
 ``capture()`` 取 ``(_,_,frame)`` 第三元）改为从 S1 CameraService 订阅取帧，同时保持 V4.3 原有语义：
 
-   CameraService(RGB888) → FrameReader.read() → 本适配器本地：RGB→BGR + copy + ROTATE_180
+   CameraService(RGB888 原始数组) → FrameReader.read() → ROTATE_180 + copy（不交换通道）
 
 - 本适配器不拥有/不关闭摄像头生命周期；release()/stop() 仅解除自身订阅（其余订阅者不受影响）。
 - 失败（FAULT/CLOSED/读取失败）：iter_frames 以 StopIteration 结束，capture() 返回 None，不伪造、不冒充新帧。
@@ -20,10 +20,11 @@ _LOGGER = logging.getLogger("edge_cam_adapter")
 
 
 class EdgeCamAdapter:
-    """把一个已启动的 CameraService 包装成 EdgeCam 兼容 reader（RGB→BGR + 180° 旋转 + copy）。
+    """把一个已启动的 CameraService 包装成 EdgeCam 兼容 reader（180° 旋转 + copy）。
 
-    输入为 CameraService 广播的 RGB888 原始帧；本适配器本地执行 RGB→BGR（OpenCV 按 BGR 解释，
-    Pi 实测 capture_array 需转换），再 ROTATE_180，输出独立 BGR 副本。
+    输入为 CameraService 广播的 RGB888 原始数组。当前 OV5647/Picamera2 真机对照确认，
+    数组可直接供 OpenCV 使用；格式名称不等于 ndarray 的 RGB 通道顺序。
+    与 V4.3 CameraFrameReader 一致：只旋转 180°，不交换红蓝通道，输出独立副本。
     通道语义与 main 路径 RunCameraSharedReader、E8 路径 E8CameraAdapter 一致；CameraService
     本身不承担颜色转换（保持输出原始 RGB888）。
     """
@@ -65,10 +66,8 @@ class EdgeCamAdapter:
             return False, None
         try:
             import cv2
-            # RGB888 → BGR（OpenCV 消费者按 BGR 解释；Pi 实测 capture_array 需转换）。
-            # 先转通道再旋转：RGB→BGR 后 ROTATE_180，结果独立副本。
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            out = cv2.rotate(bgr, cv2.ROTATE_180)
+            # 保持 V4.3 的实际数组通道顺序及摄像头安装方向补偿。
+            out = cv2.rotate(frame, cv2.ROTATE_180)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("EdgeCamAdapter 图像旋转失败: %s", exc)
             return False, None

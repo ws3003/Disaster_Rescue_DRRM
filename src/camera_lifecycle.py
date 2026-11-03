@@ -4,7 +4,7 @@
 - `CameraServiceSession`：context manager，创建并启动**唯一** CameraService，登记消费者适配器，
   退出时按"消费者 release → service.stop → service.close"逆序释放；异常也保证清理；幂等。
 - `RunCameraSharedReader`：供 `src/main.py::run_camera` 使用的鸭子 reader
-  （`fps/width/height` + `iter_frames(stride)` → `(idx, ts, BGR)`，EdgeClient 变换：RGB→BGR+ROTATE180+copy），
+  （`fps/width/height` + `iter_frames(stride)` → `(idx, ts, BGR)`，V4.3 变换：ROTATE180+copy，不交换通道），
   退订只 release 自身 FrameReader。
 
 说明：本仓库中 main.py(摄像头 demo) 与 e7e8_runner(E8)/edge_client(感知) 是**各自独立进程**；
@@ -67,7 +67,7 @@ class RunCameraSharedReader:
     """供 main.py::run_camera 的鸭子 reader（fps/width/height + iter_frames(stride)）。
 
     - 每次 create 订阅该 CameraService 的 FrameReader。
-    - iter_frames(stride) 产 `(frame_idx, ts, BGR)`；用 EdgeClient 变换：RGB→BGR + ROTATE_180 + copy。
+    - iter_frames(stride) 产 `(frame_idx, ts, BGR)`；保留原始通道并 ROTATE_180 + copy。
     - release() 只解除本订阅，不关服务/摄像头。
     """
 
@@ -94,8 +94,7 @@ class RunCameraSharedReader:
         if not ok or frame is None:
             return False, None
         try:
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            bgr = cv2.rotate(bgr, cv2.ROTATE_180)
+            bgr = cv2.rotate(frame, cv2.ROTATE_180)
         except Exception:  # noqa: BLE001
             return False, None
         return True, bgr.copy()

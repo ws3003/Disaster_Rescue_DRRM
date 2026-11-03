@@ -35,9 +35,10 @@ class _FakeCam:
         if self.fail_capture:
             raise RuntimeError("capture boom")
         a = np.zeros((2, 2, 3), dtype=np.uint8)
-        a[..., 0] = 10   # R
+        a[..., 0] = 10   # B：RGB888 实际数组直接供 OpenCV 使用
         a[..., 1] = 20   # G
-        a[..., 2] = 30   # B
+        a[..., 2] = 30   # R
+        a[0, 0] = [11, 22, 33]  # 不对称角点用于验证安装方向补偿
         return a
 
     def stop(self):
@@ -72,8 +73,10 @@ class TestReadBGR:
             ok, frame = src.read()                 # 明确用 R/G/B 不同通道值校验
             assert ok is True
             assert frame.shape[:2] == (2, 2) and frame.shape[2] == 3
-            # RGB=(10,20,30) -> BGR 应为 (B=30, G=20, R=10)
-            assert list(frame[0, 0]) == [30, 20, 10], f"通道序错误: {list(frame[0,0])}"
+            expected = cam.capture_array()[::-1, ::-1]
+            np.testing.assert_array_equal(frame, expected)
+            assert list(frame[0, 0]) == [10, 20, 30]
+            assert list(frame[1, 1]) == [11, 22, 33]
         finally:
             src.release()
 

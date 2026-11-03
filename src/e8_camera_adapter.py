@@ -2,8 +2,8 @@
 
 让 E8（CameraRecorder 的 capture source）改从 S1 CameraService 订阅取帧，而非自建第二个 Picamera2。
 
-转换（保持 E8 原有方向语义：无 180° 旋转）：
-  CameraService(RGB888) → FrameReader.read() → 本适配器本地 RGB→BGR + copy。绝不 ROTATE_180。
+转换（与 V4.3 现场采集的颜色、安装方向一致）：
+  CameraService(RGB888 原始数组) → FrameReader.read() → ROTATE_180 + copy，不交换通道。
 
 接口完全兼容 CameraRecorder 期望的 capture source：
 - read() -> (bool, ndarray)   （VideoWriter 需要的 BGR 帧；成功必为独立副本）
@@ -30,13 +30,14 @@ class E8CameraAdapter:
         self._reader: FrameReader = service.subscribe()
 
     def read(self) -> Tuple[bool, Optional[Any]]:
-        """返回 (ok, bgr ndarray)；失败/失效返回 (False, None)。不旋转。"""
+        """返回方向修正后的 BGR 独立副本；失败/失效返回 (False, None)。"""
         ok, frame = self._reader.read()
         if not ok or frame is None:
             return False, None
         try:
             import cv2
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            # 真机原始数组可直接供 OpenCV 使用；只补偿物理安装的 180° 倒置。
+            bgr = cv2.rotate(frame, cv2.ROTATE_180)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("E8 图像转换失败: %s", exc)
             return False, None

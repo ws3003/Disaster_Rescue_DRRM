@@ -4,7 +4,7 @@ S4 目标在本仓库的落点：
   - `src/camera_lifecycle.py` 提供统一生命周期载体：
     - ``camera_session``：创建/启动**唯一** CameraService，正常/异常退出按
       "消费者 release → service.stop → service.close" 逆序释放；
-    - ``RunCameraSharedReader``：唯一 CameraService 的鸭子 reader（EdgeClient 变换 RGB→BGR+180°+copy）；
+    - ``RunCameraSharedReader``：唯一 CameraService 的鸭子 reader（保留 V4.3 通道、180°+copy）；
     - ``release_consumers``：逆序幂等释放消费者。
   - `src/camera_service.py`：唯一 Picamera2 持有者；stop() 停采集不关硬件，close() 停+释放+CLOSED（幂等）；
     FrameReader.release() 只解除自身订阅，绝不关摄像头。
@@ -280,8 +280,8 @@ def test_edge_release_does_not_affect_e8():
     service.start()
     _await_running(service)
     try:
-        edge = EdgeCamAdapter(service)   # EdgeClient 侧（RGB→BGR+180°）
-        e8 = E8CameraAdapter(service)    # E8 侧（RGB→BGR，不旋转）
+        edge = EdgeCamAdapter(service)   # EdgeClient 侧（保留通道、180°）
+        e8 = E8CameraAdapter(service)    # E8 侧（与旧采集器一致）
         edge.release()                   # EdgeClient 释放自身订阅
         assert service.state == "RUNNING"  # 不影响 E8 / 不关服务
         ok, frame = e8.read()            # E8 仍可读帧

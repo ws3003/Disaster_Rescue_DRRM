@@ -43,6 +43,15 @@ class TestTimeZones:
     def test_sub_micro_rejected(self):
         assert _is_unp(_norm("2026-10-30T08:00:00.123456789+08:00"))
 
+    @pytest.mark.parametrize("suffix", ["Z", "+08:00", ""])
+    @pytest.mark.parametrize("fraction", ["1234567", "1234560"])
+    def test_long_fraction_rejected_before_datetime_truncation(self, suffix, fraction):
+        assert _is_unp(_norm("2026-10-30T08:00:00." + fraction + suffix))
+
+    def test_microsecond_precision_preserved(self):
+        assert _norm("2026-10-30T08:00:00.123456+08:00") == "2026-10-30T00:00:00.123456Z"
+        assert _norm("2026-10-30T08:00:00.123456") == "2026-10-30T08:00:00.123456"
+
 
 class TestReadingTimestampEnqueue:
     def test_reading_z_literal_enqueues_clean(self):

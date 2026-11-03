@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -112,6 +113,10 @@ def _norm_time(value: Any):
         return _UNP
     s = value.strip()
     if s == "":
+        return _UNP
+    # fromisoformat accepts >6 fractional digits and truncates them. Reject
+    # before parsing so distinct source timestamps cannot share a C4 hash.
+    if re.search(r"[.,][0-9]{7,}", s):
         return _UNP
     text = s[:-1] + "+00:00" if s.endswith("Z") else s
     try:

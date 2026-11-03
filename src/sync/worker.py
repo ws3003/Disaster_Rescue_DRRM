@@ -61,7 +61,9 @@ class OutboxWorker:
             return {"sensor_id": row["sensor_id"],
                     "temperature": bridge.exact_number(row.get("temperature")),
                     "humidity": bridge.exact_number(row.get("humidity")),
-                    "device_captured_at": row.get("device_captured_at")}
+                    "device_captured_at": row.get("device_captured_at"),
+                    # 已定义的接收元数据需随副本保留，但不参与业务内容哈希。
+                    "edge_received_at": row.get("edge_received_at")}
         if record_type == "sensor_alert":
             row = self.db.get_sensor_alert(source_record_id)
             if not row:
