@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import os
+import secrets
 import tempfile
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +22,7 @@ from fastapi.testclient import TestClient
 import server.api as api_mod
 import server.media as media_mod
 import server.s4 as s4_mod
+from server import auth as auth_mod
 from server.auth import get_current_user
 from src.database.db import Database
 from src.storage import StorageSignError
@@ -265,3 +268,91 @@ class TestMediaAccess:
         # object_key 保持原值，未把签名 URL 写入数据库
         assert rec["object_key"] == "evidence/m-1.mp4"
         assert "https://evb/" not in rec["object_key"]
+
+
+# ----------------------------------------------------------------------
+# 单租户共享（阶段 0.4-B）：两个独立用户经真实微信 Session 访问同一共享媒体
+# 仅 override s4.get_db（auth 与 s4 共用同一函数对象）；不 override get_current_user，
+# 以真实 Bearer Session 走 `get_current_user` 的哈希/过期/撤销校验。
+# ----------------------------------------------------------------------
+@pytest.fixture()
+def authed_client(db):
+    """覆盖 s4.get_db 指向临时库；保留真实 get_current_user（读同一临时库会话表）。"""
+    overrides = api_mod.app.dependency_overrides
+    had = s4_mod.get_db in overrides
+    original = overrides.get(s4_mod.get_db)
+    overrides[s4_mod.get_db] = lambda: db
+    try:
+        yield TestClient(api_mod.app)
+    finally:
+        if had:
+            overrides[s4_mod.get_db] = original
+        else:
+            overrides.pop(s4_mod.get_db, None)
+
+
+def _make_user_session(db, openid: str, user_id: str, *, expires_in_s: int = 86400):
+    """建一个真实内部用户 + 真实 Session，返回 (user_id, 明文 Bearer token)。"""
+    uid = db.create_user(openid, user_id=user_id)
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in_s)).isoformat(
+        timespec="seconds")
+    db.create_session(uid, auth_mod._sha256(token), expires_at=expires_at)
+    return uid, token
+
+
+class TestSingleTenantShared:
+    def test_shared_media_list_accessible_by_second_user(self, authed_client, db):
+        """用户 A、B 用各自独立 Session 访问同一 sensor 告警的媒体列表，结果一致且不泄内部字段。"""
+        aid = _make_sensor_alert(db)
+        mid = _make_media(db, aid)
+        key = f"sensor:{aid}"
+        ua, ta = _make_user_session(db, "openid-A", "U-A")
+        ub, tb = _make_user_session(db, "openid-B", "U-B")
+        assert ua != ub and ta != tb
+        ha = {"Authorization": f"Bearer {ta}"}
+        hb = {"Authorization": f"Bearer {tb}"}
+        ra = authed_client.get(f"/api/v1/alerts/{key}/media", headers=ha)
+        rb = authed_client.get(f"/api/v1/alerts/{key}/media", headers=hb)
+        assert ra.status_code == 200, ra.text
+        assert rb.status_code == 200, rb.text
+        ids_a = [m["media_id"] for m in ra.json()["data"]]
+        ids_b = [m["media_id"] for m in rb.json()["data"]]
+        assert mid in ids_a and mid in ids_b and ids_a == ids_b
+        text = (ra.text + rb.text).lower()
+        for leak in ("object_key", "local_path", "bucket", "https://evb", "signature"):
+            assert leak not in text, f"泄漏字段: {leak}"
+
+    def test_shared_media_access_by_second_user(self, authed_client, db, monkeypatch):
+        """用户 A、B 各自请求同一 media_id 的签名：均成功，且签名只用同一 DB object_key、ttl=300。"""
+        aid = _make_sensor_alert(db)
+        mid = _make_media(db, aid, object_key="evidence/shared.mp4",
+                          status="success", upload_status="success")
+        fake = _monkey_storage(monkeypatch)
+        ua, ta = _make_user_session(db, "openid-A", "U-A")
+        ub, tb = _make_user_session(db, "openid-B", "U-B")
+        ha = {"Authorization": f"Bearer {ta}"}
+        hb = {"Authorization": f"Bearer {tb}"}
+        ra = authed_client.post(f"/api/v1/media/{mid}/access", headers=ha)
+        # 客户端伪造 query 定位字段应被忽略，签名只来自数据库 object_key
+        rb = authed_client.post(
+            f"/api/v1/media/{mid}/access?object_key=hack&bucket=B&endpoint=E&access_url=U",
+            headers=hb)
+        assert ra.status_code == 200, ra.text
+        assert rb.status_code == 200, rb.text
+        assert ra.json()["data"]["access_url"] and ra.json()["data"]["expires_at"]
+        assert rb.json()["data"]["access_url"] and rb.json()["data"]["expires_at"]
+        assert len(fake.calls) == 2
+        assert set(fake.calls) == {("evidence/shared.mp4", 300)}
+
+    def test_access_media_expired_session_401(self, authed_client, db):
+        """真实过期 Session：接口 A、接口 B 均返回 401（不 Mock get_current_user/Session）。"""
+        aid = _make_sensor_alert(db)
+        mid = _make_media(db, aid)
+        key = f"sensor:{aid}"
+        _uid, tok = _make_user_session(db, "openid-exp", "U-EXP", expires_in_s=-3600)
+        h = {"Authorization": f"Bearer {tok}"}
+        ra = authed_client.get(f"/api/v1/alerts/{key}/media", headers=h)
+        rb = authed_client.post(f"/api/v1/media/{mid}/access", headers=h)
+        assert ra.status_code == 401, ra.text
+        assert rb.status_code == 401, rb.text
