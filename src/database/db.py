@@ -1279,8 +1279,12 @@ class Database:
             or self._now_iso()
         )
 
-        with self._connect() as conn:
-            cursor = conn.execute(
+        now_ms = int(__import__("time").time() * 1000)
+        with self.with_transaction() as tx:
+            prev = tx.execute(
+                "SELECT status FROM sensor_alerts WHERE alert_id = ?", (alert_id,)
+            ).fetchone()
+            cursor = tx.execute(
                 """
                 UPDATE sensor_alerts
                 SET status = ?,
@@ -1293,10 +1297,22 @@ class Database:
                     alert_id,
                 ),
             )
+            changed = cursor.rowcount > 0
+            # P0-2: 从 active 合法转为 resolved 时，在同一事务内把 Outbox 重开为 pending
+            # （gen+1 作 fencing：旧 active 的 ACK 因 status/gen 不匹配不会覆盖新任务）。
+            if changed and new_status == "resolved" and prev is not None and prev["status"] == "active":
+                tx.execute(
+                    """
+                    INSERT INTO sync_outbox (record_type, source_record_id, status, gen, created_at)
+                    VALUES ('sensor_alert', ?, 'pending', 0, ?)
+                    ON CONFLICT(record_type, source_record_id) DO UPDATE SET
+                        status='pending', gen=gen+1, worker_id=NULL, lease_until=NULL,
+                        next_attempt_at=NULL, completed_at=NULL
+                    """,
+                    (alert_id, now_ms),
+                )
 
-        return (
-            cursor.rowcount > 0
-        )
+        return changed
 
     # ================================================================
     # S4 read queries (V4.4 / S4 contract v0.1.0)

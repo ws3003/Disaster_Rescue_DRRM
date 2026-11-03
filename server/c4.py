@@ -11,6 +11,7 @@ Pi 侧 Outbox worker 将待同步记录投递至此; 服务端做幂等接收(c4
 from __future__ import annotations
 
 import hmac
+import json as _json
 import math
 import os
 from datetime import datetime
@@ -34,12 +35,13 @@ _CODES = {
 _C4_RECORD_TYPES = frozenset({"person_event", "reading", "sensor_alert"})
 
 # 需携带业务本体的记录类型（writing 业务只读副本到服务端库 readings/sensor_alerts）
-_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert"})
+_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert", "person_event"})
 
 # 各类型的必填业务字段（缺失 → 整批 400，不产生半写入）
 _BUSINESS_REQUIRED = {
     "reading": frozenset({"sensor_id", "temperature", "device_captured_at"}),
     "sensor_alert": frozenset({"type", "occurred_at"}),
+    "person_event": frozenset({"type", "ts"}),
 }
 
 
@@ -167,6 +169,18 @@ def _write_business_copy(tx, rt: str, sid: str, business: Dict[str, Any], recv_i
              business.get("resolved_at"), business.get("device_captured_at"),
              recv_iso, business.get("reading_id")),
         )
+    elif rt == "person_event":
+        payload = business.get("payload")
+        payload_json = _json.dumps(payload, ensure_ascii=False, default=str) if payload is not None else None
+        tx.execute(
+            """
+            INSERT INTO events
+              (event_id, ts, type, severity, person_id, payload)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (sid, business.get("ts"), business.get("type"), business.get("severity"),
+             business.get("person_id"), payload_json),
+        )
 
 
 def _ingest(db: Database, rec: Dict[str, Any]) -> str:
@@ -216,6 +230,48 @@ def _ingest(db: Database, rec: Dict[str, Any]) -> str:
             return "synced"
         if row["content_hash"] == ch:
             return "already_synced"
+        # sensor_alert 生命周期：active -> resolved 等死亡量使 hash 变化，应更新既有业务副本
+        # （单调推进，不回退；幂等 hash 同步前移以保证重复发送转 already_synced）。
+        if rt == "sensor_alert" and isinstance(business, dict):
+            _h, _why = _hash_of_business(rt, business)
+            if not _h or _h != ch:
+                tx.execute(
+                    """
+                    INSERT INTO c4_content_conflict
+                        (record_type, source_record_id, content_hash, conflict_hash, detected_at, edge_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (rt, sid, row["content_hash"], ch, now, edge),
+                )
+                return "content_mismatch"
+            cur = tx.execute(
+                "SELECT status FROM sensor_alerts WHERE alert_id = ?", (sid,)
+            ).fetchone()
+            new_status = str(business.get("status") or "active").lower()
+            # 单调守卫：已 resolved 的副本不允许被旧 active 回退。
+            if cur is not None and cur["status"] == "resolved" and new_status != "resolved":
+                tx.execute(
+                    """
+                    INSERT INTO c4_content_conflict
+                        (record_type, source_record_id, content_hash, conflict_hash, detected_at, edge_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (rt, sid, row["content_hash"], ch, now, edge),
+                )
+                return "content_mismatch"
+            tx.execute(
+                """
+                UPDATE sensor_alerts
+                SET status = ?, resolved_at = ?
+                WHERE alert_id = ?
+                """,
+                (new_status, business.get("resolved_at"), sid),
+            )
+            tx.execute(
+                "UPDATE c4_idem SET content_hash = ? WHERE record_type = ? AND source_record_id = ?",
+                (ch, rt, sid),
+            )
+            return "synced"
         tx.execute(
             """
             INSERT INTO c4_content_conflict

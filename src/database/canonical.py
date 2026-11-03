@@ -47,6 +47,7 @@ WHITELIST: dict[str, frozenset] = {
     "sensor_alert": frozenset({
         "type", "temperature", "humidity", "threshold",
         "occurred_at", "device_captured_at", "reading_id",
+        "status", "resolved_at",
     }),
 }
 

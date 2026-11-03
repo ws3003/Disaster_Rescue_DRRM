@@ -16,7 +16,7 @@ from src.database.db import Database
 from src.sync import bridge
 
 # 业务数据同步：reading/sensor_alert 在 HTTP 载荷携带完整业务本体（服务端写只读副本）
-_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert"})
+_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert", "person_event"})
 
 
 class OutboxWorker:
@@ -51,9 +51,10 @@ class OutboxWorker:
             row = self.db.get_event(source_record_id)
             if not row:
                 return None
-            # get_event 已把 payload JSON 反序列化为 dict
+            # get_event 已把 payload JSON 反序列化为 dict；ts 为源事件时间（保留原始，不新建）。
             return {"type": row["type"], "severity": row.get("severity"),
-                    "person_id": row.get("person_id"), "payload": row.get("payload")}
+                    "person_id": row.get("person_id"), "payload": row.get("payload"),
+                    "ts": row.get("ts")}
         if record_type == "reading":
             row = self.db.get_reading(source_record_id)
             if not row:
@@ -73,7 +74,8 @@ class OutboxWorker:
                     "humidity": bridge.exact_number(row.get("humidity")),
                     "threshold": bridge.exact_number(row.get("threshold")),
                     "severity": row.get("severity"), "device_captured_at": row.get("device_captured_at"),
-                    "reading_id": row.get("reading_id"), "occurred_at": row.get("occurred_at")}
+                    "reading_id": row.get("reading_id"), "occurred_at": row.get("occurred_at"),
+                    "status": row.get("status"), "resolved_at": row.get("resolved_at")}
         return None
 
     def _hash_for(self, record_type: str, source_record_id: str, biz: Optional[dict] = None) -> tuple[Optional[str], set]:
