@@ -834,9 +834,19 @@ def main(argv: Optional[list] = None) -> int:
     probe_scheduler = None
     perception_cfg = cfg.get("perception", {}) or {}
     if perception_cfg.get("enabled", True):
+        # 阶段一：X4 日志专用 Database（独立于感知构建，不依赖 sensor.enabled）。
+        # 初始化失败仅禁用 X4 日志，绝不影响云端检测/本地兜底。
+        x4_db = None
+        try:
+            from src.database.db import Database
+            x4_db = Database(db_path=str((cfg.get("db") or {}).get("path") or "data/drrm.db"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[EdgeClient] X4 DB init failed, X4 logging disabled: {exc}")
+            x4_db = None
+        # 阶段二：X4 感知组件构建（注入 db）；仅此阶段失败才走既有感知降级。
         try:
             from src.x4.composition import build_x4_perception, make_probe_scheduler
-            perception = build_x4_perception()
+            perception = build_x4_perception(db=x4_db)
             probe_scheduler = make_probe_scheduler(perception)
         except Exception as exc:  # noqa: BLE001
             print(f"[EdgeClient] perception init failed, upload image only: {exc}")

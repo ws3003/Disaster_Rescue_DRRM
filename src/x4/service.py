@@ -19,12 +19,12 @@ from __future__ import annotations
 import logging
 import math
 import time
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.x4.cloud_yolo import CloudError, CloudYoloClient
 from src.x4.config import X4Config
 from src.x4.contracts import EDGE_MODEL_ID, InferenceResult, Detection
-from src.x4.logging import record_inference
+from src.x4.logging import record_event, record_inference
 
 _log = logging.getLogger("x4.service")
 
@@ -198,19 +198,43 @@ class X4DetectionService:
         经标准 logging 记录（不写 agent_logs）；`_probe_in_flight` 由 machine.probe 的 finally 清理；
         不实现后台线程/异步调度器（phase-2 范围）。
         """
+        prev = self.machine.state
         try:
-            return self.machine.probe(probe_fn)
+            status = self.machine.probe(probe_fn)
         except Exception as exc:  # noqa: BLE001——探测异常不得穿透正常帧路径
             _log.warning("x4 probe failed: %s", exc)
             self.machine.consecutive_probe_ok = 0
             self.machine.probe_due_at = self._now() + self.machine.probe_interval
             return "probe_failed"
+        cur = self.machine.state
+        # 冷却到期 → 进入恢复探测（仅状态边沿记录一次；不重复探测心跳）
+        if prev == CLOUD_COOLDOWN and cur == RECOVERY_PROBE:
+            self._event_log("x4_probe", {
+                "event": "enter_recovery",
+                "from_state": prev,
+                "to_state": cur,
+                "cooldown_seconds": self.machine.cooldown_seconds,
+                "reason": "cooldown_expired",
+                "probe_result": status,
+            })
+        # 探测连续成功达标 → 真正恢复云端优先（仅状态边沿记录一次）
+        elif prev == RECOVERY_PROBE and cur == CLOUD_PREFERRED:
+            self._event_log("x4_circuit", {
+                "event": "restored",
+                "from_state": prev,
+                "to_state": cur,
+                "success_count": self.machine.restore_success,
+                "recovery_threshold": self.machine.restore_success,
+                "reason": "recovery_success",
+            })
+        return status
 
     # ---- 核心 ----
     def detect_frame(self, frame: Any) -> List[Any]:
         """返回当前帧下游可用的 `Detector.Detection` 列表。"""
         if self._cloud_viable and self.machine.wants_cloud():
             t0 = self._now()
+            entered_cooldown = False
             try:
                 x4 = self.cloud.infer(frame, timeout=self.cfg.request_timeout_seconds)
                 local = self._to_local_detections(x4)
@@ -220,11 +244,22 @@ class X4DetectionService:
                                                  cloud_error=""), state=self.machine.state)
                 return local
             except CloudError as exc:
-                self.machine.on_cloud_failure()
+                entered_cooldown = self.machine.on_cloud_failure()
                 cloud_error = exc.code
             except Exception:  # noqa: BLE001——云端异常不得吞成"空检测成功"
-                self.machine.on_cloud_failure()
+                entered_cooldown = self.machine.on_cloud_failure()
                 cloud_error = "cloud_invalid_response"
+            # 熔断事件仅在"跨越阈值首次进入 CLOUD_COOLDOWN"的当帧记录一次。
+            if entered_cooldown:
+                self._event_log("x4_circuit", {
+                    "event": "enter_cooldown",
+                    "from_state": CLOUD_PREFERRED,
+                    "to_state": CLOUD_COOLDOWN,
+                    "failure_count": self.machine.consecutive_failures,
+                    "failure_threshold": self.machine.fail_threshold,
+                    "cooldown_seconds": self.machine.cooldown_seconds,
+                    "reason": "failure_threshold",
+                })
             if not getattr(self.cfg, "fallback_enabled", True):
                 # 禁回退：不调用本地推理，记录失败状态与日志，再抛既有异常（不伪造空列表）
                 self._record(result=self._result(provider="cloud", success=False, detections=(),
@@ -266,6 +301,17 @@ class X4DetectionService:
         if not self.record or self.db is None:
             return
         record_inference(self.db, result, input_meta={"state": state})
+
+    def _event_log(self, event: str, output: Dict[str, Any]) -> None:
+        """稀疏状态转换事件日志（熔断 enter_cooldown / 恢复 enter_recovery / restored）。
+
+        - record 关闭或 db 未注入时不写。
+        - meta=None；latency 由 record_event 落 SQL NULL；不伪造 frame_id。
+        - record_event 已隔离异常：写失败仅返回失败结果，不影响状态机/fallback。
+        """
+        if not self.record or self.db is None:
+            return
+        record_event(self.db, event, meta=None, output=output)
 
     @staticmethod
     def _to_local_detections(x4_seq: Tuple[Detection, ...]) -> List[Any]:

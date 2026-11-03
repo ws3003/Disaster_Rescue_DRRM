@@ -22,6 +22,13 @@ from src.x4.contracts import InferenceResult
 
 _log = logging.getLogger("x4.logging")
 
+# X4 日志专用 SQLite 锁等待秒数（不改变 Database 全局默认 5.0）。
+# 正式推理与事件日志写入时显式传入，避免锁等待长时间阻塞检测主链。
+_X4_LOG_TIMEOUT = 1.0
+
+# record_event 允许的事件白名单（熔断/恢复探测），拒绝任意非白名单事件名。
+_ALLOWED_EVENTS = frozenset({"x4_circuit", "x4_probe"})
+
 
 @dataclass(frozen=True)
 class RecordResult:
@@ -108,8 +115,55 @@ def record_inference(
         _log.warning("x4 record_inference rejected: invalid latency_ms=%r", result.latency_ms)
         return RecordResult(ok=False, log_id=None, reason="latency_invalid")
     try:
-        log_id = db.save_agent_log(tid, tname, inp, out, latency)
+        log_id = db.save_agent_log(tid, tname, inp, out, latency, timeout=_X4_LOG_TIMEOUT)
         return RecordResult(ok=True, log_id=log_id)
     except Exception as exc:  # noqa: BLE001 —— 记录失败不得中断推理
         _log.warning("x4 record_inference failed: %s", exc)
         return RecordResult(ok=False, log_id=None, reason="write_failed")
+
+
+def record_event(
+    db: Database,
+    event: str,
+    *,
+    task_id: Optional[str] = None,
+    meta: Optional[Dict[str, Any]] = None,
+    output: Optional[Dict[str, Any]] = None,
+    timeout: float = _X4_LOG_TIMEOUT,
+) -> RecordResult:
+    """记录非推理事件（熔断/恢复探测）到 agent_logs（不新增表/列）。
+
+    - 事件名必须精确命中 `_ALLOWED_EVENTS`（当前 x4_circuit / x4_probe）；其余拒绝。
+    - task_id 复用 `_resolved_task_id`（缺省 `x4-<UUID>`；不伪造 frame_id、不做幂等键）。
+    - tool_name 使用该合法事件名；input 经 `_safe_input_meta` 清洗；output 缺省空 dict，
+      以 `out.setdefault("event", ev)` 保留调用方已提供的 event 字段。
+    - 非推理事件 latency_ms 传 None → agent_logs.latency_ms 存 SQL NULL。
+    - 数据库写入显式传 timeout（默认 `_X4_LOG_TIMEOUT`）。
+    - 异常隔离：任何参数处理/序列化/写库异常均捕获并 logging 一条诊断，返回失败 RecordResult，
+      不向调用方传播（不改变 X4 推理异常处理语义）。
+    """
+    try:
+        ev = event if isinstance(event, str) else None
+        if ev is None:
+            raise ValueError("event must be a string")
+        ev = ev.strip()
+        if not ev or ev not in _ALLOWED_EVENTS:
+            raise ValueError(f"invalid event: {event!r}")
+        tid = _resolved_task_id(task_id)
+        tname = _normalize_tool_name(ev)
+        inp = _safe_input_meta(meta)
+        # output 校验：仅接受 dict（或 None→空 dict）；非 dict 视为调用错误并拒绝
+        out = dict(output) if isinstance(output, dict) else {}
+        out.setdefault("event", ev)
+        try:
+            log_id = db.save_agent_log(tid, tname, inp, out, None, timeout=timeout)
+            return RecordResult(ok=True, log_id=log_id)
+        except Exception as exc:  # noqa: BLE001 —— 序列化/写库失败
+            _log.warning("x4 record_event failed: %s", exc)
+            return RecordResult(ok=False, log_id=None, reason="write_failed")
+    except ValueError as exc:
+        _log.warning("x4 record_event rejected: %s", exc)
+        return RecordResult(ok=False, log_id=None, reason="invalid_event")
+    except Exception as exc:  # noqa: BLE001 —— 预留兜底：参数处理异常不得外泄
+        _log.warning("x4 record_event rejected (unexpected): %s", exc)
+        return RecordResult(ok=False, log_id=None, reason="invalid_event")

@@ -82,16 +82,22 @@ class Database:
     # Connection
     # ================================================================
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self, timeout: float = 5.0) -> sqlite3.Connection:
         """
         Create a SQLite connection.
 
         Row factory is enabled so database rows can be converted
         directly into dictionaries.
+
+        timeout: SQLite busy-wait seconds.  Default 5.0 matches the
+        sqlite3 default, so existing callers are unchanged; callers that
+        need a shorter lock wait (e.g. the X4 inference log writer) pass
+        an explicit value.  WAL / PRAGMA behavior is unchanged.
         """
 
         conn = sqlite3.connect(
-            self.db_path
+            self.db_path,
+            timeout=timeout,
         )
 
         conn.row_factory = (
@@ -845,7 +851,8 @@ class Database:
         tool_name: str,
         input: dict,
         output: dict,
-        latency_ms: int,
+        latency_ms: int | None,
+        timeout: float = 5.0,
     ) -> int:
         """
         Save one Agent tool execution log.
@@ -870,7 +877,7 @@ class Database:
             default=str,
         )
 
-        with self._connect() as conn:
+        with self._connect(timeout=timeout) as conn:
 
             cursor = conn.execute(
                 """
@@ -890,7 +897,7 @@ class Database:
                     tool_name,
                     input_json,
                     output_json,
-                    int(latency_ms),
+                    latency_ms,
                 ),
             )
 
