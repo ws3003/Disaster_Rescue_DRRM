@@ -603,4 +603,15 @@ if _ilu.find_spec("server.auth") is not None:
     from server import auth as auth_module
     app.include_router(auth_module.router)
 
+# ----------------------------------------------------------------------
+# V4.4 微信 Session 用户态查询接口（server.user_api）：仅当 auth 存在时挂载，
+# 复用 get_current_user 认证 + s4 共享查询函数；不改变 S4/C4/V4.3 路由。
+# ----------------------------------------------------------------------
+if (
+    _ilu.find_spec("server.auth") is not None
+    and _ilu.find_spec("server.user_api") is not None
+):
+    from server import user_api as user_api_module
+    app.include_router(user_api_module.router)
+
 # ======================================================================

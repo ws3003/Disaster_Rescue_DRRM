@@ -214,6 +214,133 @@ def _sensor_block(db: Database, offset: int, limit: int) -> List[Dict[str, Any]]
 
 
 # ----------------------------------------------------------------------
+# 共享查询业务函数（无 FastAPI Depends / 无认证；供 S4 Token 路由与
+# 微信 Session 用户态路由共同调用，避免复制第二套查询实现）。
+# 输入：db + 业务参数；输出：(data, meta)。错误经 S4Error 抛出由上层信封处理。
+# ----------------------------------------------------------------------
+def query_system_status(
+    db: Database,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """S4-01 占位：device.status=unknown / modules={}（真实健康聚合由 WP-3 补充）。"""
+    return {"device": {"status": "unknown"}, "modules": {}}, {}
+
+
+def query_alerts(
+    db: Database,
+    category: Optional[str],
+    page: Optional[str],
+    page_size: Optional[str],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """告警列表查询（person / sensor_environment / 合并 + 分页）。"""
+    _validate_category(category)
+    page, page_size = _paging(page, page_size)
+    person_total = db.count_person_alerts(PERSON_EVENT_TYPE)
+    sensor_total = db.count_sensor_alerts()
+
+    if category == "person":
+        items = _person_page(db, page, page_size, person_total)
+        total = person_total
+    elif category == "sensor_environment":
+        items = _sensor_block(db, (page - 1) * page_size, page_size)
+        total = sensor_total
+    else:
+        # 合并：先人员组、后传感器组；全局分页
+        total = person_total + sensor_total
+        items: List[Dict[str, Any]] = []
+        offset = (page - 1) * page_size
+        taken = 0
+        if person_total > 0 and offset < person_total:
+            items = _person_page(db, page, page_size, person_total)
+            taken = len(items)
+        if taken < page_size:
+            s_offset = max(0, offset - person_total)
+            items += _sensor_block(db, s_offset, page_size - taken)
+
+    has_more = page * page_size < total
+    meta = {
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "has_more": has_more,
+    }
+    return items, meta
+
+
+def query_alert_detail(
+    db: Database, alert_key: str
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """告警详情（person / sensor）。"""
+    prefix, raw = _parse_alert_key(alert_key)
+    if prefix == "person":
+        ev = db.get_event(raw)
+        if ev is None:
+            raise S4Error(404, "NOT_FOUND")
+        return _person_item(ev), {}
+    alert = db.get_sensor_alert(raw)
+    if alert is None:
+        raise S4Error(404, "NOT_FOUND")
+    return _sensor_item(alert), {}
+
+
+def query_alert_related(
+    db: Database, alert_key: str
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """告警关联信息（关联读数；media 现为占位，WP-4 补充）。"""
+    prefix, raw = _parse_alert_key(alert_key)
+    readings: List[Dict[str, Any]] = []
+    if prefix == "person":
+        if db.get_event(raw) is None:
+            raise S4Error(404, "NOT_FOUND")
+        # 人员告警不关联环境读数
+    else:
+        alert = db.get_sensor_alert(raw)
+        if alert is None:
+            raise S4Error(404, "NOT_FOUND")
+        rid = alert.get("reading_id")
+        if rid:
+            reading = db.get_reading(rid)
+            if reading is not None:
+                readings = [_reading_item(reading)]
+    return {"readings": readings, "media": [], "media_supported": False}, {}
+
+
+def query_readings(
+    db: Database,
+    sensor_id: Optional[str],
+    start: Optional[str],
+    end: Optional[str],
+    page: Optional[str],
+    page_size: Optional[str],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """环境读数查询（sensor_id / start / end 过滤 + 分页）。"""
+    page, page_size = _paging(page, page_size)
+    if start is not None and end is not None and end < start:
+        raise S4Error(422, "VALIDATION_ERROR")
+
+    total = db.count_readings(
+        sensor_id=sensor_id,
+        start_device_captured_at=start,
+        end_device_captured_at=end,
+    )
+    rows = db.query_readings(
+        sensor_id=sensor_id,
+        start_device_captured_at=start,
+        end_device_captured_at=end,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    items = [_reading_item(r) for r in rows]
+    has_more = page * page_size < total
+    meta = {
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "has_more": has_more,
+    }
+    return items, meta
+
+
+# ----------------------------------------------------------------------
 # 五个只读接口（请求方法/路径/参数/字段/错误码 遵循契约）
 # ----------------------------------------------------------------------
 
@@ -223,8 +350,8 @@ def system_status(
 ) -> JSONResponse:
     try:
         _require_s4_token(authorization)
-        # S4-01：占位，不代表真实设备健康监控
-        return _ok_json({"device": {"status": "unknown"}, "modules": {}})
+        data, meta = query_system_status(None)
+        return _ok_json(data, meta)
     except S4Error as e:
         return _fail_json(e.http_status, e.code)
 
@@ -239,38 +366,8 @@ def alerts(
 ) -> JSONResponse:
     try:
         _require_s4_token(authorization)
-        _validate_category(category)
-        page, page_size = _paging(page, page_size)
-        person_total = db.count_person_alerts(PERSON_EVENT_TYPE)
-        sensor_total = db.count_sensor_alerts()
-
-        if category == "person":
-            items = _person_page(db, page, page_size, person_total)
-            total = person_total
-        elif category == "sensor_environment":
-            items = _sensor_block(db, (page - 1) * page_size, page_size)
-            total = sensor_total
-        else:
-            # 合并：先人员组、后传感器组；全局分页
-            total = person_total + sensor_total
-            items: List[Dict[str, Any]] = []
-            offset = (page - 1) * page_size
-            taken = 0
-            if person_total > 0 and offset < person_total:
-                items = _person_page(db, page, page_size, person_total)
-                taken = len(items)
-            if taken < page_size:
-                s_offset = max(0, offset - person_total)
-                items += _sensor_block(db, s_offset, page_size - taken)
-
-        has_more = page * page_size < total
-        meta = {
-            "page": page,
-            "page_size": page_size,
-            "total": total,
-            "has_more": has_more,
-        }
-        return _ok_json(items, meta)
+        data, meta = query_alerts(db, category, page, page_size)
+        return _ok_json(data, meta)
     except S4Error as e:
         return _fail_json(e.http_status, e.code)
 
@@ -283,16 +380,8 @@ def alert_detail(
 ) -> JSONResponse:
     try:
         _require_s4_token(authorization)
-        prefix, raw = _parse_alert_key(alert_key)
-        if prefix == "person":
-            ev = db.get_event(raw)
-            if ev is None:
-                raise S4Error(404, "NOT_FOUND")
-            return _ok_json(_person_item(ev))
-        alert = db.get_sensor_alert(raw)
-        if alert is None:
-            raise S4Error(404, "NOT_FOUND")
-        return _ok_json(_sensor_item(alert))
+        data, meta = query_alert_detail(db, alert_key)
+        return _ok_json(data, meta)
     except S4Error as e:
         return _fail_json(e.http_status, e.code)
 
@@ -305,24 +394,8 @@ def alert_related(
 ) -> JSONResponse:
     try:
         _require_s4_token(authorization)
-        prefix, raw = _parse_alert_key(alert_key)
-        readings: List[Dict[str, Any]] = []
-        if prefix == "person":
-            if db.get_event(raw) is None:
-                raise S4Error(404, "NOT_FOUND")
-            # 人员告警不关联环境读数
-        else:
-            alert = db.get_sensor_alert(raw)
-            if alert is None:
-                raise S4Error(404, "NOT_FOUND")
-            rid = alert.get("reading_id")
-            if rid:
-                reading = db.get_reading(rid)
-                if reading is not None:
-                    readings = [_reading_item(reading)]
-        return _ok_json(
-            {"readings": readings, "media": [], "media_supported": False}
-        )
+        data, meta = query_alert_related(db, alert_key)
+        return _ok_json(data, meta)
     except S4Error as e:
         return _fail_json(e.http_status, e.code)
 
@@ -339,30 +412,7 @@ def environment_readings(
 ) -> JSONResponse:
     try:
         _require_s4_token(authorization)
-        page, page_size = _paging(page, page_size)
-        if start is not None and end is not None and end < start:
-            raise S4Error(422, "VALIDATION_ERROR")
-
-        total = db.count_readings(
-            sensor_id=sensor_id,
-            start_device_captured_at=start,
-            end_device_captured_at=end,
-        )
-        rows = db.query_readings(
-            sensor_id=sensor_id,
-            start_device_captured_at=start,
-            end_device_captured_at=end,
-            limit=page_size,
-            offset=(page - 1) * page_size,
-        )
-        items = [_reading_item(r) for r in rows]
-        has_more = page * page_size < total
-        meta = {
-            "page": page,
-            "page_size": page_size,
-            "total": total,
-            "has_more": has_more,
-        }
-        return _ok_json(items, meta)
+        data, meta = query_readings(db, sensor_id, start, end, page, page_size)
+        return _ok_json(data, meta)
     except S4Error as e:
         return _fail_json(e.http_status, e.code)

@@ -1,13 +1,14 @@
 {
   "contract_name": "V4.4 S4 Read-Only API Contract",
-  "contract_version": "0.1.0",
+  "contract_version": "0.2.0",
   "status": "draft",
   "scope": {
-    "interfaces": ["S4-01", "S4-02", "S4-03", "S4-04", "S4-06"],
-    "method": "GET only",
+    "interfaces": ["S4-01", "S4-02", "S4-03", "S4-04", "S4-06", "USER", "MEDIA", "AUTH", "C4"],
+    "method": "GET for S4/用户态查询; POST for 媒体签名访问与 login/logout",
     "read_only": true,
     "no_s4_05": true,
-    "no_auth_login_issue_refresh_revoke_endpoints": true
+    "no_auth_login_issue_refresh_revoke_endpoints": true,
+    "note": "scope 扩展至用户态(USER, 微信 Session)与媒体(MEDIA)与登录(AUTH)与 C4（独立认证，非小程序）。原 S4 GET-only 语义保留。"
   },
   "response_envelope": {
     "fields": ["code", "message", "data", "meta"],
@@ -69,6 +70,26 @@
     ],
     "no_login_issue_refresh_revoke_endpoints": true,
     "note": "当前源码尚未实现 S4 入站鉴权；环境变量名称、Token 生命周期与校验细节待后续实施设计确定。"
+  },
+  "authentication_user": {
+    "scheme": "Bearer",
+    "request_header": "Authorization: Bearer <session_token>",
+    "login": { "method": "POST", "path": "/api/v1/auth/login", "auth": "public", "note": "微信 code2session → 内部用户 → Session；返回 session_token/expires_in/user_id；明文仅一次" },
+    "me": { "method": "GET", "path": "/api/v1/auth/me", "auth": "session" },
+    "logout": { "method": "POST", "path": "/api/v1/auth/logout", "auth": "session" },
+    "session_ttl_seconds": 86400,
+    "invalid_revoked_expired_return_401": true,
+    "tokens_small_program_must_not_hold": ["S4_API_TOKEN", "C4_TOKEN", "OSS_ACCESS_KEY", "OSS_ACCESS_SECRET"],
+    "implementation_status": "implemented",
+    "note": "微信登录公开；me/logout 与用户态查询用 Session；TTL=86400s；无/无效/过期/撤销 → 401（源码 server/auth.py）。"
+  },
+  "authentication_c4": {
+    "scheme": "Bearer",
+    "request_header": "Authorization: Bearer <c4_token>",
+    "path": "/api/v1/c4/records",
+    "method": "POST",
+    "implementation_status": "implemented",
+    "note": "C4 独立 `_require_c4_token`（C4_API_TOKEN）；与 S4/微信 Session 分离；不纳入小程序用户态认证。"
   },
   "errors": {
     "INVALID_PARAMETER": { "http_status": 400, "scenario": "参数缺失/类型/格式/取值范围错误，或 alert ID 格式非法" },
@@ -185,6 +206,46 @@
       "note": "device_captured_at 闭区间；默认排序 device_captured_at ASC；start > end 返回 422 VALIDATION_ERROR；received_at 可为 null；温度/湿度单位 ℃/%RH 为展示约定，实际采集与存储单位待 E7 核实。"
     }
   ],
+
+  "endpoints_user": [
+    { "path": "/api/v1/user/system/status", "method": "GET", "auth": "session", "note": "复用 query_system_status；字段沿用 S4-01" },
+    { "path": "/api/v1/user/alerts", "method": "GET", "auth": "session", "params": ["category", "page", "page_size"], "note": "复用 query_alerts；字段/分页沿用 S4-02" },
+    { "path": "/api/v1/user/alerts/{alert_key}", "method": "GET", "auth": "session", "note": "复用 query_alert_detail（person|sensor）" },
+    { "path": "/api/v1/user/alerts/{alert_key}/related", "method": "GET", "auth": "session", "note": "复用 query_alert_related；media 现为占位" },
+    { "path": "/api/v1/user/environment/readings", "method": "GET", "auth": "session", "params": ["sensor_id", "start", "end", "page", "page_size"], "note": "复用 query_readings" }
+  ],
+  "endpoints_auth": [
+    { "path": "/api/v1/auth/login", "method": "POST", "auth": "public", "request": "wx code → {session_token, expires_in, user_id}" },
+    { "path": "/api/v1/auth/me", "method": "GET", "auth": "session" },
+    { "path": "/api/v1/auth/logout", "method": "POST", "auth": "session" }
+  ],
+  "endpoints_media": [
+    { "path": "/api/v1/alerts/{alert_key}/media", "method": "GET", "auth": "session", "data_fields": ["media_id", "media_type", "status", "upload_status", "captured_at", "uploaded_at"], "note": "仅元数据；不下发 object_key/local_path/Bucket/永久URL" },
+    { "path": "/api/v1/media/{media_id}/access", "method": "POST", "auth": "session", "return": { "access_url": "短时签名URL", "expires_at": "ISO, TTL=300s" }, "note": "object_key 由服务端读库；客户端不可指定；401/404/409/503 视代码支持" }
+  ],
+  "media_state": {
+    "source_only_sensor": true,
+    "person_unsupported": true,
+    "evidence_status": {
+      "enum": ["unsupported", "none", "available", "partial"],
+      "unsupported": "告警类型不支持媒体（person）",
+      "none": "支持但不限于无媒体记录",
+      "available": "所有媒体记录 upload_status=success 且元数据完整且 object_key 非空（仅 DB 记录层完整，不代表 OSS 实时可访问）",
+      "partial": "有记录但至少一条未完成/失败/元数据不完整"
+    },
+    "media_service_status": { "enum": ["ok", "unavailable", "unknown"], "note": "独立表达媒体访问服务状态；预留/拟议，后端是否产出该枚举待 WP 核实" },
+    "note": "available 不代表 OSS 对象实时可访问；对象真实访问在签名/拉取时单独验证，不与 evidence_status 混为一谈。"
+  },
+  "status_placeholder_note": "system/status 现为 unknown/modules={}；Pi Edge 心跳、C4 Worker 心跳、X4 health、OSS 状态均未有真实数据源，不得包装为真实监控能力。",
+  "related_media_placeholder_note": "related.media 现为占位([]/false)；告警-媒体真实关联查询尚未实现；媒体列表/签名接口存在不代表 related.media 已完成（后续 WP-4 独立实现）。",
+  "single_tenant": {
+    "all_logged_in_users_share_business_data": true,
+    "session_is_authentication_only": true,
+    "no_user_id_business_isolation": true,
+    "no_device_id_business_isolation": true,
+    "no_change_to_shared_query_semantics": true
+  },
+
   "dto_rules": {
     "person_alert": {
       "source": "events 表（仅 type == high_risk_alert）+ 事件 payload",
