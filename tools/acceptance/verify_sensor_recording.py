@@ -29,8 +29,12 @@ def make_profile(original, baseline, scenario, out):
     if not 5 < baseline < 80:
         raise ValueError("Baseline outside this test profile's supported range; review thresholds manually")
     sensor = copy.deepcopy(original["sensor"])
-    if sensor.get("reader") != "ds18b20":
-        raise ValueError("This tool requires the configured real DS18B20; no Fake fallback")
+    if sensor.get("reader") not in ("ds18b20", "dht11"):
+        raise ValueError("This tool requires the configured real sensor (DS18B20 or DHT11); no Fake fallback")
+    if sensor.get("reader") == "dht11":
+        pin = sensor.get("pin")
+        if not (isinstance(pin, int) and not isinstance(pin, bool) and pin > 0):
+            raise ValueError("DHT11 configuration is missing a valid GPIO pin; refusing to run")
     sensor.update({
         "sensor_id": "acceptance-" + str(sensor["sensor_id"]), "enabled": True,
         "temperature_threshold": round(baseline - 2, 3),
@@ -43,6 +47,27 @@ def make_profile(original, baseline, scenario, out):
             "acceptance": {"test_only": True, "scenario": scenario,
                            "real_baseline_c": baseline, "thresholds_are_test_values": True,
                            "upload_tested": False, "sync_tested": False}}
+
+
+def _build_real_reader(sensor):
+    """按 reader 构造真实读取器（仅 ds18b20/dht11；不允许 Fake 回退）。
+
+    返回 reader 实例；reader 未知或 dht11 缺 pin 时抛 ValueError（明确失败）。
+    """
+    reader_type = sensor.get("reader")
+    if reader_type == "ds18b20":
+        from src.sensor.ds18b20_reader import DS18B20Reader
+        kwargs = {"device_id": sensor.get("device_id")}
+        if sensor.get("device_dir"):
+            kwargs["device_dir"] = sensor["device_dir"]
+        return DS18B20Reader(**kwargs)
+    if reader_type == "dht11":
+        from src.sensor.dht11_reader import DHT11Reader
+        pin = sensor.get("pin")
+        if not (isinstance(pin, int) and not isinstance(pin, bool) and pin > 0):
+            raise ValueError("DHT11 configuration requires a valid GPIO pin; refusing to run")
+        return DHT11Reader(pin=pin, retry_count=sensor.get("read_retry_count") or 0)
+    raise ValueError("Configured sensor must be real DS18B20 or DHT11; no Fake fallback")
 
 
 class ObservedReader:
@@ -171,7 +196,6 @@ def perform(args, out, result):
         raise ValueError("Not on the B branch; stopped without switching branches")
     result.update({"head": git("rev-parse", "HEAD"), "status_before": git("status", "--short"),
                    "alarm_source_sha256": hashlib.sha256((repo / "src/sensor/alarm.py").read_bytes()).hexdigest()})
-    from src.sensor.ds18b20_reader import DS18B20Reader
     from src.sensor.config import load_sensor_config
     from src.camera_service import CameraService
     from src.database.db import Database
@@ -180,12 +204,9 @@ def perform(args, out, result):
 
     original = yaml.safe_load((repo / "config/edge.yaml").read_text(encoding="utf-8"))
     sensor = original["sensor"]
-    if sensor.get("reader") != "ds18b20":
-        raise ValueError("Configured sensor is not real DS18B20")
-    reader_args = {"device_id": sensor.get("device_id")}
-    if sensor.get("device_dir"):
-        reader_args["device_dir"] = sensor["device_dir"]
-    initial = DS18B20Reader(**reader_args)
+    if sensor.get("reader") not in ("ds18b20", "dht11"):
+        raise ValueError("Configured sensor must be real DS18B20 or DHT11")
+    initial = _build_real_reader(sensor)
     try:
         baseline = [initial.read() for _ in range(3)]
     finally:
@@ -200,7 +221,7 @@ def perform(args, out, result):
                    "test_profile": profile, "scope": "real readings with TEST thresholds; local chain only"})
     db_path = out / "TEST_ONLY_DO_NOT_SYNC.db"
     db = Database(db_path=str(db_path))
-    reader = ObservedReader(DS18B20Reader(**reader_args), out / "real_readings.jsonl")
+    reader = ObservedReader(_build_real_reader(sensor), out / "real_readings.jsonl")
     service = CameraService(width=e8_cfg.width, height=e8_cfg.height, fps=e8_cfg.fps)
     recording = ObservedRecorder(build_shared_recorder(service, e8_cfg), reader)
     edge = None

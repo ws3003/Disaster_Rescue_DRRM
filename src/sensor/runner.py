@@ -237,6 +237,7 @@ def build_sensor_reader(cfg: SensorConfig, *, provider: Any = None):
     """按配置装配传感器读取器（E7-01，A2）。
 
     - cfg.reader == 'ds18b20' → DS18B20Reader(device_dir, device_id)（真实 One-Wire 温度）。
+    - cfg.reader == 'dht11' → DHT11Reader(pin, retry_count)（真实温湿度，pin 由配置校验必填）。
     - 否则 → FakeReader(provider)（Windows 测试/离线联调）。provider 缺失时抛错，
       明确可诊断——不把 Fake 当作真实硬件已接入。
 
@@ -246,6 +247,10 @@ def build_sensor_reader(cfg: SensorConfig, *, provider: Any = None):
         from src.sensor.ds18b20_reader import DEFAULT_W1_DIR, DS18B20Reader
         device_dir = cfg.device_dir or str(DEFAULT_W1_DIR)
         return DS18B20Reader(device_dir=device_dir, device_id=cfg.device_id)
+    if cfg.reader == "dht11":
+        from src.sensor.dht11_reader import DHT11Reader
+        # pin 已由 validate_config 保证为正整数（reader=dht11 必填）；retry 一并透传。
+        return DHT11Reader(pin=cfg.pin, retry_count=cfg.read_retry_count)
     if provider is None:
         raise SensorReadError(
             "reader=fake 需要显式 provider（测试/离线联调）；不要将 Fake 当作真实硬件已接入")

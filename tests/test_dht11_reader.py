@@ -114,3 +114,61 @@ class TestImportSafety:
     def test_construct_does_not_touch_hardware(self):
         DHT11Reader()  # 仅构造, 不应创建设备/读取
         DHT11Reader(pin=None)
+
+
+class _FlakyDriver:
+    """前 fail_times 次读 temperature 抛异常的假驱动，用于验证有限重试。"""
+
+    def __init__(self, fail_times, value=25.0):
+        self._fail = fail_times
+        self._value = value
+        self.reads = 0
+
+    @property
+    def temperature(self):
+        self.reads += 1
+        if self.reads <= self._fail:
+            raise OSError("bus timeout")
+        return self._value
+
+    @property
+    def humidity(self):
+        return 40.0
+
+
+class TestDHT11Retry:
+    """V4.4 E7 改造：read_retry_count 有限重试（0=单次，无真实 GPIO）。"""
+
+    def test_retry_zero_tries_once_and_fails(self):
+        d = _FlakyDriver(fail_times=1)
+        r = DHT11Reader(driver_factory=lambda: d, retry_count=0)
+        with pytest.raises(SensorReadError):
+            r.read(now=lambda: TS)
+        assert d.reads == 1  # 只尝试一次，不多调
+
+    def test_retry_two_success_on_third(self):
+        d = _FlakyDriver(fail_times=2)
+        r = DHT11Reader(driver_factory=lambda: d, retry_count=2)
+        rd = r.read(now=lambda: TS)
+        assert d.reads == 3  # 前两次失败, 第三次成功
+        assert isinstance(rd, Reading)
+        assert rd.temperature_c == 25.0 and rd.humidity_pct == 40.0
+
+    def test_retry_two_all_fail_raises_without_fabrication(self):
+        d = _FlakyDriver(fail_times=100)
+        r = DHT11Reader(driver_factory=lambda: d, retry_count=2)
+        with pytest.raises(SensorReadError):
+            r.read(now=lambda: TS)
+        assert d.reads == 3  # retry_count=2 → 最多三次，不无限循环
+
+    def test_all_attempts_fail_keeps_cause(self):
+        d = _FlakyDriver(fail_times=3)
+        r = DHT11Reader(driver_factory=lambda: d, retry_count=2)
+        with pytest.raises(SensorReadError) as ei:
+            r.read(now=lambda: TS)
+        assert isinstance(ei.value.__cause__, OSError)
+
+    def test_driver_init_error_is_not_retried(self):
+        # 依赖缺失/未指定 pin 属配置错误: 只 _ensure_driver 一次即失败, 不经由重试循环
+        with pytest.raises(SensorReadError):
+            DHT11Reader(pin=None, retry_count=5).read(now=lambda: TS)

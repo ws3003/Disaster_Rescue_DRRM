@@ -41,10 +41,13 @@ class SensorConfig:
     temperature_max: float = 85.0
     humidity_min: float = 0.0
     humidity_max: float = 100.0
-    # ---- E7-01 读取器选择（A2）："fake" 或 "ds18b20" ----
+    # ---- E7-01 读取器选择（A2）："fake" | "ds18b20" | "dht11" ----
     reader: str = "fake"
     device_id: str | None = None
     device_dir: str | None = None
+    # DHT11 数据引脚（BCM 编号，正整数）；无未经核实的默认值，须确认接线后注入。
+    # 仅 reader=="dht11" 时强制要求；ds18b20/fake 忽略该项。
+    pin: int | None = None
 
 
 def _is_num(v: Any) -> bool:
@@ -88,8 +91,16 @@ def validate_config(cfg: SensorConfig) -> SensorConfig:
         raise SensorConfigError(
             f"配置非法: 湿度量程需 min<max 且为有限数值 "
             f"(min={cfg.humidity_min!r} max={cfg.humidity_max!r})")
-    if cfg.reader not in ("fake", "ds18b20"):
-        raise SensorConfigError(f"配置非法: reader 仅支持 fake|ds18b20, got {cfg.reader!r}")
+    if cfg.reader not in ("fake", "ds18b20", "dht11"):
+        raise SensorConfigError(f"配置非法: reader 仅支持 fake|ds18b20|dht11, got {cfg.reader!r}")
+    # pin：空（None）或正整数；禁止 bool/字符串/0/-1
+    if cfg.pin is not None and (
+        isinstance(cfg.pin, bool) or not isinstance(cfg.pin, int) or cfg.pin <= 0
+    ):
+        raise SensorConfigError(f"配置非法: pin 须为正整数或 None, got {cfg.pin!r}")
+    # reader=dht11 时 pin 为必填；缺失明确报错，不回退 FakeReader
+    if cfg.reader == "dht11" and cfg.pin is None:
+        raise SensorConfigError("配置非法: reader=dht11 必须指定 pin（GPIO BCM 编号）")
     if cfg.device_id is not None and (
         not isinstance(cfg.device_id, str) or not cfg.device_id.strip()
     ):
@@ -161,6 +172,8 @@ def sensor_config_from_dict(data: Mapping[str, Any]) -> SensorConfig:
         reader=str(data.get("reader", "fake")),
         device_id=data.get("device_id") if isinstance(data.get("device_id"), str) else None,
         device_dir=data.get("device_dir") if isinstance(data.get("device_dir"), str) else None,
+        # 原样传入 pin，交由 validate_config 判定（bool/str/非法值会被拒绝）
+        pin=data.get("pin"),
     ))
 
 

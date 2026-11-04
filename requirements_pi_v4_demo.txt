@@ -36,6 +36,13 @@ PyYAML>=6.0
 psutil>=5.9
 python-dateutil>=2.8
 
+# ---- E7 温湿度传感器 (DHT11; 仅树莓派) ----
+# 真实 DHT11 读取依赖; 惰性 import (adafruit_dht), Windows 开发机无需安装。
+# 还需系统级依赖 (非 pip, 必须在 Pi 上先装):
+#   sudo apt install -y libgpiod2
+# 再:  pip install adafruit-circuitpython-dht
+adafruit-circuitpython-dht
+
 # ---- 说明 ----
 # 服务器端 (FastAPI Gateway / VLM / LLM) 依赖不在此文件:
 # 参考项目 requirements.txt 中 fastapi/uvicorn/python-multipart 部分, 部署在 Windows 端。

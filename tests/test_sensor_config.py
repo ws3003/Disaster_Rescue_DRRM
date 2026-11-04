@@ -108,3 +108,58 @@ class TestA1A2Config:
         assert cfg.reader == "ds18b20"
         assert cfg.device_id == "28-0224e33f1e4e"
         assert int(cfg.temperature_max) == 85
+
+
+class TestDHT11Config:
+    """V4.4 E7 改造：DHT11 + GPIO pin 配置解析与校验。"""
+
+    def _dht(self, **extra):
+        d = {
+            "sensor_id": "dht11-01", "temperature_threshold": 40.0,
+            "sample_period_seconds": 10.0, "confirm_high_count": 3,
+            "confirm_recovery_count": 3, "cooldown_seconds": 600.0,
+            "reader": "dht11", "pin": 4,
+        }
+        d.update(extra)
+        return d
+
+    def test_dht11_with_pin_parsed(self):
+        cfg = sensor_config_from_dict(self._dht())
+        assert cfg.reader == "dht11"
+        assert cfg.pin == 4
+
+    def test_dht11_missing_pin_rejected(self):
+        with pytest.raises(SensorConfigError):
+            sensor_config_from_dict(self._dht(pin=None))
+
+    def test_dht11_pin_absent_key_rejected(self):
+        d = self._dht(); d.pop("pin")
+        with pytest.raises(SensorConfigError):
+            sensor_config_from_dict(d)
+
+    @pytest.mark.parametrize("bad", ["17", True, 0, -1, 4.0, 3.5])
+    def test_dht11_invalid_pin_rejected(self, bad):
+        with pytest.raises(SensorConfigError):
+            sensor_config_from_dict(self._dht(pin=bad))
+
+    def test_ds18b20_allows_pin_none(self):
+        # 原有 DS18B20 配置不受 pin 字段影响（pin 仅 dht11 必填）
+        base = {
+            "sensor_id": "ds18b20-01", "temperature_threshold": 40.0,
+            "sample_period_seconds": 10.0, "confirm_high_count": 3,
+            "confirm_recovery_count": 3, "cooldown_seconds": 600.0,
+            "reader": "ds18b20", "device_id": "28-abc",
+        }
+        cfg = sensor_config_from_dict(base)
+        assert cfg.pin is None
+        assert cfg.reader == "ds18b20"
+
+    def test_fake_allows_pin_none(self):
+        # 默认 fake 仍可无 pin 通过，且不带 pin
+        cfg = sensor_config_from_dict(TestA1A2Config()._base())
+        assert cfg.reader == "fake"
+        assert cfg.pin is None
+
+    def test_unknown_reader_still_rejected(self):
+        with pytest.raises(SensorConfigError):
+            sensor_config_from_dict(self._dht(reader="sht31"))

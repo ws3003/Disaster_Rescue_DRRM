@@ -50,8 +50,31 @@ class TestProfile(unittest.TestCase):
 
     def test_fake_reader_is_not_silently_accepted(self):
         self.original["sensor"]["reader"] = "fake"
-        with self.assertRaisesRegex(ValueError, "real DS18B20"):
+        with self.assertRaisesRegex(ValueError, "real sensor"):
             helper.make_profile(self.original, 26, "level2", Path("results"))
+
+    def test_dht11_profile_accepted(self):
+        d = copy.deepcopy(self.original)
+        d["sensor"].update({"reader": "dht11", "pin": 4})
+        profile = helper.make_profile(d, 26, "level1", Path("results"))
+        self.assertEqual(profile["sensor"]["reader"], "dht11")
+        self.assertEqual(profile["sensor"]["pin"], 4)
+        # DS18B20 原有断言保持：确认次数/冷却/量级
+        self.assertEqual(profile["sensor"]["confirm_high_count"], 3)
+
+    def test_dht11_missing_pin_is_refused(self):
+        d = copy.deepcopy(self.original)
+        d["sensor"].update({"reader": "dht11"})  # 缺 pin
+        with self.assertRaisesRegex(ValueError, "GPIO pin"):
+            helper.make_profile(d, 26, "level2", Path("results"))
+
+    def test_dht11_invalid_pin_is_refused(self):
+        for bad in (True, "17", 0, -1):
+            with self.subTest(bad=bad):
+                d = copy.deepcopy(self.original)
+                d["sensor"].update({"reader": "dht11", "pin": bad})
+                with self.assertRaisesRegex(ValueError, "GPIO pin"):
+                    helper.make_profile(d, 26, "level1", Path("results"))
 
 
 class TestAssessment(unittest.TestCase):
@@ -154,6 +177,30 @@ class TestDatabaseInspection(unittest.TestCase):
             self.assertEqual(helper.inspect_test_db(path)["outbox_count"], 0)
             self.assertEqual(path.read_bytes(), before)
             path.unlink()  # Windows also verifies the inspection connection was released.
+
+
+class TestBuildRealReader(unittest.TestCase):
+    """V4.4 E7 改造：验收构造器同时支持 DS18B20 与 DHT11（不触 GPIO）。"""
+
+    def test_ds18b20_returns_real_reader(self):
+        r = helper._build_real_reader({"reader": "ds18b20", "device_id": "28-abc",
+                                       "device_dir": "/sys/bus/w1/devices"})
+        self.assertEqual(type(r).__name__, "DS18B20Reader")
+
+    def test_dht11_returns_reader_with_pin_and_retry(self):
+        r = helper._build_real_reader({"reader": "dht11", "pin": 4, "read_retry_count": 2})
+        self.assertEqual(r._pin, 4)
+        self.assertEqual(r._retry_count, 2)
+
+    def test_dht11_missing_or_invalid_pin_fails(self):
+        for pin in (None, True, "17", 0, -1):
+            with self.subTest(pin=pin):
+                with self.assertRaisesRegex(ValueError, "GPIO pin"):
+                    helper._build_real_reader({"reader": "dht11", "pin": pin})
+
+    def test_unknown_reader_refused(self):
+        with self.assertRaisesRegex(ValueError, "DS18B20 or DHT11"):
+            helper._build_real_reader({"reader": "fake"})
 
 
 if __name__ == "__main__":

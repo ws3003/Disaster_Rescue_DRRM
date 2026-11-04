@@ -24,11 +24,14 @@ class DHT11Reader:
         self,
         pin: Optional[int] = None,
         driver_factory: Optional[Callable[[], Any]] = None,
+        retry_count: int = 0,
     ) -> None:
         # pin 无默认值；须由确认后的扩展板/GPIO 映射注入。
         self._pin = pin
         # driver_factory: 注入真实或 Mock 驱动, 便于 Windows 单测。
         self._factory = driver_factory
+        # read_retry_count：读取失败时的有限重试次数（0=仅尝试一次，2=最多三次）。
+        self._retry_count = int(retry_count) if retry_count else 0
         self._driver = None
 
     def _ensure_driver(self) -> Any:
@@ -55,12 +58,23 @@ class DHT11Reader:
         """读取一次读数；成功返回 Reading，失败抛 SensorReadError。
 
         校验与异常转换委托给 A1 reader.read_sample / build_reading。
+        仅对读取失败进行有限重试（retry_count 次重试，0=单次）：驱动初始化/依赖缺失/
+        未确认 pin 属配置错误，不重试；最终失败保留最后一次 SensorReadError 上抛，
+        绝不吞异常、不伪造数据、不回退 FakeReader。
         """
-        driver = self._ensure_driver()
-        return _reader.read_sample(
-            lambda: (driver.temperature, driver.humidity),
-            now=now,
-        )
+        driver = self._ensure_driver()  # 配置/依赖错误只暴露一次，不进入重试
+        attempts = int(self._retry_count) + 1  # retry_count=N → 共尝试 N+1 次
+        last: SensorReadError | None = None
+        for _ in range(attempts):
+            try:
+                return _reader.read_sample(
+                    lambda: (driver.temperature, driver.humidity),
+                    now=now,
+                )
+            except SensorReadError as exc:
+                last = exc
+        assert last is not None
+        raise last
 
     def close(self) -> None:
         """释放驱动资源（若驱动对象提供 exit()）。关闭后再 read() 会惰性重建。
