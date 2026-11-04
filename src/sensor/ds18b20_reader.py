@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -36,15 +37,27 @@ def _now_iso() -> str:
 
 
 class DS18B20Reader:
-    """读取一个 DS18B20 温度读数（℃）。仅温度，不含湿度。"""
+    """读取一个 DS18B20 温度读数（℃）。仅温度，不含湿度。
+
+    对 w1_slave 单次瞬态读取失败（空/不完整内容、CRC 失败、缺字段、read_text OSError）
+    做有界重试（retry_count，默认 2；0=单次）。设备定位错误（缺目录/缺文件/无设备）不重试，
+    立即失败；最终仍失败抛 SensorReadError，不伪造读数、不回退 FakeReader。
+    """
 
     def __init__(
         self,
         device_dir: str | Path = DEFAULT_W1_DIR,
         device_id: Optional[str] = None,
+        *,
+        retry_count: int = 2,
+        retry_delay_seconds: float = 0.05,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.base = Path(device_dir)
         self.device_id = device_id
+        self._retry_count = max(0, int(retry_count))
+        self._retry_delay = float(retry_delay_seconds) if retry_delay_seconds > 0 else 0.0
+        self._sleep = sleep
 
     def _resolve_slave(self) -> Path:
         """定位 w1_slave 文件：指定 device_id，或自动发现首个 28-* 设备。"""
@@ -86,16 +99,31 @@ class DS18B20Reader:
 
     def read(self, now: Callable[[], str] | None = None) -> Reading:
         ts = (now or _now_iso)()
+        # 设备定位/发现（缺目录/缺文件/无设备）为结构性错误：保持在重试循环外，立即失败不重试。
         slave = self._resolve_slave()
-        try:
-            text = slave.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            raise SensorReadError(
-                f"读取 w1_slave 失败: {slave}; {type(exc).__name__}: {exc}"
-            ) from exc
-        temp_c = self._parse_w1_slave(text)
-        # DS18B20 仅温度：humidity=None；build_reading 内含 E7-02 量程校验
-        return build_reading(temp_c, None, ts)
+        # 仅对单次瞬态读取失败（空/不完整内容、CRC 失败、缺温度字段、read_text 的 OSError）
+        # 做有限重试：retry_count=0 → 仅 1 次；N → 最多 N+1 次；每次重试前短暂等待。
+        attempts = int(self._retry_count) + 1
+        last: Optional[SensorReadError] = None
+        for i in range(attempts):
+            try:
+                text = slave.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                last = SensorReadError(
+                    f"读取 w1_slave 失败: {slave}; {type(exc).__name__}: {exc}"
+                )
+            else:
+                try:
+                    temp_c = self._parse_w1_slave(text)
+                except SensorReadError as exc:
+                    last = exc  # 空/不完整/CRC/缺字段：可瞬态，尝试重试
+                else:
+                    # DS18B20 仅温度：humidity=None；build_reading 内含 E7-02 量程校验
+                    return build_reading(temp_c, None, ts)
+            if i < attempts - 1:
+                self._sleep(self._retry_delay)
+        assert last is not None
+        raise last
 
     def close(self) -> None:
         """无持久资源；保留以兼容 ReaderProto 约定。"""
