@@ -25,8 +25,9 @@ User=pi
 Group=pi
 # 从环境文件注入: C4_SERVER_BASE_URL, C4_API_TOKEN, (可选 C4_POLL_INTERVAL_SECONDS/…/DRRM_DB)
 EnvironmentFile=/etc/c4-worker.env
-Restart=always
+Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=2
 # 优雅停止: 结束当前 batch 后再退出(不把未成功记录标 success)
 KillSignal=SIGTERM
 TimeoutStopSec=20

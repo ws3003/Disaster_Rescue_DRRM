@@ -88,7 +88,7 @@ rescue:
 # ============================================================
 sensor:
   sensor_id: "ds18b20-01"          # 告警日志/数据库中的传感器逻辑 ID（实际硬件为 DS18B20）
-  enabled: false                     # E7 采样开关（EdgeClient 主入口按此启用）
+  enabled: true                     # E7 采样开关（EdgeClient 主入口按此启用）
   # 读取器选择: "ds18b20"=真实 One-Wire 温度; "fake"=测试/离线 Mock(需显式 provider)
   reader: "ds18b20"
   # DS18B20 One-Wire 设备 (Raspberry Pi 已确认存在; 已识别: 28-0224e33f1e4e, GPIO4)
@@ -110,7 +110,7 @@ sensor:
 # V4.4 E8 视频取证（S1）。enabled=false 时禁用真实录像（不会伪造成功）；
 # 每次告警触发录像时新建一个 PicameraFrameSource，录毕由 CameraRecorder 释放。
 e8:
-  enabled: false               # 生产接线前默认关闭；true 后才尝试真实摄像头录像
+  enabled: true               # 生产接线前默认关闭；true 后才尝试真实摄像头录像
   record_seconds: 10           # 取证录像时长（秒）
   width: 1280                  # 录像分辨率
   height: 720

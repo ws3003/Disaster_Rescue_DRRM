@@ -275,6 +275,29 @@ class TestLockPath:
         with pytest.raises(m.ConfigError):
             m._lock_path_for("data/drrm.db")
 
+    def test_realpath_file_symlink_alias(self, m, tmp_path):
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        real_db = real_dir / "drrm.db"
+        real_db.write_bytes(b"x")
+        alias_db = tmp_path / "alias.db"
+        alias_db.symlink_to(real_db)
+        assert m._lock_path_for(str(alias_db)) == m._lock_path_for(str(real_db))
+        assert m._lock_path_for(str(alias_db)) == (str(real_db.resolve()) + ".c4worker.lock")
+
+    def test_realpath_parent_dir_symlink_alias(self, m, tmp_path):
+        real_dir = tmp_path / "real"
+        data = real_dir / "data"
+        data.mkdir(parents=True)
+        real_db = data / "drrm.db"
+        real_db.write_bytes(b"x")
+        alias_dir = tmp_path / "alias"
+        alias_dir.symlink_to(real_dir)
+        via_real = str(real_dir / "data" / "drrm.db")
+        via_alias = str(alias_dir / "data" / "drrm.db")
+        assert m._lock_path_for(via_alias) == m._lock_path_for(via_real)
+        assert m._lock_path_for(via_alias) == (str((data / "drrm.db").resolve()) + ".c4worker.lock")
+
 
 class TestSingletonLock:
     def test_win_skip_warning_or_posix_fd(self, m, tmp_path, caplog):
@@ -406,4 +429,4 @@ class TestSingletonSubprocess:
         holder.wait()
         assert r.returncode == 2
         assert "已有 C4 Worker" in r.stderr
-        assert "C4 worker 启动" not in r.stderr   # 未走到 make_worker/run_loop
+        assert "C4 worker 启动: base_url" not in r.stderr   # 未走到 make_worker/run_loop

@@ -161,10 +161,14 @@ def _preflight_database(db_path: str) -> None:
 
 
 def _lock_path_for(db_path: str) -> str:
-    """锁文件固定派生自规范化绝对数据库路径；同库同锁，无自定义覆盖。"""
+    """锁文件固定派生自规范化绝对数据库路径；同库同锁，无自定义覆盖。
+
+    使用 os.path.realpath 解析软链接(含父目录软链接)，使真实路径与软链接路径归并为
+    同一锁文件；不解决硬链接 inode 别名(HARDLINK ALIAS REMAINS OUT OF SCOPE)。"""
     if not os.path.isabs(db_path):
         raise ConfigError("DRRM_DB 必须是绝对路径")
-    return f"{os.path.normpath(db_path)}.c4worker.lock"
+    canonical_db_path = os.path.realpath(db_path)
+    return f"{canonical_db_path}.c4worker.lock"
 
 
 def _acquire_singleton_lock(lock_path: str) -> Optional[int]:
