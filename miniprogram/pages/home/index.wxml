@@ -74,6 +74,8 @@ module.exports.pad = function (n) {
     </view>
   </view>
 
+  <monitor-charts category-chart="{{categoryChart}}" temperature-chart="{{temperatureChart}}" mock-mode="{{mockMode}}" bindcategorytap="onChartCategoryTap" />
+
   <scene-media />
 
   <!-- 系统运行状态 S4-01 -->

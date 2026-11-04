@@ -4,6 +4,7 @@ const { createHomeController } = require('../../logic/home-controller');
 const { buildAlertListViews } = require('../../utils/view');
 const { formatClock } = require('../../utils/time');
 const net = require('../../utils/net');
+const { buildCategoryChart, buildTemperatureChart } = require('../../utils/charts');
 
 Page({
   data: {
@@ -19,7 +20,9 @@ Page({
     status: { loading: false, error: null, data: null, view: null },
     person: { loading: false, error: null, items: [], views: [], total: null },
     sensor: { loading: false, error: null, items: [], views: [], total: null },
-    summary: { personText: '—', sensorText: '—' }
+    summary: { personText: '—', sensorText: '—' },
+    categoryChart: buildCategoryChart({}, {}),
+    temperatureChart: buildTemperatureChart({ loading: true })
   },
 
   toggleAlerts() {
@@ -74,6 +77,8 @@ Page({
           views: buildAlertListViews(state.sensor.items, { nowMs: nowMs })
         }),
         summary: state.summary,
+        categoryChart: buildCategoryChart(state.person, state.sensor),
+        temperatureChart: buildTemperatureChart(state.sensor),
         updatedAt: state.loading ? this.data.updatedAt : formatClock(Date.now())
       },
       () => this.animateSummary(state.summary)
@@ -171,6 +176,11 @@ Page({
 
   goAlerts() {
     wx.navigateTo({ url: '/pages/alerts/index' });
+  },
+
+  onChartCategoryTap(event) {
+    if (event.detail.category === 'person') this.goAlertsPerson();
+    else if (event.detail.category === 'sensor_environment') this.goAlertsSensor();
   },
 
   goAlertsPerson() {
