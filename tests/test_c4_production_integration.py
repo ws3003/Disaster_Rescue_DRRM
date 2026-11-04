@@ -1,15 +1,17 @@
 """V4.4 C4 Pi → Windows 单向同步专项验收集成测试（Mock HTTP + 临时 SQLite，不发真实网络）。
 
 端到端：bridge 入队 → OutboxWorker.process_batch(注入 mock post) → outbox success；数据边界
-（media 不入 Outbox、视频/签名 URL 不入载荷）；服务端真实接收 POST /api/v1/c4/records 幂等与持久化。
+（媒体元数据入 Outbox、视频二进制/公开 URL/签名 URL/凭证不入载荷）；服务端真实接收 POST /api/v1/c4/records 幂等与持久化。
 
 关键不变量（本测试的验收断言）：
-1) media_evidence 绝不进入 C4 Outbox。
-2) reading / person_event / sensor_alert 每类都被 bridge 处置：要么进入 Outbox(可同步)，要么进入
+1) media_evidence 元数据属于 C4 Outbox 同步范围（record_type='media_evidence', source_record_id=media_id）。
+2) 视频二进制、公开访问 URL、签名 URL 与 OSS 凭证**不**进入 C4 payload；`object_key` 仅是元数据标识，非访问链接。
+3) reading / person_event / sensor_alert 每类都被 bridge 处置：要么进入 Outbox(可同步)，要么进入
    c4_verify(待人工核验)——绝不静默丢失。（是否入 Outbox 由 canonical 对载荷的解析决定，属既有行为；
    本测试如实记录，不假设某类必然入 Outbox。）
-3) Worker 只发送 Outbox 内记录，成功后全部置 success；重试网络失败保持 retry_wait、不丢数据。
-4) 服务端接收幂等 + 持久化。
+4) Worker 只发送 Outbox 内记录，成功后全部置 success；重试网络失败保持 retry_wait、不丢数据。
+5) 服务端接收幂等 + 持久化。
+6) 媒体可播放性仍由现有 status/upload_status 规则控制（不入 C4 payload 的 URL 不改变该判定）。
 """
 
 from __future__ import annotations
@@ -77,6 +79,22 @@ def _seed(db):
     return {"reading": reading, "sensor_alert": alert, "person_event": person}
 
 
+def _seed_media(db) -> str:
+    """经真实 DAO 创建一条媒体元数据记录（引用真实 sensor_alert，走 Outbox 自动入队）。
+
+    返回 media_id。object_key 为对象标识（元数据），非公开 URL。
+    """
+    media_id = "M-PROD-00000001"
+    # 复用 _seed 创建的告警之一作为 ref_id（真实关联）；无则新建一条 sensor_alert。
+    alert_id = db.save_sensor_alert(type="sensor_over_temp", temperature=52.0, threshold=45.0)
+    db.save_media_evidence(
+        source="sensor", ref_id=alert_id, media_type="video",
+        local_path="/tmp/evidence_prod.mp4", captured_at="2026-10-28T10:00:00Z",
+        status="success", upload_status="success", object_key=f"evidence/{media_id}.mp4",
+        uploaded_at="2026-10-28T10:05:00Z", media_id=media_id)
+    return media_id
+
+
 def _count_outbox(db, rt):
     with db._connect() as c:
         return c.execute("SELECT COUNT(*) FROM sync_outbox WHERE record_type=?",
@@ -96,36 +114,65 @@ def _outbox(db):
 
 
 class TestEnqueueBoundary:
-    def test_media_never_in_outbox_no_silent_loss(self, db):
+    def test_media_evidence_metadata_is_synced_without_silent_loss(self, db):
         info = _seed(db)
-        # media_evidence 永不入 Outbox
-        assert "media_evidence" not in {x[0] for x in _outbox(db)}
-        # 三类每类至少入 Outbox 或 c4_verify（不静默丢失）
-        for rt, res in info.items():
-            assert res["status"] in ("queued", "verified")
-            assert (_count_outbox(db, rt) + _count_verify(db, rt)) >= 1, rt
-        # 记录实际分流（document 既有 canonical 行为）
-        disposition = {rt: ("outbox" if _count_outbox(db, rt) else
-                            ("verify" if _count_verify(db, rt) else "lost"))
-                       for rt in info}
-        return disposition
-
-    def test_payload_no_media_no_signedurl(self, db):
-        _seed(db)
-        sent = {}
+        media_sid = _seed_media(db)                       # 经真实 DAO 创建并自动入队
+        # 媒体元数据确实进入 Outbox，source_record_id=media_id，且非对象键
+        assert "media_evidence" in {x[0] for x in _outbox(db)}
+        assert any(x[0] == "media_evidence" and x[1] == media_sid
+                   and not x[1].startswith("evidence/") for x in _outbox(db))
+        # Worker 处理：媒体不被静默忽略/错误死信，发送成功
+        sent: dict = {}
 
         def fake_post(url, json=None, headers=None, timeout=10.0):
-            sent["payload"] = json
-            return _resp_ok([(r["record_type"], r["source_record_id"])
-                             for r in json["records"]])
+            recs = [(r["record_type"], r["source_record_id"])
+                    for r in (json or {}).get("records") or []]
+            for r in (json or {}).get("records") or []:
+                sent.setdefault(r["record_type"], []).append(r["source_record_id"])
+            return _resp_ok(recs)
+
         w = OutboxWorker(db, "http://win/api/v1", _TOKEN, http_post=fake_post,
                          worker_id="w", now_ms=lambda: 1)
         w.process_batch(max_records=10)
-        if sent.get("payload"):
-            blob = repr(sent["payload"]).lower()
-            assert "media_evidence" not in blob
-            assert "evidence/" not in blob        # 视频对象 key 不混入
-            assert "access_url" not in blob and "sig" not in blob  # 签名 URL 不入载荷
+        assert media_sid in sent.get("media_evidence", [])
+        with db._connect() as c:
+            st = c.execute(
+                "SELECT status FROM sync_outbox "
+                "WHERE record_type='media_evidence' AND source_record_id=?", (media_sid,)).fetchone()[0]
+        assert st == "success"
+        # 三类原有记录仍 non-silent（queued 或 verified）
+        for rt, res in info.items():
+            assert res["status"] in ("queued", "verified"), rt
+            assert (_count_outbox(db, rt) + _count_verify(db, rt)) >= 1, rt
+
+    def test_payload_no_public_url_no_signedurl(self, db):
+        _seed(db)
+        media_sid = _seed_media(db)                       # 真实媒体元数据, object_key=evidence/M-PROD-...mp4
+        sent: dict = {}
+
+        def fake_post(url, json=None, headers=None, timeout=10.0):
+            recs = [(r["record_type"], r["source_record_id"])
+                    for r in (json or {}).get("records") or []]
+            for r in (json or {}).get("records") or []:
+                sent[r["record_type"]] = json           # 按类型保存载荷, 便于精确检查 media payload
+            return _resp_ok(recs)
+
+        w = OutboxWorker(db, "http://win/api/v1", _TOKEN, http_post=fake_post,
+                         worker_id="w", now_ms=lambda: 1)
+        w.process_batch(max_records=10)
+        assert "media_evidence" in sent                  # 媒体 payload 确实被发送
+        media_payload = sent["media_evidence"]
+        blob = repr(media_payload).lower()
+        # 媒体元数据入载荷（非二进制）—— source_record_id=media_id, 且含 object_key 标识
+        assert media_sid.lower() in blob
+        assert "media_evidence" in blob
+        assert f"evidence/{media_sid.lower()}.mp4" in blob          # object_key 为元数据标识, 非 URL
+        assert "object_key" in blob
+        # 安全：无公开 URL / 签名 URL / OSS 凭证 泄漏
+        all_blob = repr(sent).lower()
+        for banned in ("http://", "https://", "access_url", "ossaccesskeyid", "signature=",
+                       "access key", "secret="):
+            assert banned not in all_blob, banned
 
 
 class TestWorkerSend:

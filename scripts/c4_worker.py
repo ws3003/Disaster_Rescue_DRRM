@@ -22,12 +22,15 @@
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import signal
+import sqlite3
 import sys
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from types import FrameType
 from typing import Callable, Optional
@@ -36,6 +39,9 @@ from src.database.db import Database
 from src.sync.worker import OutboxWorker
 
 _LOGGER = logging.getLogger("c4.worker")
+
+# Worker 连接前必须存在的项目核心表（V4.3 persons/events + C4 sync_outbox）。
+_CORE_TABLES = frozenset({"persons", "events", "sync_outbox"})
 
 # 默认值（安全、可配置；不写死业务阈值）
 _DEFAULTS = {
@@ -120,6 +126,81 @@ def make_worker(cfg: WorkerConfig, db: Database) -> OutboxWorker:
     )
 
 
+def _preflight_database(db_path: str) -> None:
+    """Worker 连接前校验数据库：绝对路径 + 文件存在 + SQLite 只读核心表。
+
+    - 不调用 Database()/_initialize_database()，绝不建表/迁移/写库。
+    - 失败抛 ConfigError（由 main 统一返回退出码 2）。
+    """
+    if not os.path.isabs(db_path):
+        raise ConfigError("DRRM_DB 必须是绝对路径，不得使用相对路径静默解析")
+    norm = os.path.normpath(db_path)
+    if not os.path.isfile(norm):
+        raise ConfigError(f"数据库文件不存在: {norm}（不自动创建）")
+    # 只读 URI：转义空格 / ? / #；保留 '/'(POSIX 与 C:)；不替换 Linux 正斜杠。
+    norm_fwd = norm.replace("\\", "/") if os.name == "nt" else norm
+    uri = f"file:{urllib.parse.quote(norm_fwd, safe='/:')}?mode=ro"
+    conn = None
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=2)
+        # sqlite3.connect 是惰性的：非 SQLite / 损坏的 DatabaseError 在首次查询才抛出，
+        # 因此连接与读取都须在同一 try/except sqlite3.Error 内捕获。
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        # 非 SQLite / 损坏 / 只读不可打开 → 明确失败（不伪装成功）
+        raise ConfigError(f"数据库只读打开/读取失败（非 SQLite/损坏/权限）: {exc}") from exc
+    finally:
+        if conn is not None:
+            conn.close()
+    have = {r[0] for r in rows}
+    missing = _CORE_TABLES - have
+    if missing:
+        raise ConfigError(f"数据库缺少核心表: {sorted(missing)}")
+
+
+def _lock_path_for(db_path: str) -> str:
+    """锁文件固定派生自规范化绝对数据库路径；同库同锁，无自定义覆盖。"""
+    if not os.path.isabs(db_path):
+        raise ConfigError("DRRM_DB 必须是绝对路径")
+    return f"{os.path.normpath(db_path)}.c4worker.lock"
+
+
+def _acquire_singleton_lock(lock_path: str) -> Optional[int]:
+    """POSIX flock 单实例锁；成功返回保持打开的 fd（进程生命周期持有）。
+
+    - Linux/POSIX：必须导入 fcntl 并成功 flock(LOCK_EX|LOCK_NB)，否则拒绝启动。
+    - Windows 开发：显式 WARNING 后返回 None（跳过锁，未验证）。
+    - 其他未知平台：拒绝启动（不得静默跳过）。
+    """
+    plat = sys.platform
+    if plat.startswith("win"):
+        _LOGGER.warning("POSIX flock 不可用，开发环境跳过单实例锁（未验证）")
+        return None
+    posix = (plat.startswith("linux")
+             or plat in ("darwin", "freebsd", "openbsd", "netbsd", "solaris"))
+    if not posix:
+        raise ConfigError(f"不支持平台 {plat!r}，无法保证单实例保护")
+    try:
+        import fcntl
+    except ImportError as exc:  # pragma: no cover - POSIX 系统通常自带
+        raise ConfigError("fcntl 不可用（POSIX 平台必需）") from exc
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError as exc:
+        # 打开失败 / 锁目录不可写 / 权限：输出真实原因，不误报"已有实例"
+        raise ConfigError(f"锁文件无法打开: {lock_path} ({exc})") from exc
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        os.close(fd)
+        if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+            raise ConfigError("已有 C4 Worker 实例在运行") from exc
+        raise ConfigError(f"获取进程锁失败(errno={exc.errno}): {exc}") from exc
+    return fd
+
+
 def run_loop(
     worker: OutboxWorker,
     *,
@@ -171,17 +252,36 @@ def main(argv=None) -> int:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _stop)
 
-    db = Database(db_path=cfg.db_path)
-    worker = make_worker(cfg, db)
-    _LOGGER.info("C4 worker 启动: base_url=%s db=%s batch=%d poll=%.1fs",
-                 cfg.base_url, cfg.db_path, cfg.batch_size, cfg.poll_interval_seconds)
+    db = None
+    worker = None
+    lock_fd = None
     try:
+        # 连接前预检 + 单实例锁：ConfigError → 退出码 2，不构造 worker、不进 run_loop
+        _preflight_database(cfg.db_path)
+        lock_fd = _acquire_singleton_lock(_lock_path_for(cfg.db_path))
+        db = Database(db_path=cfg.db_path)
+        worker = make_worker(cfg, db)
+        _LOGGER.info("C4 worker 启动: base_url=%s db=%s batch=%d poll=%.1fs",
+                     cfg.base_url, cfg.db_path, cfg.batch_size, cfg.poll_interval_seconds)
         run_loop(worker, poll_interval_seconds=cfg.poll_interval_seconds,
                  batch_size=cfg.batch_size, should_stop=stop_event.is_set)
+    except ConfigError as exc:
+        _LOGGER.error("C4 worker 启动失败: %s", exc)
+        return 2
     finally:
-        worker_loop_close = getattr(worker, "close", None)
-        if callable(worker_loop_close):
-            worker_loop_close()
+        # 1) Worker close 优先；2) 无论成败最后关闭锁 fd；清理异常只记录，不覆盖原始异常。
+        if worker is not None:
+            worker_loop_close = getattr(worker, "close", None)
+            if callable(worker_loop_close):
+                try:
+                    worker_loop_close()
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning("C4 worker close 异常", exc_info=True)
+        if lock_fd is not None:
+            try:
+                os.close(lock_fd)
+            except OSError:  # noqa: BLE001
+                _LOGGER.warning("C4 worker 锁 fd 关闭异常", exc_info=True)
         _LOGGER.info("C4 worker 退出")
     return 0
 

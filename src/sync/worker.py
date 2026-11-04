@@ -15,8 +15,8 @@ from src.database import canonical
 from src.database.db import Database
 from src.sync import bridge
 
-# 业务数据同步：reading/sensor_alert 在 HTTP 载荷携带完整业务本体（服务端写只读副本）
-_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert", "person_event"})
+# 业务数据同步：reading/sensor_alert/media_evidence 在 HTTP 载荷携带完整业务本体（服务端写只读副本）
+_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert", "person_event", "media_evidence"})
 
 
 class OutboxWorker:
@@ -76,6 +76,15 @@ class OutboxWorker:
                     "severity": row.get("severity"), "device_captured_at": row.get("device_captured_at"),
                     "reading_id": row.get("reading_id"), "occurred_at": row.get("occurred_at"),
                     "status": row.get("status"), "resolved_at": row.get("resolved_at")}
+        if record_type == "media_evidence":
+            row = self.db.get_media_evidence(source_record_id)
+            if not row:
+                return None
+            # canonical 字段(入 hash) + uploaded_at(仅传输落库, 不入 hash)。
+            return {"media_id": row["media_id"], "ref_id": row["ref_id"], "source": row["source"],
+                    "media_type": row["media_type"], "status": row["status"],
+                    "upload_status": row["upload_status"], "object_key": row["object_key"],
+                    "captured_at": row["captured_at"], "uploaded_at": row["uploaded_at"]}
         return None
 
     def _hash_for(self, record_type: str, source_record_id: str, biz: Optional[dict] = None) -> tuple[Optional[str], set]:
@@ -146,8 +155,8 @@ class OutboxWorker:
         if not h:
             return self._to_verify(oid, gen, rt, sid, reasons, biz)
         rec = {"record_type": rt, "source_record_id": sid, "content_hash": h}
-        # 业务数据同步：reading/sensor_alert 携带完整业务本体（精确表示），供服务端写只读副本。
-        # person_event 继续沿用旧协议(无 business)；media_evidence 永不入 Outbox/载荷。
+        # 业务数据同步：reading/sensor_alert/media_evidence 携带完整业务本体（精确表示），供服务端写只读副本。
+        # person_event 继续沿用旧协议(无 business)；非 carrier(无 business 载荷)的未支持类型不入队。
         if rt in _BUSINESS_CARRIERS and isinstance(biz, dict):
             rec["business"] = biz
         payload = {"records": [rec]}

@@ -308,6 +308,41 @@ def _shutdown_edge(svc, cam, e7e8=None) -> bool:
     return True
 
 
+def _make_e8_uploader(
+    e8_enabled: bool,
+    storage_config: str = "config/storage.yaml",
+):
+    """E8 开启时构造 OSS Uploader 注入证据链；E8 关闭直接 None（不创建 Provider）。
+
+    - 惰性导入，避免在模块顶层拉起 OSS 依赖而影响 V4.3 主链路初始化。
+    - E8 关闭时不调用 build_uploader / create_storage（零 Provider 副作用）。
+    - 复用 scripts.e7e8_runner.build_uploader（即 create_storage，provider 看 storage.yaml）。
+    - 类型门控（安全关键）：仅接受 OSSStorageProvider；若 create_storage 因配置回退到
+      LocalStorageProvider 等非 OSS 实现，一律不注入（fail-closed）——否则 Local 写本地会返回
+      {ok:True}，Recorder 会误判为 OSS 上传成功。
+    - 缺失 AK/SK 或 OSS_EVIDENCE_BUCKET 不在构造期阻断：OSSStorageProvider 构造只存 config；
+      缺凭据在"上传期"由 _credentials_for 返回 {ok:False} 或抛 EvidenceBucketNotConfiguredError，
+      Recorder 严格以 res.get("ok") is True 判定，故不会假成功。
+    - 返回 OSSStorageProvider 实例，或 None（E8 关 / 类型不匹配）。
+    """
+    if not e8_enabled:
+        return None
+
+    from scripts.e7e8_runner import build_uploader
+    from src.storage import OSSStorageProvider
+
+    uploader = build_uploader(storage_config)
+
+    if not isinstance(uploader, OSSStorageProvider):
+        # fail-closed：本地/未知 Provider 不得注入生产 E8 证据链，避免假成功。
+        print("[EdgeClient][E8] uploader 类型非 OSSStorageProvider，已 fail-closed 停用 OSS 上传"
+              f"（provider={getattr(uploader, 'name', type(uploader).__name__)}, config={storage_config}）；"
+              "请检查 config/storage.yaml provider 必须为 aliyun_oss。")
+        return None
+
+    return uploader
+
+
 def _build_e7e8(cfg, camera_service, config_path):
     """按配置在 EdgeClient 进程内启动 E7(+可选 E8) 组合，共享传入的唯一 CameraService。
 
@@ -329,7 +364,7 @@ def _build_e7e8(cfg, camera_service, config_path):
     obj = EdgeE7E8(
         sensor_cfg, e8_cfg, db,
         camera_service=camera_service,
-        uploader=None,
+        uploader=_make_e8_uploader(bool(getattr(e8_cfg, "enabled", False))),
         sleep=time.sleep,
     )
     obj.start()

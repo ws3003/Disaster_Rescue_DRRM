@@ -32,16 +32,17 @@ _CODES = {
     "INTERNAL_ERROR": "服务端内部错误",
 }
 
-_C4_RECORD_TYPES = frozenset({"person_event", "reading", "sensor_alert"})
+_C4_RECORD_TYPES = frozenset({"person_event", "reading", "sensor_alert", "media_evidence"})
 
 # 需携带业务本体的记录类型（writing 业务只读副本到服务端库 readings/sensor_alerts）
-_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert", "person_event"})
+_BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert", "person_event", "media_evidence"})
 
 # 各类型的必填业务字段（缺失 → 整批 400，不产生半写入）
 _BUSINESS_REQUIRED = {
     "reading": frozenset({"sensor_id", "temperature", "device_captured_at"}),
     "sensor_alert": frozenset({"type", "occurred_at"}),
     "person_event": frozenset({"type", "ts"}),
+    "media_evidence": frozenset({"status", "ref_id", "media_type", "source"}),
 }
 
 
@@ -128,6 +129,9 @@ def _validate_record(rec: Dict[str, Any]) -> None:
     if rt not in _C4_RECORD_TYPES or not isinstance(sid, str) or not sid or not isinstance(ch, str) or not ch:
         raise HTTPException(status_code=400, detail="invalid record fields")
     _validate_business(rt, rec.get("business"))
+    if rt == "media_evidence" and isinstance(rec.get("business"), dict):
+        # media：INSERT/UPDATE 共用字段校验（含 media_id==sid、source、media_type、枚举、ref_id）
+        _media_validate(rec["business"], sid)
 
 
 def _hash_of_business(rt: str, business: Dict[str, Any]):
@@ -136,6 +140,101 @@ def _hash_of_business(rt: str, business: Dict[str, Any]):
         return None, {"invalid"}
     view = _bridge._canonical_view(rt, business)
     return _canonical.classify(rt, view, version=_bridge.SYNC_NORM_VERSION)
+
+
+MEDIA_STATUS_MP = {
+    "pending": {"pending", "processing", "success", "failed-awaiting-retry"},
+    "processing": {"processing", "success", "failed-awaiting-retry"},
+    "success": {"success"},
+    "failed-awaiting-retry": {"failed-awaiting-retry", "success"},
+}
+MEDIA_UPLOAD_MP = {
+    None: {None, "pending", "uploading", "success", "failed"},   # NULL 初始：可保持/前进
+    "pending": {"pending", "uploading", "success", "failed"},
+    "uploading": {"uploading", "success", "failed"},
+    "success": {"success"},
+    "failed": {"failed", "success"},
+}
+
+
+def _media_playable(status, upload_status, object_key) -> bool:
+    """唯一可播放条件：status==success ∧ upload_status==success ∧ object_key 非空。"""
+    return bool(status == "success" and upload_status == "success" and object_key)
+
+
+def _media_validate(business: Any, sid: str) -> None:
+    """media 业务校验（INSERT/UPDATE 共用）。business 缺失=旧客户端兼容（应已由 _validate_business 处理）。"""
+    if not isinstance(business, dict):
+        raise HTTPException(400, "media business 必须为对象")
+    if business.get("media_id") != sid:
+        raise HTTPException(400, "media business.media_id 与 source_record_id 不一致")
+    if business.get("source") != "sensor":
+        raise HTTPException(400, "media source 必须为 sensor")
+    if business.get("media_type") not in ("image", "video"):
+        raise HTTPException(400, "media media_type 必须为 image/video")
+    st = business.get("status")
+    if st not in MEDIA_STATUS_MP:
+        raise HTTPException(400, f"非法 media status: {st!r}")
+    up = business.get("upload_status")
+    if up is not None and up not in MEDIA_UPLOAD_MP:
+        raise HTTPException(400, f"非法 media upload_status: {up!r}")
+    if not business.get("ref_id"):
+        raise HTTPException(400, "media ref_id 必填")
+
+
+def _media_conflict(tx, rt: str, sid: str, old_hash: str, new_hash: str,
+                    now: int, edge: Any) -> str:
+    """媒体 illegal/revert 冲突：记审计、不推进 idem hash。返回 content_mismatch。"""
+    tx.execute(
+        """
+        INSERT INTO c4_content_conflict
+            (record_type, source_record_id, content_hash, conflict_hash, detected_at, edge_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (rt, sid, old_hash, new_hash, now, edge),
+    )
+    return "content_mismatch"
+
+
+def _media_first_receive_guard(db, rec: Dict[str, Any], seen: set) -> None:
+    """批次预校验：媒体首收 status=success 需可播放（INSERT 期强制，整批400、零写入）。
+
+    在 receive 批次预校验阶段、任何 _ingest 之前对所有 media 记录执行，保证违反
+    "首收 success 需可播放" 的批次整体 400、不产生半写入（修复 batch 原子性契约）。
+
+    分层语义（与 _ingest 首收 playable 守卫条件逐条一致，_ingest 守卫保留为纵深防御）：
+    1. 非 media_evidence 直接返回。
+    2. key=(record_type, source_record_id)；批次内已出现同键 → 放行交还 _ingest
+       （幂等/UPDATE/content_mismatch 由原逻辑决定），不去重/排序/合并/覆盖。
+    3. seen.add 先于 business 检查：business 缺失的旧兼容首条也会标记同键已见，
+       避免其后的同键 success 记录被误判为"首次"。
+    4. business 非 dict → 保持旧客户端兼容，返回（_ingest 只登记 idem，不写副本）。
+    5. status != success → 不触发 playable（pending/processing/failed-awaiting-retry 不误拒）。
+    6. 只读查询 c4_idem：已登记 → 交还 _ingest（保护 UPDATE 的 content_mismatch，不补建业务行）。
+    7. 复用 _media_playable（与 _ingest :301 守卫同输入），不可播放 ⇒ 整批 HTTP 400。
+    """
+    if rec.get("record_type") != "media_evidence":
+        return
+    key = (rec["record_type"], rec["source_record_id"])
+    if key in seen:
+        return
+    seen.add(key)
+    business = rec.get("business")
+    if not isinstance(business, dict):
+        return
+    if business.get("status") != "success":
+        return
+    with db._connect() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM c4_idem WHERE record_type = ? AND source_record_id = ? LIMIT 1",
+            (rec["record_type"], rec["source_record_id"]),
+        ).fetchone() is not None
+    if exists:
+        return
+    if not _media_playable(business.get("status"), business.get("upload_status"),
+                           bool(business.get("object_key"))):
+        raise HTTPException(status_code=400,
+                            detail="media 首收 status=success 需 upload_status=success 且 object_key 非空")
 
 
 def _write_business_copy(tx, rt: str, sid: str, business: Dict[str, Any], recv_iso: str) -> None:
@@ -181,6 +280,21 @@ def _write_business_copy(tx, rt: str, sid: str, business: Dict[str, Any], recv_i
             (sid, business.get("ts"), business.get("type"), business.get("severity"),
              business.get("person_id"), payload_json),
         )
+    elif rt == "media_evidence":
+        # 服务端媒体行：local_path 置空串（NOT NULL 占位，不接收 Pi 本地路径）；
+        # object_key/uploaded_at 仅在上传成功后出现；不存 URL/签名/密钥。
+        tx.execute(
+            """
+            INSERT INTO media_evidence
+              (media_id, ref_id, source, media_type, status, upload_status,
+               object_key, captured_at, created_at, uploaded_at, local_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (sid, business.get("ref_id"), "sensor", business.get("media_type"),
+             business.get("status"), business.get("upload_status"),
+             business.get("object_key"), business.get("captured_at"),
+             recv_iso, business.get("uploaded_at"), ""),
+        )
 
 
 def _ingest(db: Database, rec: Dict[str, Any]) -> str:
@@ -224,6 +338,12 @@ def _ingest(db: Database, rec: Dict[str, Any]) -> str:
                 "VALUES (?, ?, ?, ?, ?)",
                 (rt, sid, ch, now, edge),
             )
+            # 首收 media：status=success 需可播放（INSERT 期强制）
+            if rt == "media_evidence" and isinstance(business, dict) \
+                    and business.get("status") == "success" \
+                    and not _media_playable(business.get("status"), business.get("upload_status"), bool(business.get("object_key"))):
+                raise HTTPException(status_code=400,
+                                    detail="media 首收 status=success 需 upload_status=success 且 object_key 非空")
             # 同事务写 Windows 只读业务副本（合法业务本体；person_event 不写）
             if rt in _BUSINESS_CARRIERS and isinstance(business, dict):
                 _write_business_copy(tx, rt, sid, business, recv_iso)
@@ -272,6 +392,73 @@ def _ingest(db: Database, rec: Dict[str, Any]) -> str:
                 (ch, rt, sid),
             )
             return "synced"
+        if rt == "media_evidence":
+            if not isinstance(business, dict):
+                return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+            _h, _why = _hash_of_business(rt, business)
+            if not _h or _h != ch:
+                return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+            cur = tx.execute(
+                "SELECT * FROM media_evidence WHERE media_id = ?", (sid,)
+            ).fetchone()
+            if cur is None:
+                # idem 存在但媒体业务记录缺失：不自动补建，记冲突
+                return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+            # ref_id 不可变
+            if (business.get("ref_id") is not None) and business["ref_id"] != cur["ref_id"]:
+                return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+            # status 状态机（含 keep；success 终态）
+            new_s = business.get("status", cur["status"])
+            if new_s not in MEDIA_STATUS_MP[cur["status"]]:
+                return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+            # upload_status：缺失→保留现值；显式 NULL/具体值→走状态机；success 终态不回退
+            has_u = "upload_status" in business
+            cur_u = cur["upload_status"]
+            new_u = business["upload_status"] if has_u else cur_u
+            eff_u = cur_u
+            if has_u:
+                if cur_u == "success":
+                    if new_u != "success":
+                        return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+                    eff_u = "success"
+                else:
+                    if new_u not in MEDIA_UPLOAD_MP[cur_u]:
+                        return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+                    eff_u = new_u
+            # object_key / uploaded_at：缺失→保留；已成功态禁止显式清空
+            has_ok = "object_key" in business
+            new_ok = business["object_key"] if has_ok else cur["object_key"]
+            has_ua = "uploaded_at" in business
+            new_ua = business["uploaded_at"] if has_ua else cur["uploaded_at"]
+            if eff_u == "success":
+                if has_ok and new_ok is None:
+                    return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+                if has_ua and new_ua is None:
+                    return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+            # status=success 可播放（投影后有效态）
+            proj_play = _media_playable(new_s, eff_u, new_ok)
+            if new_s == "success" and not proj_play:
+                return _media_conflict(tx, rt, sid, row["content_hash"], ch, now, edge)
+            # 动态 SET：缺失字段不加列（保留现值）
+            set_cols, vals = ["status=?"], [new_s]
+            if has_u:
+                set_cols.append("upload_status=?"); vals.append(eff_u)
+            if has_ok:
+                set_cols.append("object_key=?"); vals.append(new_ok)
+            if has_ua:
+                set_cols.append("uploaded_at=?"); vals.append(new_ua)
+            set_cols.append("last_error=?")
+            vals.append(None if new_s == "success" else business.get("last_error"))
+            vals.append(sid)
+            tx.execute(
+                "UPDATE media_evidence SET " + ", ".join(set_cols) + " WHERE media_id = ?",
+                vals,
+            )
+            tx.execute(
+                "UPDATE c4_idem SET content_hash = ? WHERE record_type = ? AND source_record_id = ?",
+                (ch, rt, sid),
+            )
+            return "synced"
         tx.execute(
             """
             INSERT INTO c4_content_conflict
@@ -305,6 +492,10 @@ def receive(
             if not isinstance(rec, dict):
                 raise HTTPException(status_code=400, detail="invalid record fields")
             _validate_record(rec)
+        # 媒体首收 playable 语义预校验：任何 _ingest 前整批完成；失败整批400、零写入
+        seen: set = set()
+        for rec in records:
+            _media_first_receive_guard(db, rec, seen)
     except HTTPException as exc:
         return _fail_json("INVALID_PARAMETER", exc.detail, 400)
 

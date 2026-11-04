@@ -1,7 +1,8 @@
 # Snapshot 存储配置 (Phase 2.6)
-# provider: local | aliyun_oss (当前实现 local, OSS 预留)
+# provider: local | aliyun_oss (当前实现 aliyun_oss)
 # AK/SK 绝不写在此文件; OSS 凭据用环境变量:
 #   OSS_BUCKET / OSS_ENDPOINT / OSS_ACCESS_KEY / OSS_ACCESS_SECRET
+#   OSS_EVIDENCE_BUCKET (evidence 取证媒体独立私有桶; 未配置时上传/签名 fail-closed, 不回退原桶)
 storage:
   provider: aliyun_oss
 

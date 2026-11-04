@@ -47,7 +47,7 @@ _DELIVERY_TRANSITIONS = {
 
 # V4.4 C4-01 Outbox 常量 (module-level)
 _OUTBOX_STATUS = frozenset({"pending", "processing", "retry_wait", "success", "dead_letter"})
-_C4_RECORD_TYPES = frozenset({"person_event", "reading", "sensor_alert"})
+_C4_RECORD_TYPES = frozenset({"person_event", "reading", "sensor_alert", "media_evidence"})
 
 
 class Database:
@@ -1603,8 +1603,8 @@ class Database:
         media_id = media_id or self._media_id()
 
         try:
-            with self._connect() as conn:
-                conn.execute(
+            with self.with_transaction() as tx:
+                tx.execute(
                     """
                     INSERT INTO media_evidence (
                         media_id, source, ref_id, media_type, local_path, status,
@@ -1619,10 +1619,21 @@ class Database:
                         captured_at, created_at, uploaded_at, retry_count, last_error,
                     ),
                 )
+                # 新媒体记录与 Outbox 首开须同事务原子: media_id 作为 source_record_id, 初始 pending。
+                # 幂等重存(IntegrityError)会回滚整个事务、不会走到这里 -> 不加 gen、不重开。
+                tx.execute(
+                    """
+                    INSERT INTO sync_outbox (record_type, source_record_id, status, gen, created_at)
+                    VALUES ('media_evidence', ?, 'pending', 0, ?)
+                    ON CONFLICT(record_type, source_record_id) DO NOTHING
+                    """,
+                    (media_id, self._utc_now_ms()),
+                )
         except sqlite3.IntegrityError:
-            # media_id 已存在: 幂等或冲突
+            # with_transaction 已整体回滚(媒体+outbox); media_id 已存在 -> 幂等或冲突。
+            # 用新连接重读既有媒体记录(原连接已被 with_transaction 关闭)。
             existing = self.get_media_evidence(media_id)
-            if existing is None:  # pragma: no cover - 不应发生
+            if existing is None:  # pragma: no cover - 非媒体唯一约束冲突, 保持传播
                 raise
             if (
                 existing.get("source") == source
@@ -1631,7 +1642,7 @@ class Database:
                 and existing.get("local_path") == local_path
                 and existing.get("captured_at") == captured_at
             ):
-                return media_id
+                return media_id  # 幂等重存: 不重开 Outbox、不增加 generation
             raise ValueError(f"媒体 ID 冲突，关键字段不一致: {media_id!r}")
 
         return media_id
@@ -1693,8 +1704,8 @@ class Database:
         if not isinstance(status, str) or status not in _MEDIA_STATUS:
             raise ValueError(f"非法 status: {status!r}")
 
-        with self._connect() as conn:
-            row = conn.execute(
+        with self.with_transaction() as tx:
+            row = tx.execute(
                 "SELECT status FROM media_evidence WHERE media_id = ?",
                 (media_id,),
             ).fetchone()
@@ -1702,7 +1713,7 @@ class Database:
                 return False
             current = row["status"]
             if status not in _MEDIA_TRANSITIONS.get(current, frozenset()):
-                return False
+                return False  # 非法/同态转换: 不写媒体、不重开 Outbox
 
             sets: list[str] = ["status = ?"]
             params: list[Any] = [status]
@@ -1735,11 +1746,25 @@ class Database:
                 _add("retry_count", retry_count)
 
             params.append(media_id)
-            cur = conn.execute(
+            cur = tx.execute(
                 f"UPDATE media_evidence SET {', '.join(sets)} WHERE media_id = ?",
                 params,
             )
-            return cur.rowcount > 0
+            if cur.rowcount == 0:
+                return False
+            # 合法状态转换且实际更新成功 -> 同一事务内重开 Outbox (media_id 作 source_record_id):
+            # gen+1、清 worker/lease/next_attempt/completed, 使最新媒体快照可被其后的 Worker 领取。
+            tx.execute(
+                """
+                INSERT INTO sync_outbox (record_type, source_record_id, status, gen, created_at)
+                VALUES ('media_evidence', ?, 'pending', 0, ?)
+                ON CONFLICT(record_type, source_record_id) DO UPDATE SET
+                    status='pending', gen=gen+1, worker_id=NULL, lease_until=NULL,
+                    next_attempt_at=NULL, completed_at=NULL
+                """,
+                (media_id, self._utc_now_ms()),
+            )
+            return True
 
 
     # ================================================================

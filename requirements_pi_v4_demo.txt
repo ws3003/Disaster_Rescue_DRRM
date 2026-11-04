@@ -39,3 +39,6 @@ python-dateutil>=2.8
 # ---- 说明 ----
 # 服务器端 (FastAPI Gateway / VLM / LLM) 依赖不在此文件:
 # 参考项目 requirements.txt 中 fastapi/uvicorn/python-multipart 部分, 部署在 Windows 端。
+
+# V4.4 J-1B OSS 证据上传（未装不联网；惰性 import）
+oss2>=3.0,<4.0

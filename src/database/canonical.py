@@ -49,6 +49,10 @@ WHITELIST: dict[str, frozenset] = {
         "occurred_at", "device_captured_at", "reading_id",
         "status", "resolved_at",
     }),
+    "media_evidence": frozenset({
+        "media_id", "media_type", "ref_id", "source",
+        "status", "upload_status", "object_key", "captured_at",
+    }),
 }
 
 # 每拥有型必填字段(缺失 -> missing_required)
@@ -56,6 +60,7 @@ REQUIRED: dict[str, frozenset] = {
     "person_event": frozenset({"timestamp"}),
     "reading": frozenset({"sensor_id", "device_captured_at"}),
     "sensor_alert": frozenset({"type", "occurred_at"}),
+    "media_evidence": frozenset({"status", "ref_id", "media_type", "source"}),
 }
 
 # 已知非业务字段 (不参与哈希, 不触发 unknown_keys, 在 business_json 完整保留)
