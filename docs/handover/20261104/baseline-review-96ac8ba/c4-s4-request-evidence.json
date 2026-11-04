@@ -1,0 +1,743 @@
+[
+  {
+    "source_directory": "c4_s4_ASGI_TEST_19pny783",
+    "evidence": {
+      "scope": "SOFTWARE_ASGI_TEST_NOT_REAL_HARDWARE_OR_NETWORK",
+      "case": "tests.test_c4_s4_flow.TestC4S4Flow.test_bad_sync_auth_never_looks_like_a_successful_copy",
+      "http": [
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-E9FD2012",
+                "content_hash": "d71252b6794c26e4fdc39d4ea2c97bcd28d2bed9b41d61ed4fed262ed288d958",
+                "business": {
+                  "sensor_id": "ASGI-TEST-sensor",
+                  "temperature": "26.75",
+                  "humidity": null,
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "edge_received_at": "2026-11-03T10:00:01+08:00"
+                }
+              }
+            ]
+          },
+          "status": 401,
+          "response": {
+            "code": "UNAUTHORIZED",
+            "message": "unauthorized",
+            "data": null,
+            "meta": {}
+          }
+        }
+      ],
+      "edge_outbox": [
+        {
+          "id": 1,
+          "record_type": "reading",
+          "source_record_id": "R-20261103-E9FD2012",
+          "status": "retry_wait",
+          "gen": 1,
+          "worker_id": "worker-1",
+          "lease_until": 1793707628602,
+          "next_attempt_at": 1793707603602,
+          "retry_count": 1,
+          "last_error": "retryable:retryable",
+          "created_at": 1793707538605,
+          "completed_at": null
+        }
+      ],
+      "server_readings": [],
+      "server_alerts": []
+    }
+  },
+  {
+    "source_directory": "c4_s4_ASGI_TEST_38ldnmht",
+    "evidence": {
+      "scope": "SOFTWARE_ASGI_TEST_NOT_REAL_HARDWARE_OR_NETWORK",
+      "case": "tests.test_c4_s4_flow.TestC4S4Flow.test_same_id_changed_content_does_not_overwrite_original",
+      "http": [
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-4BC4C48F",
+                "content_hash": "d71252b6794c26e4fdc39d4ea2c97bcd28d2bed9b41d61ed4fed262ed288d958",
+                "business": {
+                  "sensor_id": "ASGI-TEST-sensor",
+                  "temperature": "26.75",
+                  "humidity": null,
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "edge_received_at": "2026-11-03T10:00:01+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-4BC4C48F",
+                "status": "synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-4BC4C48F",
+                "content_hash": "4a547b02ab26ad8c6653687eb24f18547e0d1f0545757705b79d4d0dc4a1eff1",
+                "business": {
+                  "sensor_id": "ASGI-TEST-sensor",
+                  "temperature": "31.5",
+                  "humidity": null,
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "edge_received_at": "2026-11-03T10:00:01+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-4BC4C48F",
+                "status": "content_mismatch",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 0,
+              "conflicted": 1,
+              "failed": 1
+            }
+          }
+        }
+      ],
+      "edge_outbox": [
+        {
+          "id": 1,
+          "record_type": "reading",
+          "source_record_id": "R-20261103-4BC4C48F",
+          "status": "success",
+          "gen": 1,
+          "worker_id": "worker-1",
+          "lease_until": 1793707629892,
+          "next_attempt_at": null,
+          "retry_count": 0,
+          "last_error": null,
+          "created_at": 1793707539929,
+          "completed_at": 1793707539988
+        }
+      ],
+      "server_readings": [
+        {
+          "reading_id": "R-20261103-4BC4C48F",
+          "sensor_id": "ASGI-TEST-sensor",
+          "temperature": 26.75,
+          "humidity": null,
+          "device_captured_at": "2026-11-03T10:00:00+08:00",
+          "edge_received_at": "2026-11-03T10:00:01+08:00",
+          "received_at": "2026-11-03T20:05:39+08:00"
+        }
+      ],
+      "server_alerts": []
+    }
+  },
+  {
+    "source_directory": "c4_s4_ASGI_TEST_4wlj5mna",
+    "evidence": {
+      "scope": "SOFTWARE_ASGI_TEST_NOT_REAL_HARDWARE_OR_NETWORK",
+      "case": "tests.test_c4_s4_flow.TestC4S4Flow.test_sensor_copy_visible_in_list_detail_and_explicit_reading_relation",
+      "http": [
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-208E2B72",
+                "content_hash": "d71252b6794c26e4fdc39d4ea2c97bcd28d2bed9b41d61ed4fed262ed288d958",
+                "business": {
+                  "sensor_id": "ASGI-TEST-sensor",
+                  "temperature": "26.75",
+                  "humidity": null,
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "edge_received_at": "2026-11-03T10:00:01+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-208E2B72",
+                "status": "synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "sensor_alert",
+                "source_record_id": "E-20261103-7266F2B4",
+                "content_hash": "450f0c2948b8dfb6121af643a542f0a2f159427fda204efe1f8dacc42d4c6dff",
+                "business": {
+                  "type": "sensor_hightemp",
+                  "temperature": "52.25",
+                  "humidity": null,
+                  "threshold": "50.0",
+                  "severity": "HIGH",
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "reading_id": "R-20261103-208E2B72",
+                  "occurred_at": "2026-11-03T10:00:02+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "sensor_alert",
+                "source_record_id": "E-20261103-7266F2B4",
+                "status": "synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        }
+      ],
+      "edge_outbox": [
+        {
+          "id": 1,
+          "record_type": "reading",
+          "source_record_id": "R-20261103-208E2B72",
+          "status": "success",
+          "gen": 1,
+          "worker_id": "worker-1",
+          "lease_until": 1793707630432,
+          "next_attempt_at": null,
+          "retry_count": 0,
+          "last_error": null,
+          "created_at": 1793707540462,
+          "completed_at": 1793707540519
+        },
+        {
+          "id": 2,
+          "record_type": "sensor_alert",
+          "source_record_id": "E-20261103-7266F2B4",
+          "status": "success",
+          "gen": 1,
+          "worker_id": "worker-1",
+          "lease_until": 1793707630432,
+          "next_attempt_at": null,
+          "retry_count": 0,
+          "last_error": null,
+          "created_at": 1793707540477,
+          "completed_at": 1793707540594
+        }
+      ],
+      "server_readings": [
+        {
+          "reading_id": "R-20261103-208E2B72",
+          "sensor_id": "ASGI-TEST-sensor",
+          "temperature": 26.75,
+          "humidity": null,
+          "device_captured_at": "2026-11-03T10:00:00+08:00",
+          "edge_received_at": "2026-11-03T10:00:01+08:00",
+          "received_at": "2026-11-03T20:05:40+08:00"
+        }
+      ],
+      "server_alerts": [
+        {
+          "alert_id": "E-20261103-7266F2B4",
+          "type": "sensor_hightemp",
+          "severity": "HIGH",
+          "temperature": 52.25,
+          "humidity": null,
+          "threshold": 50.0,
+          "status": "active",
+          "occurred_at": "2026-11-03T10:00:02+08:00",
+          "resolved_at": null,
+          "device_captured_at": "2026-11-03T10:00:00+08:00",
+          "received_at": "2026-11-03T20:05:40+08:00",
+          "reading_id": "R-20261103-208E2B72"
+        }
+      ]
+    }
+  },
+  {
+    "source_directory": "c4_s4_ASGI_TEST_59ppcb3g",
+    "evidence": {
+      "scope": "SOFTWARE_ASGI_TEST_NOT_REAL_HARDWARE_OR_NETWORK",
+      "case": "tests.test_c4_s4_flow.TestC4S4Flow.test_person_event_reaches_server_s4_after_worker_reports_success",
+      "http": [
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "person_event",
+                "source_record_id": "E-20261103-347A7603",
+                "content_hash": "c8c8bf8a26c8425053cad41e0e0c9a94541a8bce8e8bc7492d8a8cc462016df0"
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "person_event",
+                "source_record_id": "E-20261103-347A7603",
+                "status": "synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        }
+      ],
+      "edge_outbox": [
+        {
+          "id": 1,
+          "record_type": "person_event",
+          "source_record_id": "E-20261103-347A7603",
+          "status": "success",
+          "gen": 1,
+          "worker_id": "worker-1",
+          "lease_until": 1793707629094,
+          "next_attempt_at": null,
+          "retry_count": 0,
+          "last_error": null,
+          "created_at": 1793707539132,
+          "completed_at": 1793707539235
+        }
+      ],
+      "server_readings": [],
+      "server_alerts": []
+    }
+  },
+  {
+    "source_directory": "c4_s4_ASGI_TEST_5yvcko01",
+    "evidence": {
+      "scope": "SOFTWARE_ASGI_TEST_NOT_REAL_HARDWARE_OR_NETWORK",
+      "case": "tests.test_c4_s4_flow.TestC4S4Flow.test_reading_copy_preserves_distinct_capture_edge_and_server_times",
+      "http": [
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-BD74B2F7",
+                "content_hash": "d71252b6794c26e4fdc39d4ea2c97bcd28d2bed9b41d61ed4fed262ed288d958",
+                "business": {
+                  "sensor_id": "ASGI-TEST-sensor",
+                  "temperature": "26.75",
+                  "humidity": null,
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "edge_received_at": "2026-11-03T10:00:01+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-BD74B2F7",
+                "status": "synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        }
+      ],
+      "edge_outbox": [
+        {
+          "id": 1,
+          "record_type": "reading",
+          "source_record_id": "R-20261103-BD74B2F7",
+          "status": "success",
+          "gen": 1,
+          "worker_id": "worker-1",
+          "lease_until": 1793707629592,
+          "next_attempt_at": null,
+          "retry_count": 0,
+          "last_error": null,
+          "created_at": 1793707539627,
+          "completed_at": 1793707539743
+        }
+      ],
+      "server_readings": [
+        {
+          "reading_id": "R-20261103-BD74B2F7",
+          "sensor_id": "ASGI-TEST-sensor",
+          "temperature": 26.75,
+          "humidity": null,
+          "device_captured_at": "2026-11-03T10:00:00+08:00",
+          "edge_received_at": "2026-11-03T10:00:01+08:00",
+          "received_at": "2026-11-03T20:05:39+08:00"
+        }
+      ],
+      "server_alerts": []
+    }
+  },
+  {
+    "source_directory": "c4_s4_ASGI_TEST_dkdya18v",
+    "evidence": {
+      "scope": "SOFTWARE_ASGI_TEST_NOT_REAL_HARDWARE_OR_NETWORK",
+      "case": "tests.test_c4_s4_flow.TestC4S4Flow.test_lost_ack_retry_after_worker_restart_keeps_one_copy",
+      "http": [
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-67623C66",
+                "content_hash": "d71252b6794c26e4fdc39d4ea2c97bcd28d2bed9b41d61ed4fed262ed288d958",
+                "business": {
+                  "sensor_id": "ASGI-TEST-sensor",
+                  "temperature": "26.75",
+                  "humidity": null,
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "edge_received_at": "2026-11-03T10:00:01+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-67623C66",
+                "status": "synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-67623C66",
+                "content_hash": "d71252b6794c26e4fdc39d4ea2c97bcd28d2bed9b41d61ed4fed262ed288d958",
+                "business": {
+                  "sensor_id": "ASGI-TEST-sensor",
+                  "temperature": "26.75",
+                  "humidity": null,
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "edge_received_at": "2026-11-03T10:00:01+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-67623C66",
+                "status": "already_synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        }
+      ],
+      "edge_outbox": [
+        {
+          "id": 1,
+          "record_type": "reading",
+          "source_record_id": "R-20261103-67623C66",
+          "status": "success",
+          "gen": 2,
+          "worker_id": "after-restart",
+          "lease_until": 1793707688800,
+          "next_attempt_at": 1793707603800,
+          "retry_count": 1,
+          "last_error": "network:TEST: simulated lost acknowledgement",
+          "created_at": 1793707538828,
+          "completed_at": 1793707538964
+        }
+      ],
+      "server_readings": [
+        {
+          "reading_id": "R-20261103-67623C66",
+          "sensor_id": "ASGI-TEST-sensor",
+          "temperature": 26.75,
+          "humidity": null,
+          "device_captured_at": "2026-11-03T10:00:00+08:00",
+          "edge_received_at": "2026-11-03T10:00:01+08:00",
+          "received_at": "2026-11-03T20:05:38+08:00"
+        }
+      ],
+      "server_alerts": []
+    }
+  },
+  {
+    "source_directory": "c4_s4_ASGI_TEST_qdc4bn7d",
+    "evidence": {
+      "scope": "SOFTWARE_ASGI_TEST_NOT_REAL_HARDWARE_OR_NETWORK",
+      "case": "tests.test_c4_s4_flow.TestC4S4Flow.test_same_payload_replay_does_not_duplicate_server_row",
+      "http": [
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-299AF943",
+                "content_hash": "d71252b6794c26e4fdc39d4ea2c97bcd28d2bed9b41d61ed4fed262ed288d958",
+                "business": {
+                  "sensor_id": "ASGI-TEST-sensor",
+                  "temperature": "26.75",
+                  "humidity": null,
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "edge_received_at": "2026-11-03T10:00:01+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-299AF943",
+                "status": "synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-299AF943",
+                "content_hash": "d71252b6794c26e4fdc39d4ea2c97bcd28d2bed9b41d61ed4fed262ed288d958",
+                "business": {
+                  "sensor_id": "ASGI-TEST-sensor",
+                  "temperature": "26.75",
+                  "humidity": null,
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "edge_received_at": "2026-11-03T10:00:01+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "reading",
+                "source_record_id": "R-20261103-299AF943",
+                "status": "already_synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        }
+      ],
+      "edge_outbox": [
+        {
+          "id": 1,
+          "record_type": "reading",
+          "source_record_id": "R-20261103-299AF943",
+          "status": "success",
+          "gen": 1,
+          "worker_id": "worker-1",
+          "lease_until": 1793707630158,
+          "next_attempt_at": null,
+          "retry_count": 0,
+          "last_error": null,
+          "created_at": 1793707540191,
+          "completed_at": 1793707540259
+        }
+      ],
+      "server_readings": [
+        {
+          "reading_id": "R-20261103-299AF943",
+          "sensor_id": "ASGI-TEST-sensor",
+          "temperature": 26.75,
+          "humidity": null,
+          "device_captured_at": "2026-11-03T10:00:00+08:00",
+          "edge_received_at": "2026-11-03T10:00:01+08:00",
+          "received_at": "2026-11-03T20:05:40+08:00"
+        }
+      ],
+      "server_alerts": []
+    }
+  },
+  {
+    "source_directory": "c4_s4_ASGI_TEST_ypn4oee6",
+    "evidence": {
+      "scope": "SOFTWARE_ASGI_TEST_NOT_REAL_HARDWARE_OR_NETWORK",
+      "case": "tests.test_c4_s4_flow.TestC4S4Flow.test_sensor_resolution_reaches_server_after_initial_sync",
+      "http": [
+        {
+          "payload": {
+            "records": [
+              {
+                "record_type": "sensor_alert",
+                "source_record_id": "E-20261103-71E92992",
+                "content_hash": "6f76d63bada7036d6c2581a4ac762d830a072c0dfb4befd91564b58aab2c7e4e",
+                "business": {
+                  "type": "sensor_hightemp",
+                  "temperature": "52.25",
+                  "humidity": null,
+                  "threshold": "50.0",
+                  "severity": "HIGH",
+                  "device_captured_at": "2026-11-03T10:00:00+08:00",
+                  "reading_id": null,
+                  "occurred_at": "2026-11-03T10:00:02+08:00"
+                }
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "code": "OK",
+            "message": "ok",
+            "data": [
+              {
+                "record_type": "sensor_alert",
+                "source_record_id": "E-20261103-71E92992",
+                "status": "synced",
+                "error_code": null
+              }
+            ],
+            "meta": {
+              "total": 1,
+              "succeeded": 1,
+              "conflicted": 0,
+              "failed": 0
+            }
+          }
+        }
+      ],
+      "edge_outbox": [
+        {
+          "id": 1,
+          "record_type": "sensor_alert",
+          "source_record_id": "E-20261103-71E92992",
+          "status": "success",
+          "gen": 1,
+          "worker_id": "worker-1",
+          "lease_until": 1793707630754,
+          "next_attempt_at": null,
+          "retry_count": 0,
+          "last_error": null,
+          "created_at": 1793707540797,
+          "completed_at": 1793707540857
+        }
+      ],
+      "server_readings": [],
+      "server_alerts": [
+        {
+          "alert_id": "E-20261103-71E92992",
+          "type": "sensor_hightemp",
+          "severity": "HIGH",
+          "temperature": 52.25,
+          "humidity": null,
+          "threshold": 50.0,
+          "status": "active",
+          "occurred_at": "2026-11-03T10:00:02+08:00",
+          "resolved_at": null,
+          "device_captured_at": "2026-11-03T10:00:00+08:00",
+          "received_at": "2026-11-03T20:05:40+08:00",
+          "reading_id": null
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,33 @@
+commit 96ac8ba55b49a31b3296853d46af28df156bb0d8
+Author:     tkxc <tkxcddd@gmail.com>
+AuthorDate: Tue Nov 3 16:14:13 2026 +0800
+Commit:     tkxc <tkxcddd@gmail.com>
+CommitDate: Tue Nov 3 16:14:13 2026 +0800
+
+    fix(v4.4-b): preserve camera output and harden sensor sync regression
+    
+    Align new camera adapters with V4.3 colors and orientation; reject truncated timestamp precision; reset nonconsecutive sensor recovery; preserve edge receipt timestamps. Add Pi acceptance helpers and dual-database C4/S4 tests. Two integration failures remain documented: missing person-event replicas and unresolved sensor recovery propagation. This is a progress checkpoint, not completed end-to-end acceptance.
+
+ docs/B线接管进度_20261103.md                     |  67 ++++++
+ docs/C4_S4联调缺口与修复方案_20261103.md         |  73 ++++++
+ src/camera_lifecycle.py                          |   9 +-
+ src/camera_service.py                            |   5 +-
+ src/database/canonical.py                        |   7 +-
+ src/e8_camera_adapter.py                         |  11 +-
+ src/edge_cam_adapter.py                          |  17 +-
+ src/evidence/picamera_capture.py                 |   7 +-
+ src/sensor/alarm.py                              |   8 +-
+ src/sync/worker.py                               |   6 +-
+ tests/test_c4_s4_flow.py                         | 205 ++++++++++++++++
+ tests/test_c4_timestamp_normalize.py             |  11 +-
+ tests/test_camera_legacy_regression.py           | 129 ++++++++++
+ tests/test_camera_lifecycle.py                   |   8 +-
+ tests/test_e8_camera_adapter.py                  |  23 +-
+ tests/test_edge_cam_adapter.py                   |  53 ++---
+ tests/test_picamera_capture.py                   |  13 +-
+ tests/test_sensor_recovery_continuity.py         | 107 +++++++++
+ tools/acceptance/compare_v43_baseline.py         | 271 +++++++++++++++++++++
+ tools/acceptance/test_compare_v43_baseline.py    | 146 ++++++++++++
+ tools/acceptance/test_verify_sensor_recording.py | 160 +++++++++++++
+ tools/acceptance/verify_sensor_recording.py      | 288 +++++++++++++++++++++++
+ 22 files changed, 1547 insertions(+), 77 deletions(-)

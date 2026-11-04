@@ -1,0 +1,132 @@
+[
+  {
+    "path": "schemas/s4_contract.json",
+    "sha256": "499a9eb1bbf6808a7cabb16c8bb8f258bef549f6e5fdf1205b62fb0695bf5d47",
+    "tracked": true
+  },
+  {
+    "path": "server/s4.py",
+    "sha256": "e76b782b3ba7a26b60367aa17366762642a5d34e9cdec0b6342a8350098fc114",
+    "tracked": true
+  },
+  {
+    "path": "server/auth.py",
+    "sha256": "5b38e5eb949bbf27489bc3141d85749ee462088e0e0fdcb0cb346c6a91aaa183",
+    "tracked": true
+  },
+  {
+    "path": "server/wechat.py",
+    "sha256": "cf18ea5a67c0bc1f0d5dbf5e57d314ae708e423e004ba7c8b6a48908f65d93d7",
+    "tracked": true
+  },
+  {
+    "path": "server/media.py",
+    "sha256": "98e746b9bc711845161cc4fe2400a5fcb11390bf6fbb3bab39aa88540890e2b4",
+    "tracked": true
+  },
+  {
+    "path": "server/api.py",
+    "sha256": "17006c8023d3a9983c24877d8b76b3d0544721b8bef7df18a7ee74feb6954b46",
+    "tracked": true
+  },
+  {
+    "path": "src/sync/worker.py",
+    "sha256": "1ed2ddaa92ab3796be3ad3d2bef9b76a2ec5fe0dce996e4a0d3522bce6e0b25e",
+    "tracked": true
+  },
+  {
+    "path": "src/sync/bridge.py",
+    "sha256": "d08bbe61336db288a9e9b5bccccb79738ab8cca8980ea27c74a451b98e3729dd",
+    "tracked": true
+  },
+  {
+    "path": "src/database/canonical.py",
+    "sha256": "5b506160cf36e2189d3eff75959d1f0836e733c2fac83e6013ff275dd187418d",
+    "tracked": true
+  },
+  {
+    "path": "src/database/db.py",
+    "sha256": "6c555e19951b05c45087ad0ec25a83c708ac600cbee12f67a213e9c7b00d019c",
+    "tracked": true
+  },
+  {
+    "path": "src/database/schema.sql",
+    "sha256": "4559c7a79ba9b34226876ec87f6a600c485fc1e454d25cc00dccde6f5110a241",
+    "tracked": true
+  },
+  {
+    "path": "src/sensor/alarm.py",
+    "sha256": "45cbdd4aafe26a91dd67cb34899e05427d864fd107f5912d5d1809b18c1f2a65",
+    "tracked": true
+  },
+  {
+    "path": "src/tools/database_tool.py",
+    "sha256": "5cad1512e475c6d7579543cd7fe50f116e13b6f9fce1b90a3a4f0747062bfee6",
+    "tracked": true
+  },
+  {
+    "path": "tests/test_s4_contract.py",
+    "sha256": "a235f99d54fb870afb4423b777787d53203b913a469ef74117231908b160e572",
+    "tracked": true
+  },
+  {
+    "path": "tests/test_auth.py",
+    "sha256": "69af9eeb597cebbf1c12bd945fe49ab998cd4bf93e1cbadee39b2ce97a49c1f4",
+    "tracked": true
+  },
+  {
+    "path": "tests/test_media_access.py",
+    "sha256": "ffead0be7aff518808490f9a85bf7ced4ac6ff592be86f011599a1d846e882ed",
+    "tracked": true
+  },
+  {
+    "path": "tests/test_c4_s4_flow.py",
+    "sha256": "5ec6e69f2c4efe848c01958a0062e9cba2dc6fec19f3c6174efb184de2b79f4c",
+    "tracked": true
+  },
+  {
+    "path": "tests/test_c4_worker.py",
+    "sha256": "49249740bead2ba69a6d970b258dda8d3afb7d2cbd4a1fe0d5b921b99f321a62",
+    "tracked": true
+  },
+  {
+    "path": "tests/test_c4_server.py",
+    "sha256": "3b92a3f352a4511e0c770c8a0aeb7656e5a960ba93c12b88c44fb5183077cc3b",
+    "tracked": true
+  },
+  {
+    "path": "tests/test_c4_worker_entry.py",
+    "sha256": "f534bfc80ff18adc14f45b3f70ec8fb729bd8674ec359904a9c3aa034e067994",
+    "tracked": true
+  },
+  {
+    "path": "tests/test_c4_timestamp_normalize.py",
+    "sha256": "7a22da62038b244870ecf9d72f72fbba1221c13ab586daa0960b7b4373413d43",
+    "tracked": true
+  },
+  {
+    "path": "docs/B线接管进度_20261103.md",
+    "sha256": "63ade83eac9a90ff4f97ca3f14721c13dff4f1011c7561d1f76b86bd4d04b748",
+    "tracked": true
+  },
+  {
+    "path": "docs/C4_S4联调缺口与修复方案_20261103.md",
+    "sha256": "2484b51c973f36129b5a7b761224a5cacacb2b1cf855815c3ee0bd2c8a3899e0",
+    "tracked": true
+  },
+  {
+    "path": "docs/V4.4_B线第二阶段实施计划.md",
+    "sha256": "d40bd68783484e78fb514ad9de4d490a889c42364ddeafc114b44be18ee10403",
+    "tracked": true
+  },
+  {
+    "path": "docs/V4.4_B线完整功能审计报告.md",
+    "sha256": "2973ce8056345f06aad658f73df85b7a643969a44c14f6ab971155f8e07684fb",
+    "tracked": true
+  },
+  {
+    "path": "docs/V4.4_实现设计基线.md",
+    "sha256": "f933ad105623aba3557c65e020420fa398f7e4a999ce11e009093f6386cbd756",
+    "tracked": true
+  }
+]

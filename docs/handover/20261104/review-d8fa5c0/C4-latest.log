@@ -1,0 +1,908 @@
+........................................................................ [ 83%]
+..............                                                           [100%]
+============================== warnings summary ===============================
+..\..\..\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\fastapi\testclient.py:1
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_c4_worker.py::TestOutcomes::test_claim_http_ok_to_success
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205958ba0; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpm9tt94j4\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpm9tt94j4\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestOutcomes::test_network_failure_to_retry_wait
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205959b00; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpvem8woz_\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpvem8woz_\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestOutcomes::test_timeout_and_retryable_5xx_to_retry_wait
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205959f60; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpovjptwi4\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpovjptwi4\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestOutcomes::test_permanent_4xx_to_dead_letter
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d2059599e0; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmp9a0jm_e1\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmp9a0jm_e1\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestReceiptClass::test_already_synced_treated_as_success
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595a680; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpj5o5o0ee\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpj5o5o0ee\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestReceiptClass::test_content_mismatch_not_success
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595a740; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpk_9t93c9\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpk_9t93c9\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestRestart::test_restart_continues_pending_and_due_retry
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205959880; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpz17i45fe\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpz17i45fe\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestFencing::test_stale_gen_writeback_rejected
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595adc0; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpwnepbfeb\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpwnepbfeb\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestRobustness::test_http_request_outside_db_transaction
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595b040; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpy3bjcaoa\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpy3bjcaoa\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestRobustness::test_invalid_or_malformed_response_not_success
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205959060; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmppgw_slp5\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmppgw_slp5\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestRobustness::test_batch_continues_after_single_failure
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595abe0; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpw8hduzbd\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpw8hduzbd\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestHashReuse::test_person_event_with_exact_values_hashable
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205959880; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpglnb49uk\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpglnb49uk\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestFractionalNowSyncs::test_fractional_syncs_when_server_ok
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205959aa0; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpm0br1_3v\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpm0br1_3v\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestFractionalNowSyncs::test_fractional_network_error_retry_wait
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595a260; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpyjd_klo7\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpyjd_klo7\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestFractionalNowSyncs::test_fractional_no_verify_written
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595b380; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmp68mhex2z\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmp68mhex2z\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestFractionalNowSyncs::test_fractional_hash_stable_preserves_value
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595b580; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmplk_d9trm\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmplk_d9trm\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_worker.py::TestFractionalNowSyncs::test_integer_record_still_success
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595b5e0; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpnd4frqlf\\c4_worker_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpnd4frqlf\\c4_worker_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_server.py::TestAuth::test_wrong_token_401[]
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595bd40; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmp3g45ws0z\\c4_server_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmp3g45ws0z\\c4_server_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_server.py::TestValidation::test_missing_required_field_400
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595bf20; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpqnu2jg8h\\c4_server_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpqnu2jg8h\\c4_server_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_server.py::TestValidation::test_batch_one_invalid_rejects_whole
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595aee0; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpudzmebpp\\c4_server_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpudzmebpp\\c4_server_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_server.py::TestIdempotencyConflict::test_same_key_same_content_already_synced
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d20595b540; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmph4i0xynp\\c4_server_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmph4i0xynp\\c4_server_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_server.py::TestIdempotencyConflict::test_same_key_diff_content_conflict
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205881180; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmp5ox2rkp9\\c4_server_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmp5ox2rkp9\\c4_server_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_server.py::TestRollback::test_ingest_exception_rolls_back_no_partial
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205881180; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpcyj2t_5c\\c4_server_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpcyj2t_5c\\c4_server_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_server.py::TestEnvelope::test_http_status_ok_200
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205881180; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpivs5a0ly\\c4_server_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpivs5a0ly\\c4_server_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_normalize.py::TestVerifyStore::test_add_and_get
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d2058833a0; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpa08m9i6c\\c4_normalize_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpa08m9i6c\\c4_normalize_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_normalize.py::TestVerifyStore::test_merge_reasons_same_key
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205883540; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpay8skavs\\c4_normalize_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpay8skavs\\c4_normalize_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_normalize.py::TestVerifyStore::test_business_json_preserves_unknown_and_benign_keys
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205881a20; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpclprk7im\\c4_normalize_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpclprk7im\\c4_normalize_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_normalize.py::TestVerifyStore::test_concurrent_merge_no_loss
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d2058834c0; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpqwg6xsq9\\c4_normalize_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpqwg6xsq9\\c4_normalize_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_c4_normalize.py::TestVerifyStore::test_invalid_reason_rejected
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\_pytest\unraisableexception.py:63: PytestUnraisableExceptionWarning: Exception ignored in: <finalize object at 0x1d205883c20; dead>
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 632, in _rmtree_unsafe
+      os.unlink(fullname)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpq2aea9g7\\c4_normalize_test.db'
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\weakref.py", line 590, in __call__
+      return info.func(*info.args, **(info.kwargs or {}))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 933, in _cleanup
+      cls._rmtree(name, ignore_errors=ignore_errors)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 929, in _rmtree
+      _shutil.rmtree(name, onerror=onerror)
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 787, in rmtree
+      return _rmtree_unsafe(path, onerror)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\shutil.py", line 634, in _rmtree_unsafe
+      onerror(os.unlink, fullname, sys.exc_info())
+    File "D:\���ֺ�2��\�ֺ�\_handover\python\cpython-3.11-windows-x86_64-none\Lib\tempfile.py", line 893, in onerror
+      _os.unlink(path)
+  PermissionError: [WinError 32] ��һ����������ʹ�ô��ļ��������޷����ʡ�: 'D:\\���ֺ�2��\\�ֺ�\\_handover\\AB�ֹ��̵�_20261103_b0cc8de8\\runtime_c4\\tmpq2aea9g7\\c4_normalize_test.db'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+86 passed, 30 warnings in 8.10s

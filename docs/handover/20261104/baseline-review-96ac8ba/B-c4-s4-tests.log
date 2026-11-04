@@ -1,0 +1,30 @@
+..F....F                                                                 [100%]
+================================== FAILURES ===================================
+_ TestC4S4Flow.test_person_event_reaches_server_s4_after_worker_reports_success _
+tests\test_c4_s4_flow.py:189: in test_person_event_reaches_server_s4_after_worker_reports_success
+    self.assertEqual([row["alert_key"] for row in body["data"]], [f"person:{sid}"],
+E   AssertionError: Lists differ: [] != ['person:E-20261103-347A7603']
+E   
+E   Second list contains 1 additional elements.
+E   First extra element 0:
+E   'person:E-20261103-347A7603'
+E   
+E   - []
+E   + ['person:E-20261103-347A7603'] : C4 acknowledgement alone cannot substitute for a queryable person-event copy
+____ TestC4S4Flow.test_sensor_resolution_reaches_server_after_initial_sync ____
+tests\test_c4_s4_flow.py:200: in test_sensor_resolution_reaches_server_after_initial_sync
+    self.assertEqual(detail["status"], "resolved", "Server must not retain active after authoritative recovery")
+E   AssertionError: 'active' != 'resolved'
+E   - active
+E   + resolved
+E    : Server must not retain active after authoritative recovery
+============================== warnings summary ===============================
+venv\Lib\site-packages\fastapi\testclient.py:1
+  D:\���ֺ�2��\�ֺ�\Disaster_Rescue_DRRM_B\venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_c4_s4_flow.py::TestC4S4Flow::test_person_event_reaches_server_s4_after_worker_reports_success
+FAILED tests/test_c4_s4_flow.py::TestC4S4Flow::test_sensor_resolution_reaches_server_after_initial_sync
+2 failed, 6 passed, 1 warning in 3.66s

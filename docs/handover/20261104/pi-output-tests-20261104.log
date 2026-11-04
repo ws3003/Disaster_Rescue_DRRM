@@ -1,0 +1,13 @@
+test_changed_original_helper_is_refused (test_output_location.OutputRouting.test_changed_original_helper_is_refused) ... ok
+test_existing_files_and_previous_results_are_not_overwritten (test_output_location.OutputRouting.test_existing_files_and_previous_results_are_not_overwritten) ... ok
+test_generated_artifacts_and_failure_evidence_stay_in_requested_root (test_output_location.OutputRouting.test_generated_artifacts_and_failure_evidence_stay_in_requested_root) ... ok
+test_original_assessment_and_hardware_implementation_are_reused (test_output_location.OutputRouting.test_original_assessment_and_hardware_implementation_are_reused) ... ok
+test_repository_output_refused_before_writing (test_output_location.OutputRouting.test_repository_output_refused_before_writing) ... usage: launcher [-h] --repo REPO --scenario {level1,level2}
+                [--duration DURATION] [--output-root OUTPUT_ROOT]
+launcher: error: Output must remain outside the project
+ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.270s
+
+OK

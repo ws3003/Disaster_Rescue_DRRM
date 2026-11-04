@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testcase name="初次加载使用契约默认分页，并以服务端 meta 更新状态" time="0.001816" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\alerts-list-controller.test.js"/>
+	<testcase name="切换类别立即重置分页，旧请求不能覆盖新类别结果" time="0.000294" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\alerts-list-controller.test.js"/>
+	<testcase name="同一类别加载中重复触发不重复请求" time="0.000189" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\alerts-list-controller.test.js"/>
+	<testcase name="加载更多进行中不重复发起或重复追加" time="0.000332" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\alerts-list-controller.test.js"/>
+	<testcase name="加载失败保留已加载列表，重试续接同一页" time="0.000318" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\alerts-list-controller.test.js"/>
+	<testcase name="下拉刷新失败时保留旧数据" time="0.000263" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\alerts-list-controller.test.js"/>
+	<testcase name="空列表状态与服务端 has_more 语义" time="0.000244" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\alerts-list-controller.test.js"/>
+	<testcase name="本地非法 category 不发起请求并展示参数错误" time="0.000193" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\alerts-list-controller.test.js"/>
+	<testcase name="契约版本与范围" time="0.000808" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="五个接口路径与客户端常量一致" time="0.000178" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="告警键格式与客户端前缀一致" time="0.000103" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="分页默认值、上限与 meta 字段一致" time="0.000612" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="category 枚举值一致" time="0.000159" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="错误码与 HTTP 状态码映射一致" time="0.000118" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="响应信封字段一致且 Bearer 鉴权约定一致" time="0.000143" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="人员告警 DTO：11 个字段，与契约名称/类型/可空性一致" time="0.000397" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="传感器告警 DTO：14 个字段，status 枚举与带时区时间一致" time="0.000219" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="环境读数 DTO：7 个字段，device_captured_at 为带时区时间" time="0.000209" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="Mock 示例字段集合与契约完全一致（无多余、无缺失）" time="0.000932" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="S4-04 关联数据规则与客户端校验一致" time="0.000120" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="契约声明的实现状态仍为未实现（避免 Mock 被误认为真实后端）" time="0.000199" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\contract-static.test.js"/>
+	<testcase name="人员告警详情：11 个契约字段，关联读数为空且媒体不支持" time="0.003578" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\detail-controller.test.js"/>
+	<testcase name="传感器告警详情：14 个契约字段，关联读数 7 个字段" time="0.000621" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\detail-controller.test.js"/>
+	<testcase name="非法 alert_key 本地拦截，不发起详情或关联请求" time="0.000187" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\detail-controller.test.js"/>
+	<testcase name="详情 404 展示资源不存在，不用本地数据冒充详情" time="0.000234" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\detail-controller.test.js"/>
+	<testcase name="关联数据失败不影响详情展示" time="0.000297" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\detail-controller.test.js"/>
+	<testcase name="连续加载不同告警时，旧响应不能覆盖新详情" time="0.000276" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\detail-controller.test.js"/>
+	<testcase name="成功信封结构校验" time="0.001120" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="失败信封结构校验" time="0.000220" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="信封结构异常不得当作成功" time="0.000363" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="S4-01 data 结构校验（占位值允许，但字段类型必须符合契约）" time="0.000233" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="S4-02 meta 字段类型校验" time="0.000281" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="S4-01/03/04 成功响应 meta 必须为空对象" time="0.000132" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="人员告警 DTO：必填、可空、时间格式" time="0.001665" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="传感器告警 DTO：status 枚举与带时区时间" time="0.000480" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="环境读数 DTO：temperature 必填、湿度可空、时间格式" time="0.000294" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="列表 data 必须按 category 匹配请求筛选" time="0.000277" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="详情 data 的 alert_key 必须与请求一致，DTO 类型必须匹配前缀" time="0.000142" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="S4-04 关联数据规则" time="0.000196" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\envelope.test.js"/>
+	<testcase name="首页并行加载：状态 + 两组最近告警，摘要来自 meta.total" time="0.002314" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\home-controller.test.js"/>
+	<testcase name="状态接口失败不影响两组告警与摘要" time="0.000325" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\home-controller.test.js"/>
+	<testcase name="单个告警组失败时摘要对应项显示为 —，不虚构计数" time="0.000224" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\home-controller.test.js"/>
+	<testcase name="加载进行中重复触发不会重复请求" time="0.000271" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\home-controller.test.js"/>
+	<testcase name="重试状态接口只重发状态请求" time="0.000381" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\home-controller.test.js"/>
+	<testcase name="关注列表 toggle：加入追加到末尾，再次调用移除" time="0.002886" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\local-ui.test.js"/>
+	<testcase name="搜索历史：去重置顶、忽略空白、限制条数" time="0.000417" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\local-ui.test.js"/>
+	<testcase name="详情导航：上下文内返回前后项，越界与缺失时有明确标记" time="0.000380" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\local-ui.test.js"/>
+	<testcase name="本地筛选：仅看关注与关键词、严重程度可叠加" time="0.003962" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\local-ui.test.js"/>
+	<testcase name="首页仅选两条高严重告警，选中与展开区域分别保留服务端组内顺序" time="0.001347" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\media-focus.test.js"/>
+	<testcase name="首页空数据、单条和同等级告警边界" time="0.000214" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\media-focus.test.js"/>
+	<testcase name="最新标记分别取各组首条；筛选掉最新项不会把旧项重新标最新" time="0.000161" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\media-focus.test.js"/>
+	<testcase name="影像预览只用相册临时文件，不创建告警媒体 DTO；取消后可重试" time="0.002754" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\media-focus.test.js"/>
+	<testcase name="切换告警清空本机预览，并忽略旧告警迟到的文件选择结果" time="0.001426" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\media-focus.test.js"/>
+	<testcase name="全屏操作定位当前组件播放器，进入全屏成功后继续播放，失败时保留内嵌播放" time="0.001821" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\media-focus.test.js"/>
+	<testcase name="图片点击预览当前本机照片；没有图片时不打开预览" time="0.001504" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\media-focus.test.js"/>
+	<testcase name="默认列表：删除不报警状态后，人员优先且分页无缺失或重复" time="0.002175" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\mock-adapter.test.js"/>
+	<testcase name="category 筛选的总数及分页与实际示例条数一致" time="0.000376" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\mock-adapter.test.js"/>
+	<testcase name="组内排序：人员按 ts DESC + event_id DESC；传感器按 occurred_at DESC + alert_id DESC" time="0.000255" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\mock-adapter.test.js"/>
+	<testcase name="空列表：data=[], total=0, has_more=false" time="0.000149" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\mock-adapter.test.js"/>
+	<testcase name="Mock 详情：存在的告警返回 DTO，不存在的返回 404 NOT_FOUND" time="0.000285" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\mock-adapter.test.js"/>
+	<testcase name="Mock 关联数据：人员无读数；传感器只按 reading_id 关联最多一条" time="0.000225" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\mock-adapter.test.js"/>
+	<testcase name="Mock 系统状态严格使用契约占位结构" time="0.000187" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\mock-adapter.test.js"/>
+	<testcase name="全部 Mock 数据通过契约校验（L3）" time="0.002159" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\mock-adapter.test.js"/>
+	<testcase name="人员告警无 Lying；Help-Waving 的标题、状态、严重程度和优先级一致" time="0.000594" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\mock-adapter.test.js"/>
+	<testcase name="Mock 模式不调用 wx.request" time="0.004116" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="本地分页参数校验失败时不发起请求（Mock 与真实模式都必须生效）" time="0.000726" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="非法 alert_key 在本地拦截，不发起请求" time="0.000221" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="真实模式成功路径：请求参数、列表 DTO 与 meta" time="0.000761" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="真实模式错误码：401/403/404/500 按契约语义处理，且不回退 Mock" time="0.000453" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="测试桩 400/422 按业务错误处理，不静默修正、不自动重试" time="0.000266" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="响应缺少 code 或结构异常判定为 RESPONSE_INVALID，不当作成功" time="0.001343" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="关联数据：人员告警不得返回环境读数" time="0.000525" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="真实请求封装：Token 缺失时本地拦截，不调用 wx.request" time="0.000522" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="真实请求封装：Bearer 头、GET、URL 编码与超时错误" time="0.000559" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="buildUrl 忽略 undefined/null 参数" time="0.000195" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\service.test.js"/>
+	<testcase name="dateKeyOf 只取字符串日期前缀，不做时区换算" time="0.000895" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="相对时间：刚刚 / 分钟 / 小时 / 天，无法解析时返回空串" time="0.000433" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="带时区时间的相对时间按 ISO 偏移解析（与时区无关）" time="0.000135" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="日期分组标题：今天 / 昨天 / 今年日期 / 跨年日期" time="0.000220" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="列表项视图带相对时间与严重程度配色，不改动原始时间文本" time="0.000752" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="日期/类别分组只在相邻变化时插入标题，且保持原有顺序" time="0.001420" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="不勾选类别标题时不在同类别切换处插入标题" time="0.000244" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="本地筛选：按 key / 标题 / chips 匹配，空关键词返回全量" time="0.000501" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="本地筛选：按严重程度与状态组合过滤（状态仅传感器告警有）" time="0.000445" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="详情视图读数对比：温度对阈值，湿度不虚构阈值" time="0.000649" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="详情视图分组标题覆盖全部字段，字段总数不变" time="0.001054" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\ui-enhance.test.js"/>
+	<testcase name="分页参数省略时使用契约默认值 page=1, page_size=20" time="0.001195" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\validators.test.js"/>
+	<testcase name="显式非法 page 被拦截且不静默修正" time="0.000242" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\validators.test.js"/>
+	<testcase name="page_size 边界与取值范围" time="0.000196" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\validators.test.js"/>
+	<testcase name="category 仅允许契约定义的两个值" time="0.000164" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\validators.test.js"/>
+	<testcase name="alert_key 只校验契约声明的两种前缀格式" time="0.000312" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\validators.test.js"/>
+	<testcase name="naive / zoned ISO 判定" time="0.001628" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\view-time.test.js"/>
+	<testcase name="naive 时间展示不得附加时区" time="0.000199" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\view-time.test.js"/>
+	<testcase name="带时区时间展示保留原偏移" time="0.000200" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\view-time.test.js"/>
+	<testcase name="人员/传感器列表视图字段与标签" time="0.002113" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\view-time.test.js"/>
+	<testcase name="详情视图字段数量与可空字段展示" time="0.000531" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\view-time.test.js"/>
+	<testcase name="关联数据为空时不生成虚构读数或媒体 URL" time="0.000211" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\view-time.test.js"/>
+	<testcase name="系统状态视图如实展示契约占位值" time="0.000166" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\view-time.test.js"/>
+	<testcase name="摘要缺数据时显示 —，不补零" time="0.000104" classname="test" file="D:\《灾害2》\灾害\Disaster_Rescue_DRRM\miniprogram\tests\view-time.test.js"/>
+	<!-- tests 99 -->
+	<!-- suites 0 -->
+	<!-- pass 99 -->
+	<!-- fail 0 -->
+	<!-- cancelled 0 -->
+	<!-- skipped 0 -->
+	<!-- todo 0 -->
+	<!-- duration_ms 320.4824 -->
+</testsuites>

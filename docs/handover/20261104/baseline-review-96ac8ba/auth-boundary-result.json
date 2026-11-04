@@ -1,0 +1,244 @@
+{
+  "scope": "SOFTWARE_ASGI_TEST_WECHAT_EXCHANGE_STUBBED_NO_REAL_WECHAT_OSS_PI",
+  "backend_head": "96ac8ba55b49a31b3296853d46af28df156bb0d8",
+  "checks": [
+    {
+      "credential_kind": "session",
+      "method": "GET",
+      "path": "/api/v1/system/status",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "session",
+      "method": "GET",
+      "path": "/api/v1/alerts",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "session",
+      "method": "GET",
+      "path": "/api/v1/alerts/sensor:E-20261103-3C194F71",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "session",
+      "method": "GET",
+      "path": "/api/v1/alerts/sensor:E-20261103-3C194F71/related",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "session",
+      "method": "GET",
+      "path": "/api/v1/environment/readings",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "session",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200,
+      "code": "OK",
+      "expected_status": 200,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "session",
+      "method": "GET",
+      "path": "/api/v1/alerts/sensor:E-20261103-3C194F71/media",
+      "status": 200,
+      "code": "OK",
+      "expected_status": 200,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "session",
+      "method": "POST",
+      "path": "/api/v1/media/M-TEST-NONEXISTENT/access",
+      "status": 404,
+      "code": "NOT_FOUND",
+      "expected_status": 404,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "service",
+      "method": "GET",
+      "path": "/api/v1/system/status",
+      "status": 200,
+      "code": "OK",
+      "expected_status": 200,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "service",
+      "method": "GET",
+      "path": "/api/v1/alerts",
+      "status": 200,
+      "code": "OK",
+      "expected_status": 200,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "service",
+      "method": "GET",
+      "path": "/api/v1/alerts/sensor:E-20261103-3C194F71",
+      "status": 200,
+      "code": "OK",
+      "expected_status": 200,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "service",
+      "method": "GET",
+      "path": "/api/v1/alerts/sensor:E-20261103-3C194F71/related",
+      "status": 200,
+      "code": "OK",
+      "expected_status": 200,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "service",
+      "method": "GET",
+      "path": "/api/v1/environment/readings",
+      "status": 200,
+      "code": "OK",
+      "expected_status": 200,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "service",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "service",
+      "method": "GET",
+      "path": "/api/v1/alerts/sensor:E-20261103-3C194F71/media",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "service",
+      "method": "POST",
+      "path": "/api/v1/media/M-TEST-NONEXISTENT/access",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "anonymous",
+      "method": "GET",
+      "path": "/api/v1/system/status",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "anonymous",
+      "method": "GET",
+      "path": "/api/v1/alerts",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "anonymous",
+      "method": "GET",
+      "path": "/api/v1/alerts/sensor:E-20261103-3C194F71",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "anonymous",
+      "method": "GET",
+      "path": "/api/v1/alerts/sensor:E-20261103-3C194F71/related",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "anonymous",
+      "method": "GET",
+      "path": "/api/v1/environment/readings",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "anonymous",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "anonymous",
+      "method": "GET",
+      "path": "/api/v1/alerts/sensor:E-20261103-3C194F71/media",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "anonymous",
+      "method": "POST",
+      "path": "/api/v1/media/M-TEST-NONEXISTENT/access",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    },
+    {
+      "credential_kind": "revoked_session",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 401,
+      "code": "UNAUTHORIZED",
+      "expected_status": 401,
+      "matches_expected": true
+    }
+  ],
+  "checks_passed": 25,
+  "producer_probe": {
+    "scope": "DatabaseTool_only_not_full_Agent",
+    "event_saved": true,
+    "outbox_record_types": [
+      "person_event"
+    ],
+    "outbox_states": [
+      "pending"
+    ]
+  },
+  "credentials_persisted": false,
+  "warning": "Raw temporary databases are outside this evidence folder and excluded from delivery."
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="8" time="3.626" timestamp="2026-11-03T20:05:37.340642+08:00" hostname="DESKTOP-E1JGKII"><testcase classname="tests.test_c4_s4_flow.TestC4S4Flow" name="test_bad_sync_auth_never_looks_like_a_successful_copy" time="0.215" /><testcase classname="tests.test_c4_s4_flow.TestC4S4Flow" name="test_lost_ack_retry_after_worker_restart_keeps_one_copy" time="0.289" /><testcase classname="tests.test_c4_s4_flow.TestC4S4Flow" name="test_person_event_reaches_server_s4_after_worker_reports_success" time="0.295"><failure message="AssertionError: Lists differ: [] != ['person:E-20261103-347A7603']&#10;&#10;Second list contains 1 additional elements.&#10;First extra element 0:&#10;'person:E-20261103-347A7603'&#10;&#10;- []&#10;+ ['person:E-20261103-347A7603'] : C4 acknowledgement alone cannot substitute for a queryable person-event copy">tests\test_c4_s4_flow.py:189: in test_person_event_reaches_server_s4_after_worker_reports_success
+    self.assertEqual([row["alert_key"] for row in body["data"]], [f"person:{sid}"],
+E   AssertionError: Lists differ: [] != ['person:E-20261103-347A7603']
+E   
+E   Second list contains 1 additional elements.
+E   First extra element 0:
+E   'person:E-20261103-347A7603'
+E   
+E   - []
+E   + ['person:E-20261103-347A7603'] : C4 acknowledgement alone cannot substitute for a queryable person-event copy</failure></testcase><testcase classname="tests.test_c4_s4_flow.TestC4S4Flow" name="test_reading_copy_preserves_distinct_capture_edge_and_server_times" time="0.297" /><testcase classname="tests.test_c4_s4_flow.TestC4S4Flow" name="test_same_id_changed_content_does_not_overwrite_original" time="0.261" /><testcase classname="tests.test_c4_s4_flow.TestC4S4Flow" name="test_same_payload_replay_does_not_duplicate_server_row" time="0.278" /><testcase classname="tests.test_c4_s4_flow.TestC4S4Flow" name="test_sensor_copy_visible_in_list_detail_and_explicit_reading_relation" time="0.323" /><testcase classname="tests.test_c4_s4_flow.TestC4S4Flow" name="test_sensor_resolution_reaches_server_after_initial_sync" time="0.281"><failure message="AssertionError: 'active' != 'resolved'&#10;- active&#10;+ resolved&#10; : Server must not retain active after authoritative recovery">tests\test_c4_s4_flow.py:200: in test_sensor_resolution_reaches_server_after_initial_sync
+    self.assertEqual(detail["status"], "resolved", "Server must not retain active after authoritative recovery")
+E   AssertionError: 'active' != 'resolved'
+E   - active
+E   + resolved
+E    : Server must not retain active after authoritative recovery</failure></testcase></testsuite></testsuites>

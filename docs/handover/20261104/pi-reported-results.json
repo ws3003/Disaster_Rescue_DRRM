@@ -1,0 +1,100 @@
+{
+  "provenance": "User executed through VNC and pasted outputs; no direct download of Pi raw evidence.",
+  "last_confirmed_pi_head": "e1d75d68faf4324ca6388eea560272f3ff905bc9",
+  "worktree_patches": "camera fix and four-file E7 patch installed; current full device diff not newly retrieved",
+  "raw_media_and_databases_in_git": false,
+  "future_pi_output_root": "/home/pi/testtest",
+  "software_on_pi": {
+    "sensor_recovery_tests_passed": 6,
+    "recording_tool_tests_passed": 17,
+    "physical_temperature_recovery_verified": false
+  },
+  "runs": [
+    {
+      "case": "shared_camera_and_recorder_without_model",
+      "result_path": "/home/pi/b_camera_fixed_hvf4fpq5/result.json",
+      "decoded_frames": 153,
+      "file_fps": 15.0,
+      "decoded_duration_seconds": 10.2,
+      "edge_frames": 153,
+      "edge_subscriber_drops": 0,
+      "video_subscriber_drops": 0,
+      "camera_closed_state": "CLOSED",
+      "user_confirmed_normal_video": true
+    },
+    {
+      "case": "level1_first_run",
+      "result_path": "/home/pi/b_sensor_video_TEST_xqwmfq6p/result.json",
+      "failures": [],
+      "readings": 15,
+      "alerts": 1,
+      "media": 0,
+      "reader_errors": [],
+      "runner_dropped": [],
+      "camera_closed_state": "CLOSED"
+    },
+    {
+      "case": "level1_second_run",
+      "result_path": "/home/pi/b_sensor_video_TEST_icmcqosv/result.json",
+      "failures": ["reader_or_runner_error"],
+      "readings": 14,
+      "alerts": 1,
+      "media": 0,
+      "reader_errors": ["w1_slave 内容行数不足 (0 行)"],
+      "runner_dropped": [],
+      "camera_closed_state": "CLOSED",
+      "fault_recorded_at": "2026-11-03T22:57:40+08:00",
+      "fault_recovered_at": "2026-11-03T22:57:42+08:00",
+      "later_sensor_status": "online",
+      "fault_root_cause_closed": false
+    },
+    {
+      "case": "level2_local_chain",
+      "result_path": "/home/pi/testtest/results/b_sensor_video_TEST_evdda4v5/result.json",
+      "failures": [],
+      "video_decoded_frames": 152,
+      "video_fps": 15.0,
+      "video_duration_seconds": 10.133,
+      "record_call_seconds": 10.16,
+      "samples_during_recording": 5,
+      "video_path": "/home/pi/testtest/results/b_sensor_video_TEST_evdda4v5/media/M-20261103-0C03254B.mp4",
+      "alert_ref_id": "E-20261103-17ECD336",
+      "reader_errors": [],
+      "runner_dropped": [],
+      "camera_closed_state": "CLOSED",
+      "user_confirmed_complete_playback_color_and_orientation": true
+    },
+    {
+      "case": "level2_sustained_60_seconds",
+      "result_path": "/home/pi/testtest/results/b_sensor_video_TEST_lfud51f9/result.json",
+      "requested_duration_seconds": 60,
+      "last_printed_samples": 33,
+      "recording_calls": 1,
+      "failures": [],
+      "detailed_result_json_separately_retrieved": false
+    }
+  ],
+  "v43_vision": {
+    "first_run_processed_frames": 180,
+    "first_run_person_frames": 74,
+    "first_run_fps": 2.34,
+    "sitting_risk_and_single_rank_visible": true,
+    "five_image_correct": 2,
+    "five_image_total": 5,
+    "failed_labels": ["Fall", "Lying", "Sitting"],
+    "baseline_compare_result_dir": "/home/pi/b_v43_compare_1j6iex64",
+    "frozen_current_predictions_equal_across_two_repeats": true,
+    "historical_model_identity_verified": false,
+    "full_v43_regression_passed": false
+  },
+  "not_verified_by_these_runs": [
+    "real model inference concurrent with sensor-triggered recording",
+    "physical thermal recovery, escalation and subsequent re-trigger",
+    "full cooldown expiry and process restart scenarios",
+    "controlled disconnect and video failure handling",
+    "OSS upload and authorized retrieval",
+    "cross-device C4 and true phone backend integration",
+    "real cloud inference and local fallback",
+    "full V4.3 regression and all V4.4 requirements"
+  ]
+}

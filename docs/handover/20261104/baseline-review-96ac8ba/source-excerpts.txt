@@ -1,0 +1,965 @@
+Line-numbered source evidence. A=ef59ee4; B=96ac8ba. No repository files changed.
+
+[A] miniprogram/app.json:1-25
+1: {
+2:   "pages": [
+3:     "pages/home/index",
+4:     "pages/alerts/index",
+5:     "pages/detail/index"
+6:   ],
+7:   "window": {
+8:     "navigationBarTitleText": "灾害现场智能监测",
+9:     "navigationBarBackgroundColor": "#EEF2F6",
+10:     "navigationBarTextStyle": "black",
+11:     "backgroundColor": "#EEF2F6",
+12:     "backgroundTextStyle": "dark"
+13:   },
+14:   "style": "v2",
+15:   "sitemapLocation": "sitemap.json"
+16: }
+
+[A] miniprogram/config/env.js:1-18
+1: // A 线运行时配置。禁止在此文件中写入任何真实 Token 或密钥。
+2: // USE_MOCK=true 时只使用 Mock 适配器，绝不调用 wx.request。
+3: // 切换为真实模式（false）前，必须先满足任务书第 10.5 节联调前置条件。
+4: const USE_MOCK = true;
+5: 
+6: // Base URL / 合法域名 / AppID / 端口均为待定部署参数（任务书 11.2）。
+7: // 此处保留明显的占位值，避免被误认为真实后端地址。
+8: const API_BASE_URL = 'https://example.invalid';
+9: const TOKEN_STORAGE_KEY = 's4_api_token';
+10: const REQUEST_TIMEOUT_MS = 10000;
+11: 
+12: module.exports = {
+13:   USE_MOCK,
+14:   API_BASE_URL,
+15:   TOKEN_STORAGE_KEY,
+16:   REQUEST_TIMEOUT_MS
+17: };
+
+[A] miniprogram/services/index.js:1-32
+1: // 默认服务工厂：页面只依赖这里，不直接接触 wx.request 或 Mock 细节。
+2: // 模式切换只由 config/env.js 的 USE_MOCK 决定。
+3: 
+4: const env = require('../config/env');
+5: const { createMockAdapter } = require('../mock/mock-adapter');
+6: const { createRequest, getTokenFromStorage } = require('../utils/request');
+7: const { createS4Service } = require('./s4-service');
+8: 
+9: function createDefaultService() {
+10:   if (env.USE_MOCK) {
+11:     return createS4Service({
+12:       useMock: true,
+13:       mockAdapter: createMockAdapter()
+14:     });
+15:   }
+16:   return createS4Service({
+17:     useMock: false,
+18:     request: createRequest({
+19:       baseUrl: env.API_BASE_URL,
+20:       timeout: env.REQUEST_TIMEOUT_MS,
+21:       getToken: function () {
+22:         return getTokenFromStorage(env.TOKEN_STORAGE_KEY);
+23:       }
+24:     })
+25:   });
+26: }
+27: 
+28: module.exports = {
+29:   createDefaultService
+30: };
+
+[A] miniprogram/utils/request.js:21-82
+21: function getTokenFromStorage(storageKey) {
+22:   if (typeof wx === 'undefined' || typeof wx.getStorageSync !== 'function') {
+23:     return '';
+24:   }
+25:   try {
+26:     return wx.getStorageSync(storageKey) || '';
+27:   } catch (err) {
+28:     return '';
+29:   }
+30: }
+31: 
+32: function createRequest(options) {
+33:   const opts = options || {};
+34:   const baseUrl = opts.baseUrl;
+35:   const timeout = opts.timeout;
+36:   const getToken = opts.getToken || function () { return ''; };
+37: 
+38:   return function request(path, query) {
+39:     return new Promise(function (resolve, reject) {
+40:       let token = '';
+41:       try {
+42:         token = getToken() || '';
+43:       } catch (err) {
+44:         token = '';
+45:       }
+46:       // 真实模式下未配置 Token 时，本地请求前拦截，不发起 wx.request。
+47:       if (!token) {
+48:         reject(createAppError('TOKEN_MISSING', { detail: '真实模式下未配置 Bearer Token' }));
+49:         return;
+50:       }
+51:       if (typeof wx === 'undefined' || typeof wx.request !== 'function') {
+52:         reject(createAppError('NETWORK_ERROR', { detail: 'wx.request 不可用' }));
+53:         return;
+54:       }
+55:       wx.request({
+56:         url: buildUrl(baseUrl, path, query),
+57:         method: 'GET',
+58:         timeout: timeout,
+59:         header: {
+60:           Authorization: 'Bearer ' + token
+61:         },
+62:         success: function (res) {
+63:           resolve({
+64:             statusCode: res.statusCode,
+65:             body: res.data
+66:           });
+67:         },
+68:         fail: function (err) {
+69:           reject(mapNetworkError(err));
+70:         }
+71:       });
+72:     });
+73:   };
+74: }
+75: 
+76: module.exports = {
+77:   buildUrl,
+78:   getTokenFromStorage,
+79:   createRequest
+80: };
+
+[A] miniprogram/utils/dto-schema.js:1-71
+1: // 契约静态常量映射，唯一依据为 schemas/s4_contract.json（contract_version 0.1.0）。
+2: // 本文件只做客户端实现映射，不构成对契约的修改。
+3: // tests/contract-static.test.js 会逐项核对这些定义与契约文件是否一致。
+4: 
+5: const CONTRACT_VERSION = '0.1.0';
+6: 
+7: const ENDPOINTS = {
+8:   systemStatus: '/api/v1/system/status',
+9:   alerts: '/api/v1/alerts',
+10:   alertDetail: function (alertKey) {
+11:     return '/api/v1/alerts/' + encodeURIComponent(alertKey);
+12:   },
+13:   alertRelated: function (alertKey) {
+14:     return '/api/v1/alerts/' + encodeURIComponent(alertKey) + '/related'
+15:   },
+16:   // S4-06 契约保留，但首期不新增环境读数页面（任务书 1.2 / 3.2）。
+17:   environmentReadings: '/api/v1/environment/readings'
+18: };
+19: 
+20: const CATEGORIES = ['person', 'sensor_environment'];
+21: 
+22: const PAGINATION = {
+23:   pageDefault: 1,
+24:   pageSizeDefault: 20,
+25:   pageSizeMax: 100,
+26:   metaFields: ['page', 'page_size', 'total', 'has_more']
+27: };
+28: 
+29: const SENSOR_STATUS_VALUES = ['active', 'resolved'];
+30: 
+31: const DTO = {
+32:   personAlert: [
+33:     { name: 'alert_key', type: 'string', nullable: false, prefix: 'person:' },
+34:     { name: 'source', type: 'string', nullable: false, constValue: 'person' },
+35:     { name: 'category', type: 'string', nullable: false, constValue: 'person' },
+36:     { name: 'type', type: 'string', nullable: false },
+37:     { name: 'severity', type: 'string', nullable: true },
+38:     { name: 'ts', type: 'string', nullable: false, format: 'naive-iso' },
+39:     { name: 'person_id', type: 'integer', nullable: true },
+40:     { name: 'title', type: 'string', nullable: true },
+41:     { name: 'state', type: 'string', nullable: true },
+42:     { name: 'priority', type: 'string', nullable: true },
+43:     { name: 'risk_score', type: 'number', nullable: true }
+44:   ],
+45:   sensorAlert: [
+46:     { name: 'alert_key', type: 'string', nullable: false, prefix: 'sensor:' },
+47:     { name: 'source', type: 'string', nullable: false, constValue: 'sensor' },
+48:     { name: 'category', type: 'string', nullable: false, constValue: 'sensor_environment' },
+49:     { name: 'type', type: 'string', nullable: false },
+50:     { name: 'severity', type: 'string', nullable: true },
+51:     { name: 'status', type: 'string', nullable: false, allowed: SENSOR_STATUS_VALUES },
+52:     { name: 'temperature', type: 'number', nullable: true },
+53:     { name: 'humidity', type: 'number', nullable: true },
+54:     { name: 'threshold', type: 'number', nullable: true },
+55:     { name: 'occurred_at', type: 'string', nullable: false, format: 'zoned-iso' },
+56:     { name: 'resolved_at', type: 'string', nullable: true },
+57:     { name: 'device_captured_at', type: 'string', nullable: true },
+58:     { name: 'reading_id', type: 'string', nullable: true },
+59:     { name: 'received_at', type: 'string', nullable: true }
+60:   ],
+61:   environmentReading: [
+62:     { name: 'reading_id', type: 'string', nullable: false },
+63:     { name: 'sensor_id', type: 'string', nullable: false },
+64:     { name: 'temperature', type: 'number', nullable: false },
+65:     { name: 'humidity', type: 'number', nullable: true },
+66:     { name: 'device_captured_at', type: 'string', nullable: false, format: 'zoned-iso' },
+67:     { name: 'edge_received_at', type: 'string', nullable: true },
+68:     { name: 'received_at', type: 'string', nullable: true }
+69:   ]
+70: };
+71: 
+
+[B] server/s4.py:81-98
+81: def get_db() -> Database:
+82:     """注入真实数据库（运行时 data/drrm.db；测试用 dependency_overrides 覆盖）。"""
+83:     return Database(db_path=os.environ.get("DRRM_DB", "data/drrm.db"))
+84: 
+85: 
+86: def _require_s4_token(authorization: Optional[str]) -> None:
+87:     token = (os.environ.get("S4_API_TOKEN") or "").strip()
+88:     if not token:
+89:         # 服务端未配置 Token：已确认语义 -> 500 INTERNAL_ERROR
+90:         raise S4Error(500, "INTERNAL_ERROR")
+91:     # 等时比较, 不泄露凭据; 缺失/空值/格式错误/不匹配一律 401。
+92:     expected = f"Bearer {token}".encode("utf-8")
+93:     provided = (authorization or "").encode("utf-8")
+94:     if not authorization or not hmac.compare_digest(provided, expected):
+95:         raise S4Error(401, "UNAUTHORIZED")
+96: 
+97: 
+98: # ----------------------------------------------------------------------
+
+[B] server/s4.py:220-246
+220: @router.get("/system/status")
+221: def system_status(
+222:     authorization: Optional[str] = Header(default=None),
+223: ) -> JSONResponse:
+224:     try:
+225:         _require_s4_token(authorization)
+226:         # S4-01：占位，不代表真实设备健康监控
+227:         return _ok_json({"device": {"status": "unknown"}, "modules": {}})
+228:     except S4Error as e:
+229:         return _fail_json(e.http_status, e.code)
+230: 
+231: 
+232: @router.get("/alerts")
+233: def alerts(
+234:     category: Optional[str] = Query(default=None),
+235:     page: Optional[str] = Query(default=None),
+236:     page_size: Optional[str] = Query(default=None),
+237:     authorization: Optional[str] = Header(default=None),
+238:     db: Database = Depends(get_db),
+239: ) -> JSONResponse:
+240:     try:
+241:         _require_s4_token(authorization)
+242:         _validate_category(category)
+243:         page, page_size = _paging(page, page_size)
+244:         person_total = db.count_person_alerts(PERSON_EVENT_TYPE)
+245:         sensor_total = db.count_sensor_alerts()
+246: 
+
+[B] server/s4.py:278-309
+278: @router.get("/alerts/{alert_key}")
+279: def alert_detail(
+280:     alert_key: str,
+281:     authorization: Optional[str] = Header(default=None),
+282:     db: Database = Depends(get_db),
+283: ) -> JSONResponse:
+284:     try:
+285:         _require_s4_token(authorization)
+286:         prefix, raw = _parse_alert_key(alert_key)
+287:         if prefix == "person":
+288:             ev = db.get_event(raw)
+289:             if ev is None:
+290:                 raise S4Error(404, "NOT_FOUND")
+291:             return _ok_json(_person_item(ev))
+292:         alert = db.get_sensor_alert(raw)
+293:         if alert is None:
+294:             raise S4Error(404, "NOT_FOUND")
+295:         return _ok_json(_sensor_item(alert))
+296:     except S4Error as e:
+297:         return _fail_json(e.http_status, e.code)
+298: 
+299: 
+300: @router.get("/alerts/{alert_key}/related")
+301: def alert_related(
+302:     alert_key: str,
+303:     authorization: Optional[str] = Header(default=None),
+304:     db: Database = Depends(get_db),
+305: ) -> JSONResponse:
+306:     try:
+307:         _require_s4_token(authorization)
+308:         prefix, raw = _parse_alert_key(alert_key)
+309:         readings: List[Dict[str, Any]] = []
+
+[B] server/s4.py:320-345
+320:                 reading = db.get_reading(rid)
+321:                 if reading is not None:
+322:                     readings = [_reading_item(reading)]
+323:         return _ok_json(
+324:             {"readings": readings, "media": [], "media_supported": False}
+325:         )
+326:     except S4Error as e:
+327:         return _fail_json(e.http_status, e.code)
+328: 
+329: 
+330: @router.get("/environment/readings")
+331: def environment_readings(
+332:     sensor_id: Optional[str] = Query(default=None),
+333:     start: Optional[str] = Query(default=None),
+334:     end: Optional[str] = Query(default=None),
+335:     page: Optional[str] = Query(default=None),
+336:     page_size: Optional[str] = Query(default=None),
+337:     authorization: Optional[str] = Header(default=None),
+338:     db: Database = Depends(get_db),
+339: ) -> JSONResponse:
+340:     try:
+341:         _require_s4_token(authorization)
+342:         page, page_size = _paging(page, page_size)
+343:         if start is not None and end is not None and end < start:
+344:             raise S4Error(422, "VALIDATION_ERROR")
+345: 
+
+[B] server/auth.py:95-126
+95: def get_current_user(
+96:     authorization: Optional[str] = Header(default=None),
+97:     db: Any = Depends(get_db),
+98: ):
+99:     """从 Bearer Session Token 解析当前用户；无效/缺/过期/撤销 → 401。
+100: 
+101:     不记录明文 Token；不改变 S4 `_require_s4_token` 语义。
+102:     """
+103:     _require_session(authorization)
+104:     token = authorization.split(" ", 1)[1].strip()
+105:     session = db.get_session_by_hash(_sha256(token))
+106:     if session is None:
+107:         raise AuthError(401, "UNAUTHORIZED")
+108:     now_str = _now_iso()
+109: 
+110:     # 已撤销
+111:     if session.get("revoked_at"):
+112:         raise AuthError(401, "UNAUTHORIZED")
+113:     # 过期
+114:     if session.get("expires_at") and session["expires_at"] <= now_str:
+115:         raise AuthError(401, "UNAUTHORIZED")
+116: 
+117:     user = db.get_user_by_id(session["user_id"])
+118:     if user is None:
+119:         raise AuthError(401, "UNAUTHORIZED")
+120:     return user
+121: 
+122: 
+123: def _require_session(authorization: Optional[str]) -> None:
+124:     if not authorization or not authorization.startswith("Bearer "):
+125:         raise AuthError(401, "UNAUTHORIZED")
+126: 
+
+[B] server/auth.py:131-165
+131: @router.post("/auth/login")
+132: def login(
+133:     payload: Dict[str, Any] = Body(default={}),
+134:     db: Any = Depends(get_db),
+135: ):
+136:     """微信登录：code → openid → 内部用户 → 新建 Session(24h) → 返回一次明文 Token。"""
+137:     try:
+138:         code = str((payload or {}).get("code") or "").strip()
+139:         if not code:
+140:             raise AuthError(400, "INVALID_PARAMETER")
+141: 
+142:         wechat = WechatClient(http_get=_default_wechat_http())
+143:         result = wechat.code2session(code)
+144:         openid = result.openid
+145: 
+146:         user_id = db.create_user(openid)                    # 幂等: 一 openid 一内部用户
+147:         token = secrets.token_urlsafe(32)                   # 明文，仅本次返回一次
+148:         expires_dt = datetime.now().astimezone() + timedelta(seconds=SESSION_TTL_SECONDS)
+149:         expires_at = expires_dt.isoformat(timespec="seconds")
+150:         db.create_session(user_id, _sha256(token), expires_at=expires_at)
+151: 
+152:         return _ok_json(
+153:             {
+154:                 "session_token": token,
+155:                 "expires_in": SESSION_TTL_SECONDS,
+156:                 "user_id": user_id,
+157:             }
+158:         )
+159:     except AuthError as e:
+160:         return _fail_json(e.http_status, e.code)
+161:     except WechatAuthError as e:
+162:         # 微信服务异常统一 502，不透传微信原始错误/密钥/完整响应
+163:         return _fail_json(502, "WECHAT_ERROR")
+164:     except Exception as exc:  # noqa: BLE001
+165:         import logging
+
+[B] server/auth.py:173-220
+173: @router.get("/auth/me")
+174: def me(
+175:     authorization: Optional[str] = Header(default=None),
+176:     db: Any = Depends(get_db),
+177: ):
+178:     """返回当前登录用户非敏感信息；无效/缺/过期/撤销 Token → 401 UNAUTHORIZED。"""
+179:     try:
+180:         if not authorization or not authorization.startswith("Bearer "):
+181:             raise AuthError(401, "UNAUTHORIZED")
+182:         token = authorization.split(" ", 1)[1].strip()
+183:         session = db.get_session_by_hash(_sha256(token))
+184:         now_str = _now_iso()
+185:         if session is None or session.get("revoked_at") \
+186:                 or (session.get("expires_at") and session["expires_at"] <= now_str):
+187:             raise AuthError(401, "UNAUTHORIZED")
+188:         user = db.get_user_by_id(session["user_id"])
+189:         if user is None:
+190:             raise AuthError(401, "UNAUTHORIZED")
+191:         return _ok_json({"user_id": user["user_id"]})
+192:     except AuthError as e:
+193:         return _fail_json(e.http_status, e.code)
+194:     except Exception as exc:  # noqa: BLE001
+195:         import logging
+196:         logging.getLogger("x4.auth").warning("auth/me internal: %s", type(exc).__name__)
+197:         return _fail_json(500, "INTERNAL_ERROR")
+198: 
+199: 
+200: # ----------------------------------------------------------------------
+201: # 登出（只撤销当前 Session，幂等，不影响同用户其他 Session）
+202: # ----------------------------------------------------------------------
+203: @router.post("/auth/logout")
+204: def logout(
+205:     authorization: Optional[str] = Header(default=None),
+206:     db: Any = Depends(get_db),
+207: ):
+208:     try:
+209:         _require_session(authorization)
+210:         token = authorization.split(" ", 1)[1].strip()
+211:         session = db.get_session_by_hash(_sha256(token))
+212:         if session is None:
+213:             # 未知 Token：视为已登出（幂等，401 或无操作）
+214:             return _fail_json(401, "UNAUTHORIZED")
+215:         db.revoke_session(session["session_id"])
+216:         return _ok_json({"revoked": session["session_id"]})
+217:     except AuthError as e:
+218:         return _fail_json(e.http_status, e.code)
+219:     except Exception as exc:  # noqa: BLE001
+220:         import logging
+
+[B] server/wechat.py:60-116
+60:         appid: Optional[str] = None,
+61:         appsecret: Optional[str] = None,
+62:         *,
+63:         timeout: float = DEFAULT_TIMEOUT_SECONDS,
+64:         http_get: Optional[Callable[[str, dict, float], dict]] = None,
+65:     ):
+66:         self.appid = appid if appid is not None else os.environ.get("WX_APPID", "")
+67:         self.appsecret = appsecret if appsecret is not None else os.environ.get("WX_APP_SECRET", "")
+68:         self.timeout = timeout
+69:         self._http_get = http_get or _default_http_get
+70: 
+71:     def code2session(self, code: str) -> WechatCode2SessionResult:
+72:         """用临时登录凭证 code 换取 OpenID / session_key。
+73: 
+74:         Raises:
+75:             WechatAuthError: 配置缺失 / code 非法 / 微信 errcode / 网络异常 / 缺 openid。
+76:         """
+77:         if not self.appid or not self.appsecret:
+78:             raise WechatAuthError("wechat auth not configured", errcode=-1)
+79:         if not code or not code.strip():
+80:             raise WechatAuthError("invalid code", errcode=-2)
+81: 
+82:         params = {
+83:             "appid": self.appid,
+84:             "secret": self.appsecret,
+85:             "js_code": code,
+86:             "grant_type": "authorization_code",
+87:         }
+88:         res = self._http_get(CODE2SESSION_URL, params, self.timeout)
+89:         data = res.get("json") if isinstance(res, dict) else None
+90:         if not isinstance(data, dict):
+91:             raise WechatAuthError("wechat invalid response")
+92: 
+93:         if data.get("errcode"):
+94:             raise WechatAuthError("wechat errcode", errcode=int(data["errcode"]))
+95: 
+96:         openid = str(data.get("openid") or "").strip()
+97:         session_key = str(data.get("session_key") or "").strip()
+98:         if not openid:
+99:             raise WechatAuthError("wechat missing openid")
+100:         if not session_key:
+101:             raise WechatAuthError("wechat missing session_key")
+102: 
+103:         return WechatCode2SessionResult(openid=openid, session_key=session_key)
+
+[B] server/media.py:52-62
+52: @router.get("/alerts/{alert_key}/media")
+53: def list_alert_media(
+54:     alert_key: str,
+55:     page: Optional[str] = Query(default=None),
+56:     page_size: Optional[str] = Query(default=None),
+57:     db: Any = Depends(s4_module.get_db),
+58:     _user: dict = Depends(get_current_user),
+59: ) -> JSONResponse:
+60:     """接口 A: 查询告警关联媒体元数据（D0-01：有效登录用户可查全部告警媒体，无归属隔离）。
+61: 
+62:     person 告警先验证事件存在（无媒体→空列表）；sensor 告警先验证告警存在再查媒体。
+
+[B] server/media.py:100-108
+100: @router.post("/media/{media_id}/access")
+101: def get_media_access(
+102:     media_id: str,
+103:     db: Any = Depends(s4_module.get_db),
+104:     _user: dict = Depends(get_current_user),
+105: ) -> JSONResponse:
+106:     """接口 B: 为已上传成功的媒体签发短期 GET 签名 URL。
+107: 
+108:     仅当 status=='success' 且 upload_status=='success' 才签发；否则 409。
+
+[B] server/media.py:141-145
+141: def install(app) -> None:
+142:     """供 server/api.py 挂载时注册 AuthError 全局异常处理器（保持四字段 401 信封）。"""
+143:     app.add_exception_handler(AuthError, _on_auth_error)
+
+[B] server/api.py:576-604
+576: # V4.4 S4 只读查询接口 (挂载独立 router, 契约 schemas/s4_contract.json v0.1.0)
+577: # 仅新增 S4 路由; 不改动既有 V4.3 端点/响应模型。
+578: # ======================================================================
+579: app.include_router(s4_module.router)
+580: app.include_router(c4_module.router)
+581: 
+582: # ----------------------------------------------------------------------
+583: # V4.4 媒体访问授权（D-0）— 已解耦至 server.media：
+584: # 仅当 auth 依赖存在时挂载媒体路由（保留 get_current_user 鉴权，绝不公开匿名）。
+585: # 使用精确模块存在性检查：server.media 存在但含真实错误时不会吞掉异常。
+586: # ----------------------------------------------------------------------
+587: import importlib.util as _ilu  # noqa: E402
+588: 
+589: if (
+590:     _ilu.find_spec("server.media") is not None
+591:     and _ilu.find_spec("server.auth") is not None
+592: ):
+593:     from server import media as media_module
+594:     media_module.install(app)
+595:     app.include_router(media_module.router)
+596: 
+597: # ----------------------------------------------------------------------
+598: # V4.4 微信用户认证（server.auth）：登录 / 当前用户 / 退出已在此挂载。
+599: # 仅当 server.auth 存在时注册（保持干净部署可独立启动）；
+600: # 认证 Session Token 语义与 S4 服务 Token 相互独立，不改变 S4 鉴权。
+601: # ----------------------------------------------------------------------
+602: if _ilu.find_spec("server.auth") is not None:
+603:     from server import auth as auth_module
+604:     app.include_router(auth_module.router)
+
+[B] src/sync/worker.py:18-20
+18: # 业务数据同步：reading/sensor_alert 在 HTTP 载荷携带完整业务本体（服务端写只读副本）
+19: _BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert"})
+20: 
+
+[B] src/sync/worker.py:49-78
+49:     def _read_business(self, record_type: str, source_record_id: str) -> Optional[dict]:
+50:         if record_type == "person_event":
+51:             row = self.db.get_event(source_record_id)
+52:             if not row:
+53:                 return None
+54:             # get_event 已把 payload JSON 反序列化为 dict
+55:             return {"type": row["type"], "severity": row.get("severity"),
+56:                     "person_id": row.get("person_id"), "payload": row.get("payload")}
+57:         if record_type == "reading":
+58:             row = self.db.get_reading(source_record_id)
+59:             if not row:
+60:                 return None
+61:             return {"sensor_id": row["sensor_id"],
+62:                     "temperature": bridge.exact_number(row.get("temperature")),
+63:                     "humidity": bridge.exact_number(row.get("humidity")),
+64:                     "device_captured_at": row.get("device_captured_at"),
+65:                     # 已定义的接收元数据需随副本保留，但不参与业务内容哈希。
+66:                     "edge_received_at": row.get("edge_received_at")}
+67:         if record_type == "sensor_alert":
+68:             row = self.db.get_sensor_alert(source_record_id)
+69:             if not row:
+70:                 return None
+71:             return {"type": row["type"],
+72:                     "temperature": bridge.exact_number(row.get("temperature")),
+73:                     "humidity": bridge.exact_number(row.get("humidity")),
+74:                     "threshold": bridge.exact_number(row.get("threshold")),
+75:                     "severity": row.get("severity"), "device_captured_at": row.get("device_captured_at"),
+76:                     "reading_id": row.get("reading_id"), "occurred_at": row.get("occurred_at")}
+77:         return None
+78: 
+
+[B] src/sync/worker.py:134-166
+134:     def process_one(self, oid: int, gen: int) -> str:
+135:         row = self.db.get_outbox(oid)
+136:         if not row:
+137:             return "lost"
+138:         rt, sid = row["record_type"], row["source_record_id"]
+139:         biz = self._read_business(rt, sid)
+140:         if not biz:
+141:             self.db.outbox_mark_dead_letter(oid, self.worker_id, gen, last_error="unbuildable:missing_business")
+142:             return "dead"
+143:         h, reasons = self._hash_for(rt, sid, biz)
+144:         if not h:
+145:             return self._to_verify(oid, gen, rt, sid, reasons, biz)
+146:         rec = {"record_type": rt, "source_record_id": sid, "content_hash": h}
+147:         # 业务数据同步：reading/sensor_alert 携带完整业务本体（精确表示），供服务端写只读副本。
+148:         # person_event 继续沿用旧协议(无 business)；media_evidence 永不入 Outbox/载荷。
+149:         if rt in _BUSINESS_CARRIERS and isinstance(biz, dict):
+150:             rec["business"] = biz
+151:         payload = {"records": [rec]}
+152:         headers = {"Authorization": f"Bearer {self.token}"}
+153:         try:
+154:             resp = self._post(self.base_url + "/api/v1/c4/records", json=payload,
+155:                               headers=headers, timeout=self.timeout)
+156:         except Exception as exc:  # noqa: BLE001
+157:             return self._retry(oid, gen, f"network:{exc}")
+158: 
+159:         status = self._parse(resp, sid)
+160:         if status in ("synced", "already_synced"):
+161:             ok = self.db.outbox_mark_success(oid, self.worker_id, gen)
+162:             return "success" if ok else "lost"
+163:         if status in ("content_mismatch", "invalid"):
+164:             ok = self.db.outbox_mark_dead_letter(oid, self.worker_id, gen, last_error=status)
+165:             return "dead" if ok else "lost"
+166:         return self._retry(oid, gen, "retryable:" + status)
+
+[B] server/c4.py:34-43
+34: _C4_RECORD_TYPES = frozenset({"person_event", "reading", "sensor_alert"})
+35: 
+36: # 需携带业务本体的记录类型（writing 业务只读副本到服务端库 readings/sensor_alerts）
+37: _BUSINESS_CARRIERS = frozenset({"reading", "sensor_alert"})
+38: 
+39: # 各类型的必填业务字段（缺失 → 整批 400，不产生半写入）
+40: _BUSINESS_REQUIRED = {
+41:     "reading": frozenset({"sensor_id", "temperature", "device_captured_at"}),
+42:     "sensor_alert": frozenset({"type", "occurred_at"}),
+43: }
+
+[B] server/c4.py:139-168
+139: def _write_business_copy(tx, rt: str, sid: str, business: Dict[str, Any], recv_iso: str) -> None:
+140:     """在调用方事务内写 Windows 只读业务副本（readings / sensor_alerts）。
+141: 
+142:     同一事务与 c4_idem 登记一起提交；失败则整体回滚（不出现"已登记但无副本/有副本未登记"）。
+143:     """
+144:     if rt == "reading":
+145:         tx.execute(
+146:             """
+147:             INSERT INTO readings
+148:               (reading_id, sensor_id, temperature, humidity, device_captured_at,
+149:                edge_received_at, received_at)
+150:             VALUES (?, ?, ?, ?, ?, ?, ?)
+151:             """,
+152:             (sid, business.get("sensor_id"), business.get("temperature"),
+153:              business.get("humidity"), business.get("device_captured_at"),
+154:              business.get("edge_received_at"), recv_iso),
+155:         )
+156:     elif rt == "sensor_alert":
+157:         tx.execute(
+158:             """
+159:             INSERT INTO sensor_alerts
+160:               (alert_id, type, severity, temperature, humidity, threshold, status,
+161:                occurred_at, resolved_at, device_captured_at, received_at, reading_id)
+162:             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+163:             """,
+164:             (sid, business.get("type"), business.get("severity"),
+165:              business.get("temperature"), business.get("humidity"), business.get("threshold"),
+166:              business.get("status", "active"), business.get("occurred_at"),
+167:              business.get("resolved_at"), business.get("device_captured_at"),
+168:              recv_iso, business.get("reading_id")),
+
+[B] server/c4.py:172-218
+172: def _ingest(db: Database, rec: Dict[str, Any]) -> str:
+173:     """单条幂等接收+业务副本落地。
+174: 
+175:     - 无登记 → (业务合法且 hash 复核一致) 同一事务登记 c4_idem 并写业务副本 → synced；
+176:       业务缺失(旧客户端/person_event) → 仅登记 → synced（兼容，不写副本）。
+177:     - 同hash → already_synced（不重复入库）。
+178:     - 异hash / hash 复核不一致 → content_mismatch（冲突审计，不覆盖首收，不写副本）。
+179:     """
+180:     _validate_record(rec)
+181:     rt = rec.get("record_type")
+182:     sid = rec.get("source_record_id")
+183:     ch = rec.get("content_hash")
+184:     edge = rec.get("edge_id")
+185:     business = rec.get("business")
+186:     now = int(__import__("time").time() * 1000)
+187:     recv_iso = datetime.now().astimezone().isoformat(timespec="seconds")
+188:     with db.with_transaction() as tx:
+189:         row = tx.execute(
+190:             "SELECT content_hash FROM c4_idem WHERE record_type=? AND source_record_id=?",
+191:             (rt, sid),
+192:         ).fetchone()
+193:         if row is None:
+194:             # 首收：若携带业务本体，则复核 hash；不一致 → 记冲突、不写副本
+195:             if isinstance(business, dict):
+196:                 _h, _why = _hash_of_business(rt, business)
+197:                 if not _h or _h != ch:
+198:                     tx.execute(
+199:                         """
+200:                         INSERT INTO c4_content_conflict
+201:                           (record_type, source_record_id, content_hash, conflict_hash,
+202:                            detected_at, edge_id)
+203:                         VALUES (?, ?, ?, ?, ?, ?)
+204:                         """,
+205:                         (rt, sid, ch, _h or "", now, edge),
+206:                     )
+207:                     return "content_mismatch"
+208:             tx.execute(
+209:                 "INSERT INTO c4_idem (record_type, source_record_id, content_hash, received_at, edge_id) "
+210:                 "VALUES (?, ?, ?, ?, ?)",
+211:                 (rt, sid, ch, now, edge),
+212:             )
+213:             # 同事务写 Windows 只读业务副本（合法业务本体；person_event 不写）
+214:             if rt in _BUSINESS_CARRIERS and isinstance(business, dict):
+215:                 _write_business_copy(tx, rt, sid, business, recv_iso)
+216:             return "synced"
+217:         if row["content_hash"] == ch:
+218:             return "already_synced"
+
+[B] src/sensor/alarm.py:73-95
+73:     def _create_alert(self, temp: float, captured_at: str, threshold: float) -> str:
+74:         # 经 C4 bridge 创建 sensor alert: 单事务内业务写 + Outbox/verify 分流。
+75:         # occurred_at 在此唯一确定一次, 同一值同时进入 canonical(hash) 与持久化, 不被核心重新生成。
+76:         from src.sync import bridge as c4_bridge
+77:         occurred_at = datetime.now().astimezone().isoformat()
+78:         res = c4_bridge.create_sync_record(
+79:             self.db,
+80:             record_type="sensor_alert",
+81:             business={
+82:                 "type": ALERT_TYPE,
+83:                 "temperature": c4_bridge.exact_number(temp),
+84:                 "threshold": c4_bridge.exact_number(threshold),
+85:                 "device_captured_at": captured_at,
+86:                 "occurred_at": occurred_at,
+87:             },
+88:         )
+89:         return res["source_record_id"]
+90: 
+91:     def _resolve_alert(self, alert_id: str, resolved_at: str) -> None:
+92:         ok = self.db.update_sensor_alert_status(alert_id, "resolved", resolved_at=resolved_at)
+93:         if not ok:
+94:             raise SensorPersistError(f"告警 {alert_id!r} 不存在或状态未变更，恢复失败")
+95: 
+
+[B] src/sensor/alarm.py:149-169
+149:             self.high_count = 0
+150:             self.level2_count = 0
+151:             self.recovery_count += 1
+152:             self.state = STATE_CONFIRM_RECOVERY
+153:             if self.recovery_count >= self.cfg.confirm_recovery_count:
+154:                 alert_id = self.active_id
+155:                 resolved_at = captured_at or self._now_iso()
+156:                 if alert_id is None:
+157:                     row = self._find_active()
+158:                     if row is not None:
+159:                         alert_id = row["alert_id"]
+160:                 if alert_id is not None:
+161:                     self._resolve_alert(alert_id, resolved_at)
+162:                     self._last_resolved_ts = resolved_at
+163:                 self.state = STATE_NORMAL
+164:                 self.recovery_count = 0
+165:                 self.active_id = None
+166:                 self.active_level = None
+167:                 return {"type": "alert_resolved", "alert_id": alert_id,
+168:                         "occurred_at": resolved_at}
+169:             return None
+
+[B] src/database/db.py:299-312
+299:     def _event_write_core(self, conn, *, type, severity, person_id, payload, source_id: str | None = None) -> str:
+300:         event_id = source_id or self._event_id()
+301:         payload_json = json.dumps(payload, ensure_ascii=False, default=str)
+302:         ts = self._now()
+303:         conn.execute(
+304:             """
+305:             INSERT INTO events (event_id, ts, type, severity, person_id, payload)
+306:             VALUES (?, ?, ?, ?, ?, ?)
+307:             """,
+308:             (event_id, ts, type, severity, person_id, payload_json),
+309:         )
+310:         return event_id
+311: 
+312:     def _reading_write_core(self, conn, *, sensor_id, temperature, humidity, device_captured_at, edge_received_at, source_id: str | None = None) -> str:
+
+[B] src/database/db.py:1246-1292
+1246:     def update_sensor_alert_status(
+1247:         self,
+1248:         alert_id: str,
+1249:         status: str,
+1250:         resolved_at: str | None = None,
+1251:     ) -> bool:
+1252:         """
+1253:         Update a sensor alert status (REQ-E7-04: active -> resolved).
+1254: 
+1255:         resolved_at: 提供则一并写入 (缺省=当前带时区时间)。
+1256:         返回是否影响 (False 表示 alert 不存在或状态未变)。
+1257:         """
+1258: 
+1259:         new_status = str(status).lower().strip()
+1260: 
+1261:         if new_status not in (
+1262:             "active",
+1263:             "resolved",
+1264:         ):
+1265:             raise ValueError(
+1266:                 f"非法告警状态: {status!r} "
+1267:                 f"(仅允许 active/resolved)"
+1268:             )
+1269: 
+1270:         ts = (
+1271:             resolved_at
+1272:             or self._now_iso()
+1273:         )
+1274: 
+1275:         with self._connect() as conn:
+1276:             cursor = conn.execute(
+1277:                 """
+1278:                 UPDATE sensor_alerts
+1279:                 SET status = ?,
+1280:                     resolved_at = ?
+1281:                 WHERE alert_id = ?
+1282:                 """,
+1283:                 (
+1284:                     new_status,
+1285:                     ts,
+1286:                     alert_id,
+1287:                 ),
+1288:             )
+1289: 
+1290:         return (
+1291:             cursor.rowcount > 0
+1292:         )
+
+[B] src/database/db.py:2171-2183
+2171:     def outbox_mark_success(self, outbox_id: int, worker_id: str, gen: int, now_ms: int | None = None) -> bool:
+2172:         """成功回写 (终态): 校验 id+processing+gen。"""
+2173:         now = now_ms if now_ms is not None else self._utc_now_ms()
+2174:         with self._connect() as conn:
+2175:             cur = conn.execute(
+2176:                 """
+2177:                 UPDATE sync_outbox SET status='success', completed_at=:now
+2178:                 WHERE id=:id AND status='processing' AND worker_id=:me AND gen=:gen
+2179:                 """,
+2180:                 {"id": outbox_id, "me": worker_id, "gen": gen, "now": now},
+2181:             )
+2182:             return cur.rowcount > 0
+2183: 
+
+[B] src/database/db.py:2214-2234
+2214:     def outbox_requeue(self, outbox_id: int, *, reason: str = "manual", now_ms: int | None = None):
+2215:         """人工重入: dead_letter -> pending; 保留原失败历史(追加 requeued 标记), 重置重试计数。"""
+2216:         now = now_ms if now_ms is not None else self._utc_now_ms()
+2217:         with self.with_transaction() as tx:
+2218:             row = tx.execute(
+2219:                 "SELECT last_error FROM sync_outbox WHERE id=? AND status='dead_letter'",
+2220:                 (outbox_id,),
+2221:             ).fetchone()
+2222:             if row is None:
+2223:                 return False
+2224:             hist = (row["last_error"] or "") + f"|requeued@{now}:{reason}"
+2225:             cur = tx.execute(
+2226:                 """
+2227:                 UPDATE sync_outbox
+2228:                 SET status='pending', gen=gen+1, retry_count=0, next_attempt_at=NULL,
+2229:                     worker_id=NULL, lease_until=NULL, last_error=:hist
+2230:                 WHERE id=:id AND status='dead_letter'
+2231:                 """,
+2232:                 {"hist": hist, "id": outbox_id},
+2233:             )
+2234:             return cur.rowcount > 0
+
+[B] src/database/canonical.py:38-52
+38: })
+39: 
+40: _UNP = object()          # 规范化失败哨兵
+41: _HASH_VERSION = "v1"
+42: 
+43: # 字段白名单 (每拥有型: 参与业务内容哈希的字段)
+44: WHITELIST: dict[str, frozenset] = {
+45:     "person_event": frozenset({"state", "risk_score", "priority", "timestamp", "person_id"}),
+46:     "reading": frozenset({"sensor_id", "temperature", "humidity", "device_captured_at"}),
+47:     "sensor_alert": frozenset({
+48:         "type", "temperature", "humidity", "threshold",
+49:         "occurred_at", "device_captured_at", "reading_id",
+50:     }),
+51: }
+52: 
+
+[B] src/tools/database_tool.py:90-115
+90:             # ==================================================
+91: 
+92:             if action == "save_event":
+93:                 from src.sync import bridge as c4_bridge
+94:                 _shot = c4_bridge.create_sync_record(
+95:                     self.db,
+96:                     record_type="person_event",
+97:                     business={
+98:                         "type": kwargs.get("type", "unknown"),
+99:                         "severity": kwargs.get("severity"),
+100:                         "person_id": kwargs.get("person_id"),
+101:                         "payload": kwargs.get("payload", {}),
+102:                     },
+103:                 )
+104:                 event_id = _shot["source_record_id"]
+105: 
+106:                 return {
+107:                     "ok": True,
+108:                     "action": action,
+109:                     "event_id": event_id,
+110:                 }
+111: 
+112:             # ==================================================
+113:             # 2. get_recent_events
+114:             # ==================================================
+115: 
+
+[B] tests/test_c4_s4_flow.py:34-66
+34:         parent.mkdir(exist_ok=True)
+35:         self.artifacts = Path(tempfile.mkdtemp(prefix="c4_s4_ASGI_TEST_", dir=parent))
+36:         self.requests = []
+37:         self.edge = Database(db_path=str(self.artifacts / "edge_TEST.db"))
+38:         self.server = Database(db_path=str(self.artifacts / "server_TEST.db"))
+39:         self.c4_token, self.s4_token = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
+40:         env = patch.dict(os.environ, {"C4_API_TOKEN": self.c4_token, "S4_API_TOKEN": self.s4_token})
+41:         env.start()
+42:         self.addCleanup(env.stop)
+43:         app = FastAPI()
+44:         app.include_router(c4.router)
+45:         app.include_router(s4.router)
+46:         app.dependency_overrides[c4.get_db] = lambda: self.server
+47:         app.dependency_overrides[s4.get_db] = lambda: self.server
+48:         self.client = TestClient(app)
+49:         self.client.__enter__()
+50:         self.addCleanup(self.client.__exit__, None, None, None)
+51:         self.clock = int(time.time() * 1000) + 60_000
+52:         self.worker = self.make_worker()
+53: 
+54:     def tearDown(self):
+55:         # No auth headers/tokens are persisted in evidence.
+56:         evidence = {"scope": "SOFTWARE_ASGI_TEST_NOT_REAL_HARDWARE_OR_NETWORK",
+57:                     "case": self.id(), "http": self.requests,
+58:                     "edge_outbox": self.edge.list_outbox(),
+59:                     "server_readings": self.server.query_readings(limit=100),
+60:                     "server_alerts": self.server.query_sensor_alerts(limit=100)}
+61:         (self.artifacts / "evidence.json").write_text(
+62:             json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
+63: 
+64:     def post(self, url, json=None, headers=None, timeout=None):
+65:         response = self.client.post(urlsplit(url).path, json=json, headers=headers)
+66:         self.requests.append({"payload": copy.deepcopy(json), "status": response.status_code,
+
+[B] tests/test_c4_s4_flow.py:178-201
+178:     def test_person_event_reaches_server_s4_after_worker_reports_success(self):
+179:         result = bridge.create_sync_record(self.edge, record_type="person_event", business={
+180:             "type": "high_risk_alert", "severity": "HIGH", "person_id": 1,
+181:             "payload": {"state": "Help-Waving", "priority": "HIGH", "risk_score": 1,
+182:                         "timestamp": "2026-11-03T10:00:00+08:00"},
+183:         })
+184:         self.assertEqual(result["status"], "queued")
+185:         sid = result["source_record_id"]
+186:         self.assertIsNone(self.server.get_event(sid))
+187:         self.assertEqual(self.worker.process_batch(10), ["success"])
+188:         body = self.get("/api/v1/alerts", params={"category": "person"})
+189:         self.assertEqual([row["alert_key"] for row in body["data"]], [f"person:{sid}"],
+190:                          "C4 acknowledgement alone cannot substitute for a queryable person-event copy")
+191: 
+192:     def test_sensor_resolution_reaches_server_after_initial_sync(self):
+193:         sid = self.seed_alert()
+194:         self.assertEqual(self.worker.process_batch(10), ["success"])
+195:         resolved = "2026-11-03T10:01:00+08:00"
+196:         self.assertTrue(self.edge.update_sensor_alert_status(sid, "resolved", resolved_at=resolved))
+197:         self.assertEqual(self.edge.get_sensor_alert(sid)["status"], "resolved")
+198:         self.worker.process_batch(10)
+199:         detail = self.get(f"/api/v1/alerts/sensor:{sid}")["data"]
+200:         self.assertEqual(detail["status"], "resolved", "Server must not retain active after authoritative recovery")
+201:         self.assertEqual(detail["resolved_at"], resolved)

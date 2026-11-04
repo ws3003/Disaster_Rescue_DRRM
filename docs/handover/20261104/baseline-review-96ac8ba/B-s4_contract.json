@@ -1,0 +1,268 @@
+{
+  "contract_name": "V4.4 S4 Read-Only API Contract",
+  "contract_version": "0.1.0",
+  "status": "draft",
+  "scope": {
+    "interfaces": ["S4-01", "S4-02", "S4-03", "S4-04", "S4-06"],
+    "method": "GET only",
+    "read_only": true,
+    "no_s4_05": true,
+    "no_auth_login_issue_refresh_revoke_endpoints": true
+  },
+  "response_envelope": {
+    "fields": ["code", "message", "data", "meta"],
+    "success": {
+      "code": "OK",
+      "message": "ok"
+    },
+    "error": {
+      "data": null,
+      "meta": {}
+    },
+    "scope_note": "四字段信封仅用于五个 S4 接口；既有 V4.3 的 success/ok 响应模型保持不变。"
+  },
+  "pagination": {
+    "page_default": 1,
+    "page_size_default": 20,
+    "page_size_max": 100,
+    "meta_fields": ["page", "page_size", "total", "has_more"],
+    "has_more_formula": "page * page_size < total",
+    "empty_list": {
+      "data": [],
+      "total": 0,
+      "has_more": false
+    },
+    "merged_order": "人员告警组优先，传感器告警组其次",
+    "global_offset_formula": "(page - 1) * page_size",
+    "sensor_group_offset_formula": "max(0, global_offset - person_total)",
+    "total_formula": "person_total + sensor_total (unfiltered by category)",
+    "no_global_cross_group_time_sort": true,
+    "count_filter_consistency": true,
+    "person_sort": {
+      "primary": "events.ts DESC",
+      "secondary": "event_id DESC"
+    },
+    "sensor_sort": {
+      "primary": "sensor_alerts.occurred_at DESC",
+      "secondary": "alert_id DESC"
+    },
+    "note": "事件 ts 为本地 naive ISO，传感器 occurred_at 为带时区 ISO，语义不同，不得做跨表全局时间排序。"
+  },
+  "authentication": {
+    "scheme": "Bearer",
+    "request_header": "Authorization: Bearer <token>",
+    "scope": [
+      "GET /api/v1/system/status",
+      "GET /api/v1/alerts",
+      "GET /api/v1/alerts/{alert_key}",
+      "GET /api/v1/alerts/{alert_key}/related",
+      "GET /api/v1/environment/readings"
+    ],
+    "implementation_status": "implemented",
+    "env_name": "S4_API_TOKEN",
+    "lifecycle": "server-static-bearer-token",
+    "prohibited_reuse_of_outbound_credentials": [
+      "VLM_API_KEY",
+      "LLM_API_KEY",
+      "OSS_ACCESS_KEY",
+      "OSS_ACCESS_SECRET"
+    ],
+    "no_login_issue_refresh_revoke_endpoints": true,
+    "note": "当前源码尚未实现 S4 入站鉴权；环境变量名称、Token 生命周期与校验细节待后续实施设计确定。"
+  },
+  "errors": {
+    "INVALID_PARAMETER": { "http_status": 400, "scenario": "参数缺失/类型/格式/取值范围错误，或 alert ID 格式非法" },
+    "UNAUTHORIZED": { "http_status": 401, "scenario": "认证凭证缺失、无效或过期" },
+    "FORBIDDEN": { "http_status": 403, "scenario": "身份有效但权限不足" },
+    "NOT_FOUND": { "http_status": 404, "scenario": "ID 格式合法但对应记录不存在" },
+    "VALIDATION_ERROR": { "http_status": 422, "scenario": "语义校验失败，如 start 晚于 end" },
+    "INTERNAL_ERROR": { "http_status": 500, "scenario": "内部错误" }
+  },
+  "alert_identifiers": {
+    "person_alert_key": "person:<event_id>",
+    "sensor_alert_key": "sensor:<alert_id>",
+    "db_ids_unchanged": true,
+    "person_filter": "events.type == high_risk_alert",
+    "category_values_source": "category 为列表接口筛选参数",
+    "note": "person:/sensor: 前缀仅在 API 层拼装，不修改数据库原始 ID。"
+  },
+  "endpoints": [
+    {
+      "req_number": "S4-01",
+      "path": "/api/v1/system/status",
+      "method": "GET",
+      "params": [],
+      "data": {
+        "structure": {
+          "device": { "status": "unknown" },
+          "modules": {}
+        }
+      },
+      "meta": {},
+      "auth": true,
+      "errors": ["UNAUTHORIZED", "FORBIDDEN", "INTERNAL_ERROR"],
+      "implementation_status": "placeholder_not_implemented",
+      "note": "device.status=unknown 且 modules={} 为占位，不代表已实现真实设备健康监控或模块监控。"
+    },
+    {
+      "req_number": "S4-02",
+      "path": "/api/v1/alerts",
+      "method": "GET",
+      "params": [
+        { "name": "category", "required": false, "values": ["person", "sensor_environment"], "description": "告警分组筛选；缺省返回两组" },
+        { "name": "page", "required": false, "default": 1, "min": 1, "description": "页码" },
+        { "name": "page_size", "required": false, "default": 20, "min": 1, "max": 100, "description": "每页数量" }
+      ],
+      "data": {
+        "structure": "人员告警 DTO 组 + 传感器告警 DTO 组的合并数组（人员组优先）"
+      },
+      "meta": ["page", "page_size", "total", "has_more"],
+      "auth": true,
+      "errors": ["INVALID_PARAMETER", "UNAUTHORIZED", "FORBIDDEN", "INTERNAL_ERROR"],
+      "implementation_status": "implemented",
+      "sort": {
+        "person": "events.ts DESC, event_id DESC",
+        "sensor": "occurred_at DESC, alert_id DESC"
+      },
+      "note": "未传 category 时 total=person_total+sensor_total；合并后分页，不做跨组全局时间排序；无结果时 data=[], total=0, has_more=false。"
+    },
+    {
+      "req_number": "S4-03",
+      "path": "/api/v1/alerts/{alert_key}",
+      "method": "GET",
+      "params": [
+        { "name": "alert_key", "required": true, "description": "person:<event_id> 或 sensor:<alert_id>；人/传感器按来源所述区分" }
+      ],
+      "data": {
+        "structure": "单条人员告警 DTO 或单条传感器告警 DTO"
+      },
+      "meta": {},
+      "auth": true,
+      "errors": ["INVALID_PARAMETER", "UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "INTERNAL_ERROR"],
+      "implementation_status": "implemented",
+      "note": "非法 ID 格式返回 400 INVALID_PARAMETER；格式合法但记录不存在返回 404 NOT_FOUND。",
+      "dao_dependency": "人员告警详情查询依赖 get_event(event_id)；该 DAO 能力当前尚未实现（此为本契约的依赖与实现状态说明，不作为本轮实现要求）。"
+    },
+    {
+      "req_number": "S4-04",
+      "path": "/api/v1/alerts/{alert_key}/related",
+      "method": "GET",
+      "params": [
+        { "name": "alert_key", "required": true, "description": "person:<event_id> 或 sensor:<alert_id>" }
+      ],
+      "data": {
+        "structure": {
+          "readings": [],
+          "media": [],
+          "media_supported": false
+        }
+      },
+      "meta": {},
+      "auth": true,
+      "errors": ["INVALID_PARAMETER", "UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "INTERNAL_ERROR"],
+      "implementation_status": "implemented",
+      "relation_rule": "仅通过 sensor_alerts.reading_id 关联读数，最多一条；人员告警不关联环境读数；不允许按时间接近程度推断关联；无已核实的媒体记录表或视频媒体 URL，media 为占位。",
+      "relation_note": "data.readings 中的 [] 仅为空结果示例，不代表实际响应恒为空；实际 readings 数组可包含 0~1 条环境读数 DTO（仅经 sensor_alerts.reading_id 关联）；不得按时间接近程度推断关联；不得伪造媒体记录或 URL。"
+    },
+    {
+      "req_number": "S4-06",
+      "path": "/api/v1/environment/readings",
+      "method": "GET",
+      "params": [
+        { "name": "sensor_id", "required": false, "description": "传感器标识" },
+        { "name": "start", "required": false, "description": "带时区 ISO 8601 时间，按 device_captured_at 闭区间下界" },
+        { "name": "end", "required": false, "description": "带时区 ISO 8601 时间，按 device_captured_at 闭区间上界" },
+        { "name": "page", "required": false, "default": 1, "min": 1 },
+        { "name": "page_size", "required": false, "default": 20, "min": 1, "max": 100 }
+      ],
+      "data": {
+        "structure": "环境读数 DTO 数组"
+      },
+      "meta": ["page", "page_size", "total", "has_more"],
+      "auth": true,
+      "errors": ["INVALID_PARAMETER", "UNAUTHORIZED", "FORBIDDEN", "VALIDATION_ERROR", "INTERNAL_ERROR"],
+      "implementation_status": "implemented",
+      "note": "device_captured_at 闭区间；默认排序 device_captured_at ASC；start > end 返回 422 VALIDATION_ERROR；received_at 可为 null；温度/湿度单位 ℃/%RH 为展示约定，实际采集与存储单位待 E7 核实。"
+    }
+  ],
+  "dto_rules": {
+    "person_alert": {
+      "source": "events 表（仅 type == high_risk_alert）+ 事件 payload",
+      "fields": [
+        { "name": "alert_key", "type": "string", "nullable": false, "source": "person:<event_id>（API 层拼装）" },
+        { "name": "source", "type": "string", "nullable": false, "source": "固定值 person" },
+        { "name": "category", "type": "string", "nullable": false, "source": "固定值 person" },
+        { "name": "type", "type": "string", "nullable": false, "source": "events.type" },
+        { "name": "severity", "type": "string", "nullable": true, "source": "events.severity（透传）" },
+        { "name": "ts", "type": "string", "nullable": false, "source": "events.ts（本地 naive ISO）" },
+        { "name": "person_id", "type": "integer", "nullable": true, "source": "events.person_id" },
+        { "name": "title", "type": "string", "nullable": true, "source": "事件 payload 中 title，有则透传，无则 null" },
+        { "name": "state", "type": "string", "nullable": true, "source": "事件 payload 中 state，有则透传，无则 null" },
+        { "name": "priority", "type": "string", "nullable": true, "source": "事件 payload 中 priority，有则透传，无则 null" },
+        { "name": "risk_score", "type": "number", "nullable": true, "source": "事件 payload 中 risk_score，有则透传，无则 null" }
+      ],
+      "note": "不新增未经批准的 severity/state/priority 枚举限制。"
+    },
+    "sensor_alert": {
+      "source": "sensor_alerts 表",
+      "fields": [
+        { "name": "alert_key", "type": "string", "nullable": false, "source": "sensor:<alert_id>（API 层拼装）" },
+        { "name": "source", "type": "string", "nullable": false, "source": "固定值 sensor" },
+        { "name": "category", "type": "string", "nullable": false, "source": "固定值 sensor_environment" },
+        { "name": "type", "type": "string", "nullable": false, "source": "sensor_alerts.type（透传）" },
+        { "name": "severity", "type": "string", "nullable": true, "source": "sensor_alerts.severity（透传）" },
+        { "name": "status", "type": "string", "nullable": false, "allowed": ["active", "resolved"], "source": "sensor_alerts.status" },
+        { "name": "temperature", "type": "number", "nullable": true, "source": "sensor_alerts.temperature（触发快照）" },
+        { "name": "humidity", "type": "number", "nullable": true, "source": "sensor_alerts.humidity（触发快照）" },
+        { "name": "threshold", "type": "number", "nullable": true, "source": "sensor_alerts.threshold（触发阈值快照）" },
+        { "name": "occurred_at", "type": "string", "nullable": false, "source": "sensor_alerts.occurred_at（带时区 ISO）" },
+        { "name": "resolved_at", "type": "string", "nullable": true, "source": "sensor_alerts.resolved_at" },
+        { "name": "device_captured_at", "type": "string", "nullable": true, "source": "sensor_alerts.device_captured_at" },
+        { "name": "reading_id", "type": "string", "nullable": true, "source": "sensor_alerts.reading_id（关联读数键）" },
+        { "name": "received_at", "type": "string", "nullable": true, "source": "sensor_alerts.received_at（C4 前为 null）" }
+      ],
+      "note": "type/severity 按既有字段透传；status 仅使用已确认的 active/resolved。"
+    },
+    "environment_reading": {
+      "source": "readings 表",
+      "fields": [
+        { "name": "reading_id", "type": "string", "nullable": false, "source": "readings.reading_id" },
+        { "name": "sensor_id", "type": "string", "nullable": false, "source": "readings.sensor_id" },
+        { "name": "temperature", "type": "number", "nullable": false, "source": "readings.temperature" },
+        { "name": "humidity", "type": "number", "nullable": true, "source": "readings.humidity" },
+        { "name": "device_captured_at", "type": "string", "nullable": false, "source": "readings.device_captured_at（带时区 ISO）" },
+        { "name": "edge_received_at", "type": "string", "nullable": true, "source": "readings.edge_received_at" },
+        { "name": "received_at", "type": "string", "nullable": true, "source": "readings.received_at（C4 前为 null）" }
+      ],
+      "note": "温度/湿度显示单位为 ℃/%RH（展示约定）；实际采集与存储单位待 E7 链路核实。"
+    },
+    "note": "不做枚举推断；缺失字段以 null 表示，不伪造默认风险等级或状态。"
+  },
+  "dao_capabilities": {
+    "required_minimum": [
+      "query_person_alerts",
+      "get_event",
+      "count_person_alerts",
+      "count_sensor_alerts",
+      "count_readings"
+    ],
+    "auto_implemented": false,
+    "implemented_status": "implemented",
+    "constraints": {
+      "parameterized_sql": true,
+      "count_matches_list_filter": true
+    },
+    "note": "这些是后续实现要求，不代表已经存在于源码；人员告警查询、COUNT 与合并分页仍需后续实现和验证。"
+  },
+  "implementation_constraints": [
+    "S4 为只读 API。",
+    "本契约不增加 S4-05，也不增加 Token 登录/签发/刷新/撤销接口。",
+    "S4 错误处理仅适用于 S4 路由，不得通过全局异常处理器或中间件改变 V4.3 既有接口行为。",
+    "V4.3 冻结核心（state/detector/pose/risk/ranking/writer 及既有 events/persons/tasks/agent_logs 逻辑）不属本次修改范围。",
+    "未实现能力（S4 路由、Bearer 鉴权、人员 DAO/COUNT、媒体、received_at 写入等）不得描述为已上线。",
+    "温度/湿度单位的真实采集与存储情况仍待 E7 链路核实；℃/%RH 仅为展示约定。",
+    "media 数组目前仅为占位，不伪造媒体 URL。",
+    "两份未跟踪文档（V4.4 实现设计基线、V4.4 SRS）本轮不进行版本管理操作。",
+    "本契约仅为接口规范与 A/B 联调参考，不代表相关功能已实现或发布。"
+  ]
+}

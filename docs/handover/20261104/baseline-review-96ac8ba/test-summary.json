@@ -1,0 +1,48 @@
+{
+  "A-tests.xml": {
+    "tests": 99,
+    "failures": [],
+    "errors": [],
+    "skipped": [],
+    "passed": 99,
+    "by_class": {
+      "test": 99
+    }
+  },
+  "B-s4-auth-media-tests.xml": {
+    "tests": 79,
+    "failures": [],
+    "errors": [],
+    "skipped": [],
+    "passed": 79,
+    "by_class": {
+      "tests.test_s4_contract.TestDao": 4,
+      "tests.test_s4_contract.TestSystemStatus": 7,
+      "tests.test_s4_contract.TestAlerts": 7,
+      "tests.test_s4_contract.TestAlertDetail": 6,
+      "tests.test_s4_contract.TestRelated": 3,
+      "tests.test_s4_contract.TestEnvironmentReadings": 4,
+      "tests.test_s4_contract.TestValidation": 6,
+      "tests.test_auth.TestLogin": 8,
+      "tests.test_auth.TestMe": 4,
+      "tests.test_auth.TestLogout": 4,
+      "tests.test_auth.TestSecurity": 2,
+      "tests.test_media_access.TestAuth": 2,
+      "tests.test_media_access.TestAlertMediaList": 8,
+      "tests.test_media_access.TestMediaAccess": 14
+    }
+  },
+  "B-c4-s4-tests.xml": {
+    "tests": 8,
+    "failures": [
+      "test_person_event_reaches_server_s4_after_worker_reports_success",
+      "test_sensor_resolution_reaches_server_after_initial_sync"
+    ],
+    "errors": [],
+    "skipped": [],
+    "passed": 6,
+    "by_class": {
+      "tests.test_c4_s4_flow.TestC4S4Flow": 8
+    }
+  }
+}
