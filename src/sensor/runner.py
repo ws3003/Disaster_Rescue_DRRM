@@ -130,7 +130,9 @@ class SensorRunner:
             try:
                 ev = self._queue.get(timeout=_QUEUE_GET_TIMEOUT)
             except queue.Empty:
-                if self._stop.is_set() and self._queue.empty():
+                # 仅在“已停止 + 生产者(采样线程)确认退出 + 队列为空”时才退出消费者，
+                # 避免采样线程仍在 enqueue 时消费者提前 break 导致事件丢失。
+                if self._stop.is_set() and self._sampling_done.is_set() and self._queue.empty():
                     break
                 self._maybe_recover()
                 continue
@@ -156,7 +158,8 @@ class SensorRunner:
                 raise RuntimeError("runner consumer already started")
             self._stop.clear()               # 仅允许启动时才清除停止标志
             self._lifecycle = "running"
-            th = threading.Thread(target=self._consume, daemon=True, name="sensor-runner-e8")
+            # 消费者非 daemon：解释器不会在 consumer 仍在录像/上传时提前终止进程。
+            th = threading.Thread(target=self._consume, daemon=False, name="sensor-runner-e8")
             self._thread = th
         th.start()
 
@@ -183,16 +186,27 @@ class SensorRunner:
             self._sampling_active = False
 
     def stop(self, timeout: float = 5.0) -> bool:
-        """停止新采样；等待消费者排空已接受事件并退出（有界）。返回消费者是否已干净退出。
+        """停止新采样并排空消费者（严格顺序，有界）。返回消费者是否已干净退出。
 
-        注意：本方法只等待**消费者线程**；`run()` 采样循环（调用方线程）由 `close()` 另行确认。
+        顺序：
+          A. 置 '_stop'（不再产生新事件）；
+          B. 等采样线程经 '_sampling_done' 确认退出（证明不再有新事件入队）；
+          D/E/F. 消费者排空队列中已入队事件与在途 handle_event 后退出。
+        任意一步到 timeout 返回 False（**不杀线程**）；调用方须据此保持资源/单实例锁，
+        交由进程退出兜底（OSS 上传失败会收口为 failed-awaiting-retry，不会永久悬挂）。
         """
+        self._stop.set()
         with self._life_lock:
-            self._stop.set()
             if self._lifecycle != "closed":
                 self._lifecycle = "stopping"
+        deadline = time.monotonic() + float(timeout)
+        # B) 先等生产者(采样线程)退出：已入队事件在其 finally 置 sampling_done 前已全部入队
+        if not self._sampling_done.wait(timeout=max(0.0, deadline - time.monotonic())):
+            self._note_drop({"type": "close"}, "producer_still_running")
+            return False
+        # D/E/F) 消费者排空队列与在途任务后退出
         if self._thread is not None and self._thread.is_alive():
-            self._thread.join(timeout=float(timeout))
+            self._thread.join(timeout=max(0.0, deadline - time.monotonic()))
             if self._thread.is_alive():
                 self._note_drop({"type": "close"}, "close_timeout")
                 return False

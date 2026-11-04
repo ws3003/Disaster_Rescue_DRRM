@@ -239,12 +239,36 @@ class TestShutdownRace:
         # 采样线程仍在运行 -> close 不应提前关闭 reader
         assert r.close(timeout=0.2) is False
         assert closed["n"] == 0                          # reader 未关闭
-        assert any(x["reason"] == "sampling_still_running" for x in r.dropped)
+        # P0 严格顺序：stop 先等生产者(sampling_done)；采样未退出时记录 producer_still_running
+        assert any(x["reason"] == "producer_still_running" for x in r.dropped)
         release.set()                                    # 采样线程退出
         t.join(timeout=3)
         assert t.is_alive() is False
         assert r.close(timeout=2) is True                # 采样退出后再关 reader
         assert closed["n"] == 1                          # reader 恰好关闭一次
+
+    def test_stop_waits_sampler_before_consumer(self, db):
+        # P0 严格顺序：stop() 必须先等采样线程退出（sampling_done），才能排空消费者。
+        _new_alert_rows(db)
+        r = _mk(db, [], uploader=OkUploader(), recover_interval_seconds=3600)
+        release = threading.Event()
+        started = threading.Event()
+
+        def blocking_sleep(_s):
+            started.set()
+            release.wait(timeout=5)
+
+        r._sleep = blocking_sleep
+        t = threading.Thread(target=r.run, kwargs={"steps_per_cycle": 1}, daemon=True)
+        t.start()
+        assert started.wait(timeout=3), "采样循环未进入 sleep"
+        # 采样仍阻塞（未退出）→ stop 不得假装完成
+        assert r.stop(timeout=0.2) is False
+        assert any(x["reason"] == "producer_still_running" for x in r.dropped)
+        release.set()                                   # 采样线程可退出
+        t.join(timeout=3)
+        assert t.is_alive() is False
+        assert r.stop(timeout=2) is True                # 采样退出后 stop 排空并成功
 
     def test_duplicate_close_idempotent(self, db):
         r = _mk(db, [], uploader=OkUploader(), recover_interval_seconds=3600)

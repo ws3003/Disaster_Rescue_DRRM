@@ -28,6 +28,7 @@ Runner，此约定不代表已完成生产验证。本模块不把远端返回�
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -35,6 +36,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from src.database.db import Database
+
+_EVID_LOGGER = logging.getLogger("x4.evidence")
 
 MEDIA_SOURCE = "sensor"
 MEDIA_TYPE = "video"
@@ -170,7 +173,11 @@ class EvidenceRecorder:
         不把远端返回的未验证字段当 object_key 持久化。
         """
         if self.uploader is None:
-            return None  # 无上传后端: 保持当前状态, 不伪造成功
+            # 未接上传后端：明确告警"上传被跳过"，不得静默；DB 行保持在 processing，
+            # 由持单实例锁的启动恢复处理（见 recover(allow_processing=True)）。
+            _EVID_LOGGER.warning(
+                "E8 uploader=None; OSS 上传被跳过，记录保持 processing, media_id=%s", media_id)
+            return None
         try:
             res = self.uploader.upload(dest, prefix=UPLOAD_PREFIX)
         except Exception as exc:  # noqa: BLE001
@@ -275,23 +282,43 @@ class EvidenceRecorder:
     # ------------------------------------------------------------------
     # 恢复 / 重试（DB 持久 + 进程内安全）
     # ------------------------------------------------------------------
-    def _recoverable(self) -> list[dict]:
-        allow = ("'pending'", "'failed-awaiting-retry'")
-        rows: list[dict] = []
+    def _recoverable(self, allow_processing: bool = False) -> list[dict]:
+        """返回可恢复任务。
+
+        - 默认（allow_processing=False）只含 pending / failed-awaiting-retry（运行时轮询安全）。
+        - allow_processing=True 额外纳入 processing —— 仅限持单实例锁的启动恢复，且必须满足
+          capture_result='ok' 且本地录像文件存在（只补传既有文件，绝不重新录像）。
+        - 重试次数达到 max_retries 的任务不再回收（有界）。
+        """
+        statuses = ["'pending'", "'failed-awaiting-retry'"]
+        if allow_processing:
+            statuses.append("'processing'")
         with self.db._connect() as conn:
             cur = conn.execute(
-                "SELECT * FROM media_evidence WHERE status IN (%s) ORDER BY created_at" % ",".join(allow))
-            for r in cur.fetchall():
-                rows.append(dict(r))
-        return [r for r in rows if int(r.get("retry_count") or 0) < self.max_retries]
+                "SELECT * FROM media_evidence WHERE status IN (%s) ORDER BY created_at"
+                % ",".join(statuses))
+            rows = [dict(r) for r in cur.fetchall()]
+        result: list[dict] = []
+        for r in rows:
+            if int(r.get("retry_count") or 0) >= self.max_retries:
+                continue
+            if r.get("status") == "processing":
+                if not allow_processing:
+                    continue
+                if r.get("capture_result") != "ok":
+                    continue  # 需重录的任务不自动恢复，避免伪造已录
+                local = r.get("local_path")
+                if not local or not Path(local).is_file():
+                    continue  # 本地录像缺失，不明知数据下补传/重录
+            result.append(r)
+        return result
 
-    def recover(self, max_tasks: int = 10) -> list[dict]:
-        """启动恢复：对 'pending'/'failed-awaiting-retry' 且 retry<cap 的任务执行一次。
+    def recover(self, max_tasks: int = 10, *, allow_processing: bool = False) -> list[dict]:
+        """执行一次恢复/重试：默认只处理 pending/failed-awaiting-retry。
 
-        边界：状态/重试次数持久于库；缺 next_attempt_at/认领租约列，跨进程定时/多消费者认领
-        不强制保证（`_in_progress` 仅防同实例重复）。
+        仅当显式 allow_processing=True（且调用方已持单实例锁）才处理遗留 processing。
         """
         results: list[dict] = []
-        for row in self._recoverable()[: int(max_tasks)]:
+        for row in self._recoverable(allow_processing=allow_processing)[: int(max_tasks)]:
             results.append(self.execute_media(row["media_id"]))
         return results
