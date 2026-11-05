@@ -56,6 +56,17 @@ def make_edge_detector() -> Callable[[Any], List[Any]]:
     return _fallback
 
 
+def make_frame_selector(cfg: X4Config):
+    """按配置装配 E6-01 云端选帧器；未启用(默认)返回 None（等价不选帧、每帧云）。"""
+    if not getattr(cfg, "frame_selection_enabled", False):
+        return None
+    from src.x4.frame_selector import FrameSelector
+    return FrameSelector(
+        enabled=True,
+        interval_seconds=getattr(cfg, "frame_selection_interval_seconds", 10.0),
+    )
+
+
 def build_x4_perception(
     *,
     cfg: Optional[X4Config] = None,
@@ -89,7 +100,8 @@ def build_x4_perception(
     edge = edge_detect if edge_detect is not None else make_edge_detector()
 
     svc = X4DetectionService(cfg=cfg, cloud=cloud, edge_detect=edge, db=db, record=record,
-                             probe_interval_seconds=cfg.probe_interval_seconds)
+                             probe_interval_seconds=cfg.probe_interval_seconds,
+                             frame_selector=make_frame_selector(cfg))
 
     if det_only:
         return svc

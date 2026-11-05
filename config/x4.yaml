@@ -11,3 +11,7 @@ x4:
   cloud_health_enabled: false           # 是否启用云端健康检查前置
   probe_interval_seconds: 10.0          # 冷却结束后恢复探测间隔（秒；云端正常/禁用无开销）
   probe_short_timeout_seconds: 2.0      # 恢复探测专用短超时（不改变正常推理超时）
+  # E6-01 云端选帧（默认关闭；开启后仅 CLOUD_PREFERRED 的选定帧请求云端，本地逐帧兜底）
+  frame_selection:
+    enabled: false
+    interval_seconds: 10.0

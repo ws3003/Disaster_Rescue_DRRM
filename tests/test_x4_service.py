@@ -13,6 +13,7 @@ from src.detector import Detection as LocalDetection
 from src.x4.cloud_yolo import CloudTimeoutError, CloudYoloClient
 from src.x4.config import X4Config
 from src.x4.contracts import Detection
+from src.x4.frame_selector import FrameSelector
 from src.x4.service import (
     CLOUD_COOLDOWN,
     CLOUD_PREFERRED,
@@ -82,7 +83,8 @@ def _cloud_invalid():
     return CloudYoloClient(infer_func=lambda img, timeout: [{"bad": 1}])
 
 
-_SVC_PARAMS = {"fail_threshold", "cooldown_seconds", "probe_interval_seconds", "restore_success"}
+_SVC_PARAMS = {"fail_threshold", "cooldown_seconds", "probe_interval_seconds", "restore_success",
+               "frame_selector"}
 
 
 def _svc(db=None, cloud=None, edge=None, clock=None, **kw):
@@ -399,3 +401,73 @@ class TestParamValidation:
     def test_defaults_valid(self):
         svc, _ = _svc(cloud=_cloud_ok(x4(1, "civilian")))
         assert svc.machine.fail_threshold == 3 and svc.machine.cooldown_seconds == 30.0
+
+
+# ---------------------------------------------------------------------------
+# E6-01 云端选帧（本地逐帧兜底 + 选定帧云复核）
+# ---------------------------------------------------------------------------
+def _counting_cloud(calls, *dets):
+    return CloudYoloClient(
+        infer_func=lambda img, timeout: (calls.append(1), list(dets))[1])
+
+
+def _sel(clock, *, interval=10.0):
+    return FrameSelector(enabled=True, interval_seconds=interval, now=clock)
+
+
+def _cloud_fail(calls):
+    return CloudYoloClient(
+        infer_func=lambda img, timeout: (calls.append(1), (_ for _ in ()).throw(CloudTimeoutError()))[1])
+
+
+class TestE6FrameSelection:
+    def test_unselected_frame_no_cloud_local_result(self):
+        clock = _Clock()
+        cloud_calls: list = []
+        edge_calls: list = []
+        svc, _ = _svc(db=None, cloud=_counting_cloud(cloud_calls, x4(1, "civilian")),
+                      edge=_edge_spy(edge_calls), clock=clock,
+                      frame_selector=_sel(clock))
+        # 第 1 帧：选定 → 云（本地也兜底跑一次）
+        assert svc.detect_frame(None)  # 云成功返回云转换
+        assert cloud_calls == [1] and len(edge_calls) == 1
+        # 第 2 帧（同一时刻窗口未翻）：未选定 → 不触云、本地
+        out2 = svc.detect_frame(None)
+        assert cloud_calls == [1]                      # 未选定不调云
+        assert len(edge_calls) == 2                    # 本地仍逐帧
+        assert _first(out2).bbox == [10, 20, 30, 40]   # 返回本地结果
+        assert svc.machine.consecutive_failures == 0 and svc.machine.state == CLOUD_PREFERRED  # 未计云失败
+
+    def test_selected_cloud_success_returns_cloud(self):
+        clock = _Clock()
+        cloud_calls: list = []
+        edge_calls: list = []
+        svc, _ = _svc(db=None, cloud=_counting_cloud(cloud_calls, x4(1, "civilian")),
+                      edge=_edge_spy(edge_calls), clock=clock, frame_selector=_sel(clock))
+        out = svc.detect_frame(None)                   # 选定帧
+        assert _first(out).bbox == [1, 2, 3, 4]        # 云转换结果（override 本地）
+        assert cloud_calls == [1] and len(edge_calls) == 1   # 本地兜底仍跑了一次
+        assert svc.machine.consecutive_failures == 0
+
+    def test_selected_cloud_fail_reuses_local_and_counts(self):
+        clock = _Clock()
+        cloud_calls: list = []
+        edge_calls: list = []
+        svc, _ = _svc(db=None, cloud=_cloud_fail(cloud_calls),
+                      edge=_edge_spy(edge_calls), clock=clock, frame_selector=_sel(clock))
+        out = svc.detect_frame(None)                   # 选定帧，云失败
+        assert _first(out).bbox == [10, 20, 30, 40]    # 复用本帧本地（不重复本地推理）
+        assert cloud_calls == [1] and len(edge_calls) == 1   # 本地只跑一次（兜底）
+        assert svc.machine.consecutive_failures == 1   # 真云失败计入熔断计数
+
+    def test_disabled_no_selector_every_frame_cloud(self):
+        """默认未注入选帧器：每帧发云、云成功不跑本地（既有语义回归）。"""
+        clock = _Clock()
+        cloud_calls: list = []
+        edge_calls: list = []
+        svc, _ = _svc(db=None, cloud=_counting_cloud(cloud_calls, x4(1, "civilian")),
+                      edge=_edge_spy(edge_calls), clock=clock)   # frame_selector=None
+        svc.detect_frame(None)
+        svc.detect_frame(None)
+        assert cloud_calls == [1, 1]                   # 每帧都发云
+        assert edge_calls == []                        # 云成功不双跑本地

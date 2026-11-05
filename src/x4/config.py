@@ -25,6 +25,9 @@ class X4Config:
     # 云端恢复探测（冷却/恢复态调度；云端正常/禁用时无开销）
     probe_interval_seconds: float = 10.0   # 冷却结束后恢复探测间隔
     probe_short_timeout_seconds: float = 2.0  # 探测专用短超时（不改变正常推理超时）
+    # E6-01 云端选帧（默认关闭：不改变现有每帧云端行为）
+    frame_selection_enabled: bool = False
+    frame_selection_interval_seconds: float = 10.0
 
 
 def _as_bool(v: Any, name: str, default: bool) -> bool:
@@ -64,6 +67,7 @@ def load_x4_config(path: str | Path = "config/x4.yaml") -> X4Config:
     except OSError as exc:
         raise X4ConfigError(f"无法读取配置: {p}") from exc
     cfg = raw.get("x4") or {}
+    _fs = cfg.get("frame_selection") or {}
     c = X4Config(
         enabled=_as_bool(cfg.get("enabled"), "enabled", False),
         request_timeout_seconds=_as_float(cfg.get("request_timeout_seconds"), "request_timeout_seconds", 0.001, 8.0),
@@ -74,5 +78,8 @@ def load_x4_config(path: str | Path = "config/x4.yaml") -> X4Config:
         cloud_health_enabled=_as_bool(cfg.get("cloud_health_enabled"), "cloud_health_enabled", False),
         probe_interval_seconds=_as_float(cfg.get("probe_interval_seconds"), "probe_interval_seconds", 0.001, 10.0),
         probe_short_timeout_seconds=_as_float(cfg.get("probe_short_timeout_seconds"), "probe_short_timeout_seconds", 0.001, 2.0),
+        frame_selection_enabled=_as_bool(_fs.get("enabled"), "frame_selection.enabled", False),
+        frame_selection_interval_seconds=_as_float(
+            _fs.get("interval_seconds"), "frame_selection.interval_seconds", 0.001, 10.0),
     )
     return c

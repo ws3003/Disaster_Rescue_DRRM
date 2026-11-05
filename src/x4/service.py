@@ -171,12 +171,14 @@ class X4DetectionService:
         restore_success: int = 2,
         now: Callable[[], float] = time.monotonic,
         record: bool = True,
+        frame_selector: Optional[Any] = None,
     ):
         self.cfg = cfg
         self.cloud = cloud
         self.edge_detect = edge_detect
         self.db = db
         self.record = record
+        self.frame_selector = frame_selector   # E6-01：None=不选帧（每帧云）
         self._now = now
         self.machine = NetworkStateMachine(
             fail_threshold=fail_threshold, cooldown_seconds=cooldown_seconds,
@@ -232,6 +234,9 @@ class X4DetectionService:
     # ---- 核心 ----
     def detect_frame(self, frame: Any) -> List[Any]:
         """返回当前帧下游可用的 `Detector.Detection` 列表。"""
+        # E6-01：注入选帧器时走"本地逐帧 + 选定帧云复核"；否则保持既有"每帧云优先"。
+        if self._cloud_viable and self.machine.wants_cloud() and self.frame_selector is not None:
+            return self._detect_cloud_preferred_selected(frame)
         if self._cloud_viable and self.machine.wants_cloud():
             t0 = self._now()
             entered_cooldown = False
@@ -275,7 +280,7 @@ class X4DetectionService:
         return self._edge(frame, fallback_used=False, cloud_error="", attempted=False)
 
     def _edge(self, frame, *, fallback_used: bool, cloud_error: str,
-              t0: Optional[float] = None, attempted: bool = False) -> List[Any]:
+              t0: Optional[float] = None, attempted: bool = False, record: bool = True) -> List[Any]:
         t0 = t0 if t0 is not None else self._now()
         if self.edge_detect is None:
             raise X4DetectionError("edge detector not configured and cloud path unavailable/failed")
@@ -283,10 +288,73 @@ class X4DetectionService:
             local = list(self.edge_detect(frame))
         except Exception as exc:  # noqa: BLE001
             raise X4DetectionError(f"cloud and edge detection both failed: {exc}") from exc
-        self._record(result=self._result(provider="edge", success=True, detections=tuple(local),
-                                         latency=self._ms(t0), fallback_used=fallback_used,
-                                         cloud_error=cloud_error), state=self.machine.state)
+        if record:
+            self._record(result=self._result(provider="edge", success=True, detections=tuple(local),
+                                             latency=self._ms(t0), fallback_used=fallback_used,
+                                             cloud_error=cloud_error), state=self.machine.state)
         return local
+
+    def _detect_cloud_preferred_selected(self, frame: Any) -> List[Any]:
+        """E6-01：CLOUD_PREFERRED + 选帧器注入。本地每帧兜底；选定帧才请求云端。
+
+        - 未选中帧：本地检测（不触云、不计云失败、不触发熔断）。
+        - 选中帧云成功：返回云端转换 Detection（保持云优先语义）。
+        - 选中帧云失败：复用本帧本地 Detection（不重复本地推理），按既有熔断/回退语义处理。
+        - 每帧最多一条记录（provider=edge 或 provider=cloud），不新增逐帧日志。
+        """
+        t0 = self._now()
+        # 先算本帧本地兜底（不在此处记录；最终输出按分支记录一条）
+        local_baseline = self._edge(frame, fallback_used=False, cloud_error="",
+                                    attempted=False, record=False)
+        if not self.frame_selector.should_send(frame):
+            # 未选中帧：本地——不触云、不计失败
+            self._record(result=self._result(provider="edge", success=True,
+                                             detections=tuple(local_baseline),
+                                             latency=self._ms(t0), fallback_used=False,
+                                             cloud_error=""), state=self.machine.state,
+                         extra_meta={"frame_selected": False, "reason": "frame_not_selected"})
+            return local_baseline
+
+        # 选中帧：请求云端
+        entered_cooldown = False
+        try:
+            x4 = self.cloud.infer(frame, timeout=self.cfg.request_timeout_seconds)
+            out = self._to_local_detections(x4)
+            self.machine.on_cloud_success()
+            self._record(result=self._result(provider="cloud", success=True, detections=x4,
+                                             latency=self._ms(t0), fallback_used=False,
+                                             cloud_error=""), state=self.machine.state,
+                         extra_meta={"frame_selected": True})
+            return out
+        except CloudError as exc:
+            entered_cooldown = self.machine.on_cloud_failure()
+            cloud_error = exc.code
+        except Exception:  # noqa: BLE001——云端异常不得吞成"空检测成功"
+            entered_cooldown = self.machine.on_cloud_failure()
+            cloud_error = "cloud_invalid_response"
+        if entered_cooldown:
+            self._event_log("x4_circuit", {
+                "event": "enter_cooldown",
+                "from_state": CLOUD_PREFERRED,
+                "to_state": CLOUD_COOLDOWN,
+                "failure_count": self.machine.consecutive_failures,
+                "failure_threshold": self.machine.fail_threshold,
+                "cooldown_seconds": self.machine.cooldown_seconds,
+                "reason": "failure_threshold",
+            })
+        if not getattr(self.cfg, "fallback_enabled", True):
+            self._record(result=self._result(provider="cloud", success=False, detections=(),
+                                             latency=self._ms(t0), fallback_used=False,
+                                             cloud_error=cloud_error), state=self.machine.state,
+                         extra_meta={"frame_selected": True})
+            raise X4DetectionError(f"cloud failed and fallback disabled: {cloud_error}")
+        # 选中帧云失败：复用本帧本地（fallback_used=True 区分普通本地），不重复本地推理
+        self._record(result=self._result(provider="edge", success=True,
+                                         detections=tuple(local_baseline),
+                                         latency=self._ms(t0), fallback_used=True,
+                                         cloud_error=cloud_error), state=self.machine.state,
+                     extra_meta={"frame_selected": True, "cloud_error": cloud_error})
+        return local_baseline
 
     def _result(self, *, provider: str, success: bool, detections: Tuple, latency: float,
                 fallback_used: bool, cloud_error: str) -> InferenceResult:
@@ -297,10 +365,14 @@ class X4DetectionService:
             fallback_used=fallback_used, error_code=cloud_error,
         )
 
-    def _record(self, *, result: InferenceResult, state: str) -> None:
+    def _record(self, *, result: InferenceResult, state: str,
+                extra_meta: Optional[Dict[str, Any]] = None) -> None:
         if not self.record or self.db is None:
             return
-        record_inference(self.db, result, input_meta={"state": state})
+        meta: Dict[str, Any] = {"state": state}
+        if extra_meta:
+            meta.update(extra_meta)
+        record_inference(self.db, result, input_meta=meta)
 
     def _event_log(self, event: str, output: Dict[str, Any]) -> None:
         """稀疏状态转换事件日志（熔断 enter_cooldown / 恢复 enter_recovery / restored）。
