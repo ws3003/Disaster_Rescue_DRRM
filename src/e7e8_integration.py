@@ -22,7 +22,21 @@ from src.sensor.loop import SampledSensorLoop
 from src.sensor.alarm import HighTempAlarm
 from src.sensor.runner import SensorRunner, build_sensor_reader
 
+# 复用脚本层的 E8 单实例 flock（同一 DB 锁路径），保证 EdgeClient 与 CLI 互斥。
+from scripts.e7e8_runner import _acquire_e8_singleton_lock, _close_lock_fd  # noqa: E402
+
 _LOGGER = logging.getLogger("e7e8.integration")
+
+
+def _is_lock_conflict(message: str) -> bool:
+    """仅当锁获取异常确为“已被另一实例持有”（POSIX flock EAGAIN/EWOULDBLOCK）时返回 True。
+
+    用于区分“锁冲突(可安全降级 disabled)”与“其它锁基础设施异常(必须原样抛出，不得吞掉)”。
+    """
+    m = message.lower()
+    return ("resource temporarily unavailable" in m
+            or "wouldblock" in m or "eagain" in m
+            or "已经持有" in str(message) or "already" in str(message).lower())
 
 
 def build_shared_recorder(camera_service: Any, e8: Any) -> Any:
@@ -75,8 +89,41 @@ class EdgeE7E8:
         self._wait = wait if wait is not None else self._stop.wait
         self._thread: Optional[threading.Thread] = None
         self._loop_closed = False   # E7-only reader 只关一次（幂等）
+        # Q2 新增：enable 标志 + E8 单实例锁生命周期（默认关闭无锁）
+        self._enabled = True
+        self._lock_fd: Optional[int] = None
+        self._recorder: Optional[Any] = None
+        self._loop: Optional[Any] = None
+        self._runner: Optional[Any] = None
+        self._mode = "e7"
 
-        # E7 采样循环（二级告警经 SensorRunner 入队触发 E8 录像）
+        e8_on = bool(getattr(e8_cfg, "enabled", False))
+        need_lock = bool(e8_on and uploader is not None)
+
+        # 仅在“E8 启用 + 已接上传器”时才需要单实例锁：
+        if need_lock:
+            try:
+                fd = _acquire_e8_singleton_lock(str(db.db_path))
+            except RuntimeError as exc:
+                if _is_lock_conflict(str(exc)):
+                    # 锁冲突（已有实例持有）：进入 disabled，E7/E8 采集整体不启动。
+                    _LOGGER.warning("已有实例持有 E8 锁，跳过 E7/E8 采集（disabled）: %s", exc)
+                    self._enabled = False
+                    self._mode = "disabled"
+                    self._loop = None
+                    self._runner = None
+                    return
+                # 其他锁基础设施异常（不支持平台/fcntl 缺失/锁文件无法打开等）：
+                # 不得当作锁冲突吞掉，原样抛出由调用方处理（EdgeClient 降级为纯感知）。
+                raise
+            if fd is None:
+                # Windows 开发：无 POSIX flock，不具备跨进程互斥保证；不启动恢复。
+                _LOGGER.warning("Windows 无 POSIX flock，开发环境不具备跨进程互斥保证；不做启动恢复")
+                self._lock_fd = None
+            else:
+                self._lock_fd = fd   # POSIX 获得锁：贯穿 E8 Runner 生命周期
+
+        # 构建 E7 采样循环（disabled 已在锁冲突分支 return，不会到这里）
         loop = SampledSensorLoop(
             sensor_cfg,
             reader if reader is not None else build_sensor_reader(sensor_cfg),
@@ -85,17 +132,36 @@ class EdgeE7E8:
         loop.restore_state()
         self._loop = loop
 
-        e8_on = bool(getattr(e8_cfg, "enabled", False))
         if e8_on:
             if camera_service is None:
+                # 已持锁但 E8 依赖缺失：须安全释放锁再抛（Runner 尚未启动）。
+                self._release_lock_early()
                 raise ValueError("E8 enabled 但未提供 camera_service：无法共享同一摄像头")
-            self._runner = SensorRunner(
-                loop, build_evidence(db, camera_service, e8_cfg, uploader, recorder), sleep=sleep,
-            )
-            self._mode = "e7+e8"
+            try:
+                rec = build_evidence(db, camera_service, e8_cfg, uploader, recorder)
+                self._recorder = rec
+                # 启动期一次恢复：仅当持锁(=唯一实例)才认领遗留 processing（不重录、不重传）。
+                if self._lock_fd is not None and uploader is not None:
+                    rec.recover(max_tasks=10, allow_processing=True)
+                self._runner = SensorRunner(loop, rec, sleep=sleep)
+                self._mode = "e7+e8"
+            except Exception:
+                # 已持锁但 Runner 尚未启动：安全释放锁，再保留原始异常。
+                self._release_lock_early()
+                raise
         else:
             self._runner = None
             self._mode = "e7"
+
+    def _release_lock_early(self) -> None:
+        """仅在 Runner 启动前（初始化失败路径）释放 E8 单实例锁并清引用。"""
+        if self._lock_fd is not None:
+            _close_lock_fd(self._lock_fd)
+            self._lock_fd = None
+
+    def _release_lock_after_clean_close(self) -> None:
+        """仅在全部线程确认干净关闭后才释放 E8 单实例锁（防止仍有存活的消费者被并发接管）。"""
+        self._release_lock_early()
 
     # ------------------------------------------------------------------
     @property
@@ -108,6 +174,9 @@ class EdgeE7E8:
         return self._runner
 
     def start(self) -> None:
+        if not self._enabled:
+            # disabled（锁冲突）：不启动 E7/E8 任何采集线程
+            return
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop.clear()
@@ -136,6 +205,8 @@ class EdgeE7E8:
         - E7-only：先等待采样线程退出，**确认退出后才关 reader**；超时则不关 reader、保留引用、返回 False。
         - 返回 True 仅当所有工作线程已退出且依赖资源已安全关闭。
         """
+        if not self._enabled:
+            return True   # disabled：无可关闭线程
         self._stop.set()
         th = self._thread
 
@@ -154,9 +225,10 @@ class EdgeE7E8:
                     _LOGGER.warning("E7+E8 关闭未完成：采样线程仍存活；保留引用，稍后可重试 close")
                 else:
                     _LOGGER.warning("E7+E8 runner.close 返回 False（消费/采样未干净退出）；保留引用可重试")
-                # 不置 self._thread=None：保留引用，供后续 close() 重试
+                # 不置 self._thread=None：保留引用，供后续 close() 重试；不提前释放锁
                 return False
             self._thread = None
+            self._release_lock_after_clean_close()
             return True
 
         # ---- E7-only：先停线程，确认退出后再关 reader ----

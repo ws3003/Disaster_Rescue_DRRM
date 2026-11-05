@@ -549,3 +549,149 @@ class TestRecoveryOrdering:
             assert stub.order.count(("handle", "A1")) == 1   # 不重复消费
         finally:
             runner.close(timeout=1.0)
+
+
+class _Q2Rec:
+    """启动恢复 spy：记录 recover 调用（代替真实 EvidenceRecorder）。"""
+
+    def __init__(self):
+        self.recover_calls: list = []
+
+    def recover(self, max_tasks=10, **kw):
+        self.recover_calls.append((max_tasks, kw))
+        return []
+
+
+class TestQ2LaunchLockRecovery:
+    """Q2：EdgeE7E8 启动期 E8 单实例锁 + processing 自动恢复 + disabled 整体停用。
+
+    全部 Mock（临时 DB / Fake 相机 / Fake 恢复器），不连真实 OSS/传感器、不写正式库。
+    """
+
+    def _e8(self, enabled=True):
+        return E8Config(enabled=enabled, record_seconds=0, width=8, height=6,
+                        fps=30.0, codec="mp4v", tmp_dir=None)
+
+    def _configure_lock(self, monkeypatch, kind, released):
+        monkeypatch.setattr(integ, "_close_lock_fd", released.append)
+        if kind == "ok":
+            monkeypatch.setattr(integ, "_acquire_e8_singleton_lock", lambda p: 777)
+        elif kind == "none":
+            monkeypatch.setattr(integ, "_acquire_e8_singleton_lock", lambda p: None)
+        elif kind == "conflict":
+            def _conflict(p):
+                raise RuntimeError(
+                    "获取 E8 单实例锁失败(errno=11): [Errno 11] Resource temporarily unavailable")
+            monkeypatch.setattr(integ, "_acquire_e8_singleton_lock", _conflict)
+        elif kind == "infra":
+            def _infra(p):
+                raise RuntimeError("fcntl 不可用（POSIX 平台必需）")
+            monkeypatch.setattr(integ, "_acquire_e8_singleton_lock", _infra)
+        elif kind == "not_called":
+            def _nope(p):
+                raise AssertionError("不应调用锁获取")
+            monkeypatch.setattr(integ, "_acquire_e8_singleton_lock", _nope)
+
+    def _make(self, monkeypatch, e8_cfg, db, cam_service, *, uploader, lock_kind,
+              released, recorder=None):
+        rec = recorder if recorder is not None else _Q2Rec()
+        monkeypatch.setattr(integ, "build_evidence",
+                            lambda *a, **k: rec)
+        self._configure_lock(monkeypatch, lock_kind, released)
+        e = integ.EdgeE7E8(sensor_config_from_dict(_SENSOR), e8_cfg, db,
+                           camera_service=cam_service, uploader=uploader,
+                           reader=_hot_reader(), recorder=None, sleep=_fast_sleep)
+        e._q2_rec = rec
+        e._q2_released = released
+        return e
+
+    # 1) 锁成功 -> 启动恢复一次、锁持有
+    def test_lock_ok_recover_once_and_lock_held(self, monkeypatch, cam_service, db):
+        released = []
+        e = self._make(monkeypatch, self._e8(True), db, cam_service,
+                       uploader=object(), lock_kind="ok", released=released)
+        assert e.mode == "e7+e8" and e._runner is not None
+        assert e._lock_fd == 777
+        assert len(e._q2_rec.recover_calls) == 1       # 恰一次
+        mt, kw = e._q2_rec.recover_calls[0]
+        assert mt == 10 and kw.get("allow_processing") is True
+
+    # 2) 锁冲突 -> disabled，E7/E8 整体不启动
+    def test_lock_conflict_disabled_no_e7e8(self, monkeypatch, cam_service, db):
+        released = []
+        e = self._make(monkeypatch, self._e8(True), db, cam_service,
+                       uploader=object(), lock_kind="conflict", released=released)
+        assert e.mode == "disabled" and e._enabled is False
+        assert e._runner is None and e._loop is None
+        assert e._q2_rec.recover_calls == []           # 未执行恢复
+        e.start()                                       # 无操作
+        assert e._thread is None
+        assert e.close() is True                        # 关闭无异常
+
+    # 3) Windows None -> 不恢复、保留原运行行为、无互斥保证
+    def test_windows_none_no_recover_but_runs(self, monkeypatch, cam_service, db):
+        released = []
+        e = self._make(monkeypatch, self._e8(True), db, cam_service,
+                       uploader=object(), lock_kind="none", released=released)
+        assert e.mode == "e7+e8" and e._runner is not None
+        assert e._lock_fd is None
+        assert e._q2_rec.recover_calls == []           # 未持锁不恢复
+
+    # 4) uploader=None -> 不取锁、不恢复、E8 原语义
+    def test_uploader_none_no_lock_no_recover(self, monkeypatch, cam_service, db):
+        released = []
+        e = self._make(monkeypatch, self._e8(True), db, cam_service,
+                       uploader=None, lock_kind="not_called", released=released)
+        assert e.mode == "e7+e8" and e._runner is not None
+        assert e._q2_rec.recover_calls == []
+
+    # 5) e8 未启用 -> 不取锁、E7-only 原行为
+    def test_e8_disabled_no_lock_e7_only(self, monkeypatch, cam_service, db):
+        released = []
+        e = self._make(monkeypatch, self._e8(False), db, cam_service,
+                       uploader=object(), lock_kind="not_called", released=released)
+        assert e.mode == "e7" and e._runner is None
+        assert e._q2_rec.recover_calls == []
+
+    # 6) 初始化异常（已持锁）-> 释放锁并重抛原始异常
+    def test_init_exception_after_lock_releases_lock(self, monkeypatch, cam_service, db):
+        released = []
+        bad = _Q2Rec()
+        def _boom(*a, **k):
+            raise RuntimeError("recover boom")
+        bad.recover = _boom
+        monkeypatch.setattr(integ, "build_evidence", lambda *a, **k: bad)
+        self._configure_lock(monkeypatch, "ok", released)
+        with pytest.raises(RuntimeError):
+            integ.EdgeE7E8(sensor_config_from_dict(_SENSOR), self._e8(True), db,
+                           camera_service=cam_service, uploader=object(),
+                           reader=_hot_reader(), recorder=None, sleep=_fast_sleep)
+        assert 777 in released                          # 已安全释放锁
+
+    # 7) 干净关闭 -> 释放锁
+    def test_clean_close_releases_lock(self, monkeypatch, cam_service, db):
+        released = []
+        e = self._make(monkeypatch, self._e8(True), db, cam_service,
+                       uploader=object(), lock_kind="ok", released=released)
+        assert released == []
+        assert e.close() is True
+        assert e._lock_fd is None
+        assert released == [777]
+
+    # 8) 关闭失败 -> 不提前释放锁
+    def test_close_failure_does_not_release_lock(self, monkeypatch, cam_service, db):
+        released = []
+        e = self._make(monkeypatch, self._e8(True), db, cam_service,
+                       uploader=object(), lock_kind="ok", released=released)
+        monkeypatch.setattr(e.runner, "close", lambda timeout=5.0: False)
+        assert e.close() is False
+        assert e._lock_fd == 777
+        assert released == []                           # 未提前释放
+
+    # 9) 其他锁基础设施异常：不得当作锁冲突吞掉
+    def test_lock_infra_error_not_swallowed(self, monkeypatch, cam_service, db):
+        released = []
+        with pytest.raises(RuntimeError) as ei:
+            self._make(monkeypatch, self._e8(True), db, cam_service,
+                       uploader=object(), lock_kind="infra", released=released)
+        assert "fcntl" in str(ei.value)
