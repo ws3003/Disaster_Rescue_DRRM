@@ -1,0 +1,16 @@
+# China Mobile OneNET MQTT telemetry side channel.
+# Disabled by default. Product/device/token are injected through environment variables;
+# never commit real credentials.
+onenet:
+  enabled: false
+  host: "mqttstls.heclouds.com"
+  port: 8883
+  tls: true
+  keepalive_seconds: 60
+  qos: 1
+  queue_size: 256
+  reconnect_seconds: 5.0
+  product_id: ""
+  device_name: ""
+  temperature_identifier: "temperature"
+  humidity_identifier: "humidity"

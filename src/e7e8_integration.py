@@ -81,6 +81,7 @@ class EdgeE7E8:
         reader: Any = None,
         recorder: Any = None,
         wait: Optional[Callable[[float], None]] = None,
+        telemetry: Any = None,
     ):
         self._e8_cfg = e8_cfg
         self._sleep = sleep
@@ -95,6 +96,7 @@ class EdgeE7E8:
         self._recorder: Optional[Any] = None
         self._loop: Optional[Any] = None
         self._runner: Optional[Any] = None
+        self._telemetry = telemetry
         self._mode = "e7"
 
         e8_on = bool(getattr(e8_cfg, "enabled", False))
@@ -128,6 +130,7 @@ class EdgeE7E8:
             sensor_cfg,
             reader if reader is not None else build_sensor_reader(sensor_cfg),
             HighTempAlarm(sensor_cfg, db), db, sleep=sleep,
+            telemetry=telemetry,
         )
         loop.restore_state()
         self._loop = loop
@@ -180,6 +183,8 @@ class EdgeE7E8:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop.clear()
+        if self._telemetry is not None:
+            self._telemetry.start()
         if self._runner is not None:
             self._thread = threading.Thread(
                 target=self._runner.run, kwargs={"steps_per_cycle": 1},
@@ -228,6 +233,8 @@ class EdgeE7E8:
                 # 不置 self._thread=None：保留引用，供后续 close() 重试；不提前释放锁
                 return False
             self._thread = None
+            if self._telemetry is not None:
+                self._telemetry.close(timeout=timeout)
             self._release_lock_after_clean_close()
             return True
 
@@ -253,4 +260,6 @@ class EdgeE7E8:
             _LOGGER.debug("loop close 异常: %s", exc)
             return False
         self._thread = None
+        if self._telemetry is not None:
+            self._telemetry.close(timeout=timeout)
         return True

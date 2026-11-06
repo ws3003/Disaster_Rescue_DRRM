@@ -40,12 +40,14 @@ class SampledSensorLoop:
         alarm: HighTempAlarm,
         db: Database,
         sleep: Callable[[float], None] = time.sleep,
+        telemetry: object | None = None,
     ) -> None:
         self.cfg = cfg
         self.reader = reader
         self.alarm = alarm
         self.db = db
         self._sleep = sleep
+        self.telemetry = telemetry
         self.fault_count = 0          # 设备级连续读取失败（离线判定）
         self.quality_failures = 0     # 数据质量异常计数（不参与离线判定）
         self.offline = False          # 设备级离线（重启后经 restore_state 恢复）
@@ -181,7 +183,7 @@ class SampledSensorLoop:
 
         try:
             from src.sync import bridge as c4_bridge
-            c4_bridge.create_sync_record(
+            persisted = c4_bridge.create_sync_record(
                 self.db,
                 record_type="reading",
                 business={
@@ -195,6 +197,23 @@ class SampledSensorLoop:
             raise
         except Exception as exc:
             raise SensorPersistError(f"读数持久化失败: {exc!r}") from exc
+
+        # Optional OneNET side channel. SQLite/C4 remains authoritative: telemetry
+        # failure must never roll back or block an already persisted E7 reading.
+        if self.telemetry is not None:
+            try:
+                self.telemetry.publish_reading(
+                    sensor_id=self.cfg.sensor_id,
+                    temperature=reading.temperature_c,
+                    humidity=reading.humidity_pct,
+                    captured_at=reading.captured_at,
+                    reading_id=persisted.get("source_record_id"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"[SensorLoop] OneNET 遥测投递失败（本地数据已保存）: "
+                    f"{type(exc).__name__}: {exc}"
+                )
 
         event = self.alarm.process(
             reading.temperature_c, reading.humidity_pct, reading.captured_at

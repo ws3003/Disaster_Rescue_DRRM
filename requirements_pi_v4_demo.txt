@@ -49,3 +49,5 @@ adafruit-circuitpython-dht
 
 # V4.4 J-1B OSS 证据上传（未装不联网；惰性 import）
 oss2>=3.0,<4.0
+# China Mobile OneNET MQTT telemetry (E7 parallel side channel)
+paho-mqtt>=2.1,<3.0

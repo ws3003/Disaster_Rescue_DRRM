@@ -361,11 +361,23 @@ def _build_e7e8(cfg, camera_service, config_path):
     sensor_cfg = load_sensor_config(config_path)
     e8_cfg = load_e8_config(config_path)
     db = Database(db_path=str((cfg.get("db") or {}).get("path") or "data/drrm.db"))
+    telemetry = None
+    onenet_path = os.environ.get("ONENET_CONFIG") or os.path.join(_ROOT_DIR, "config", "onenet.yaml")
+    try:
+        from src.onenet import OneNetMqttPublisher, load_onenet_config
+        onenet_cfg = load_onenet_config(onenet_path)
+        if onenet_cfg.enabled:
+            telemetry = OneNetMqttPublisher(onenet_cfg)
+            print("[EdgeClient][OneNET] MQTT telemetry enabled")
+    except Exception as exc:  # noqa: BLE001
+        # OneNET is an optional parallel channel; never disable E7/E8/OSS.
+        print(f"[EdgeClient][OneNET] disabled: {exc}")
     obj = EdgeE7E8(
         sensor_cfg, e8_cfg, db,
         camera_service=camera_service,
         uploader=_make_e8_uploader(bool(getattr(e8_cfg, "enabled", False))),
         sleep=time.sleep,
+        telemetry=telemetry,
     )
     obj.start()
     return obj
