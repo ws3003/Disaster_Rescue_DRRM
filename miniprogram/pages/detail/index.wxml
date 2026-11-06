@@ -75,7 +75,16 @@ module.exports.pad = function (n) {
       </view>
     </view>
 
-    <scene-media context-key="{{alertKey}}" />
+    <scene-media
+      context-key="{{alertKey}}"
+      mock-mode="{{mockMode}}"
+      media-supported="{{mediaSupported}}"
+      media-items="{{mediaItems}}"
+      media-loading="{{mediaLoading}}"
+      media-error="{{mediaError}}"
+      remote-video-url="{{remoteVideoUrl}}"
+      bind:requestaccess="onRequestMediaAccess"
+    />
 
     <!-- 触发快照对比（仅传感器） -->
     <block wx:if="{{detailView.metrics.length}}">

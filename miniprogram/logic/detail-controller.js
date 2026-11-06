@@ -21,6 +21,7 @@ function createDetailController(options) {
   const opts = options || {};
   const fetchDetail = opts.fetchDetail;
   const fetchRelated = opts.fetchRelated;
+  const fetchMedia = typeof opts.fetchMedia === 'function' ? opts.fetchMedia : null;
   const onStateChange = opts.onStateChange || function () {};
 
   const state = {
@@ -33,7 +34,11 @@ function createDetailController(options) {
     related: null,
     relatedView: null,
     relatedLoading: false,
-    relatedError: null
+    relatedError: null,
+    mediaSupported: !!fetchMedia,
+    mediaItems: [],
+    mediaLoading: false,
+    mediaError: null
   };
 
   let seq = 0;
@@ -49,7 +54,11 @@ function createDetailController(options) {
       related: state.related,
       relatedView: state.relatedView,
       relatedLoading: state.relatedLoading,
-      relatedError: state.relatedError
+      relatedError: state.relatedError,
+      mediaSupported: state.mediaSupported,
+      mediaItems: state.mediaItems.slice(),
+      mediaLoading: state.mediaLoading,
+      mediaError: state.mediaError
     };
   }
 
@@ -70,6 +79,9 @@ function createDetailController(options) {
     state.related = null;
     state.relatedView = null;
     state.relatedError = null;
+    state.mediaItems = [];
+    state.mediaLoading = false;
+    state.mediaError = null;
     state.error = null;
     state.initialized = true;
 
@@ -82,17 +94,22 @@ function createDetailController(options) {
 
     state.loading = true;
     state.relatedLoading = true;
+    state.mediaLoading = !!fetchMedia;
     emit();
 
     const detailPromise = settle(fetchDetail(checked.value));
     const relatedPromise = settle(fetchRelated(checked.value));
+    const mediaPromise = fetchMedia
+      ? settle(fetchMedia(checked.value, { page: 1, page_size: 20 }))
+      : Promise.resolve({ ok: true, value: { items: [] } });
 
-    return Promise.all([detailPromise, relatedPromise]).then(function (results) {
+    return Promise.all([detailPromise, relatedPromise, mediaPromise]).then(function (results) {
       if (current !== seq) {
         return;
       }
       const detailResult = results[0];
       const relatedResult = results[1];
+      const mediaResult = results[2];
 
       if (detailResult.ok) {
         state.detail = detailResult.value;
@@ -110,8 +127,18 @@ function createDetailController(options) {
         state.relatedError = normalizeError(relatedResult.error);
       }
 
+      if (mediaResult.ok) {
+        state.mediaItems = mediaResult.value && Array.isArray(mediaResult.value.items)
+          ? mediaResult.value.items.slice()
+          : [];
+        state.mediaError = null;
+      } else {
+        state.mediaError = normalizeError(mediaResult.error);
+      }
+
       state.loading = false;
       state.relatedLoading = false;
+      state.mediaLoading = false;
       emit();
     });
   }

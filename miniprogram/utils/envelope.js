@@ -292,6 +292,40 @@ function validateRelatedData(data, prefix) {
   return { ok: issues.length === 0, issues };
 }
 
+function validateMediaListData(data) {
+  const issues = [];
+  if (!Array.isArray(data)) {
+    return { ok: false, issues: ['data 不是数组'] };
+  }
+  for (let i = 0; i < data.length; i += 1) {
+    const expected = DTO.mediaMetadata.map(function (field) { return field.name; }).sort();
+    const actual = isPlainObject(data[i]) ? Object.keys(data[i]).sort() : [];
+    if (actual.join(',') !== expected.join(',')) {
+      issues.push('data[' + i + '] 字段集合与媒体元数据契约不一致');
+    }
+    validateDto(data[i], DTO.mediaMetadata, 'data[' + i + ']', issues);
+  }
+  return { ok: issues.length === 0, issues };
+}
+
+function validateMediaAccessData(data) {
+  const issues = [];
+  if (!isPlainObject(data)) {
+    return { ok: false, issues: ['data 不是对象'] };
+  }
+  const keys = Object.keys(data || {}).sort();
+  if (keys.join(',') !== 'access_url,expires_at') {
+    issues.push('data 字段必须且只能为 access_url/expires_at');
+  }
+  if (typeof data.access_url !== 'string' || !/^https?:\/\//.test(data.access_url)) {
+    issues.push('data.access_url 不是有效的 HTTP(S) 地址');
+  }
+  if (typeof data.expires_at !== 'string' || !data.expires_at) {
+    issues.push('data.expires_at 不是非空字符串');
+  }
+  return { ok: issues.length === 0, issues };
+}
+
 function issuesToError(issues) {
   return createAppError('RESPONSE_INVALID', {
     detail: issues.join('；'),
@@ -314,5 +348,7 @@ module.exports = {
   validateAlertListData,
   validateAlertDetailData,
   validateRelatedData,
+  validateMediaListData,
+  validateMediaAccessData,
   issuesToError
 };

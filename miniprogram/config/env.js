@@ -6,12 +6,14 @@ const USE_MOCK = true;
 // Base URL / 合法域名 / AppID / 端口均为待定部署参数（任务书 11.2）。
 // 此处保留明显的占位值，避免被误认为真实后端地址。
 const API_BASE_URL = 'https://example.invalid';
-const TOKEN_STORAGE_KEY = 's4_api_token';
+// 小程序只保存由 /api/v1/auth/login 返回的短期用户 Session。
+// S4_API_TOKEN、C4_TOKEN、OSS AK/SK 均不得进入小程序。
+const SESSION_STORAGE_KEY = 'v44_user_session';
 const REQUEST_TIMEOUT_MS = 10000;
 
 module.exports = {
   USE_MOCK,
   API_BASE_URL,
-  TOKEN_STORAGE_KEY,
+  SESSION_STORAGE_KEY,
   REQUEST_TIMEOUT_MS
 };

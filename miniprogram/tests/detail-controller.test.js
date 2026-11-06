@@ -161,3 +161,42 @@ test('连续加载不同告警时，旧响应不能覆盖新详情', async () =>
   assert.equal(state.alertKey, 'person:2');
   assert.equal(state.detailView.alertKey, fixtures.personAlerts[1].alert_key);
 });
+
+test('真实媒体元数据独立加载，不改变 related.media 占位语义', async () => {
+  const sensor = fixtures.sensorAlerts[0];
+  const controller = createDetailController({
+    fetchDetail: function () { return Promise.resolve(sensor); },
+    fetchRelated: function () { return Promise.resolve(emptyRelated()); },
+    fetchMedia: function (key, params) {
+      assert.equal(key, sensor.alert_key);
+      assert.deepEqual(params, { page: 1, page_size: 20 });
+      return Promise.resolve({ items: [{
+        media_id: 'M-1', media_type: 'video', status: 'success',
+        upload_status: 'success', captured_at: null, uploaded_at: null
+      }] });
+    }
+  });
+  await controller.load(sensor.alert_key);
+  const state = controller.getState();
+  assert.equal(state.mediaSupported, true);
+  assert.equal(state.mediaItems.length, 1);
+  assert.equal(state.relatedView.mediaSupported, false);
+  assert.equal(state.mediaError, null);
+});
+
+test('媒体接口失败不影响详情和关联读数', async () => {
+  const person = fixtures.personAlerts[0];
+  const controller = createDetailController({
+    fetchDetail: function () { return Promise.resolve(person); },
+    fetchRelated: function () { return Promise.resolve(emptyRelated()); },
+    fetchMedia: function () {
+      return Promise.reject({ kind: 'SERVICE_UNAVAILABLE', message: '服务暂不可用' });
+    }
+  });
+  await controller.load(person.alert_key);
+  const state = controller.getState();
+  assert.equal(state.error, null);
+  assert.equal(state.detailView.alertKey, person.alert_key);
+  assert.equal(state.mediaError.kind, 'SERVICE_UNAVAILABLE');
+  assert.deepEqual(state.mediaItems, []);
+});

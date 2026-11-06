@@ -1,10 +1,27 @@
 // Device-only preview state. No persistence, upload, API fields, or inferred alert association.
 Component({
   properties: {
-    contextKey: { type: String, value: '', observer: function () { this.clearPreview(); } }
+    contextKey: { type: String, value: '', observer: function () { this.clearPreview(); } },
+    mockMode: { type: Boolean, value: true },
+    mediaSupported: { type: Boolean, value: false },
+    mediaItems: { type: Array, value: [] },
+    mediaLoading: { type: Boolean, value: false },
+    mediaError: { type: Object, value: null },
+    remoteVideoUrl: { type: String, value: '' }
   },
   data: { imagePath: '', videoPath: '', choosing: false },
   methods: {
+    requestRemoteAccess(event) {
+      const mediaId = event.currentTarget.dataset.id;
+      const mediaType = event.currentTarget.dataset.type;
+      if (!mediaId) return;
+      this.triggerEvent('requestaccess', { mediaId: mediaId, mediaType: mediaType });
+    },
+    expandRemoteVideo() {
+      if (!this.properties.remoteVideoUrl) return;
+      const video = wx.createVideoContext('remoteSceneVideo', this);
+      video.requestFullScreen({ success: () => video.play() });
+    },
     choosePreview(event) {
       if (this.data.choosing) return;
       const kind = event.currentTarget.dataset.kind;

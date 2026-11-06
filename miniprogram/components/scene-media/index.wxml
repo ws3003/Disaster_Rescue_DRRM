@@ -1,6 +1,31 @@
 <view class="scene-media">
-  <view class="section-head"><text class="section-title">现场影像</text><text class="source-tag">待接入</text></view>
-  <view class="media-notice">当前接口未提供现场影像，以下仅支持本机文件预览。</view>
+  <view class="section-head"><text class="section-title">现场影像</text><text class="source-tag">{{mockMode ? '本机 Mock' : '云端证据'}}</text></view>
+
+  <block wx:if="{{!mockMode}}">
+    <view class="media-notice">仅展示后端已关联的媒体元数据；查看时临时申请短时访问地址。</view>
+    <view wx:if="{{mediaLoading}}" class="media-empty compact">正在读取现场影像…</view>
+    <view wx:elif="{{mediaError}}" class="media-error">{{mediaError.message}}</view>
+    <view wx:elif="{{!mediaItems.length}}" class="media-empty compact">当前告警暂无已核实影像</view>
+    <view wx:else class="remote-list">
+      <view class="remote-row" wx:for="{{mediaItems}}" wx:key="media_id">
+        <view class="remote-copy">
+          <text class="remote-type">{{item.media_type === 'image' ? '现场图片' : '现场视频'}}</text>
+          <text class="remote-meta">{{item.captured_at || item.uploaded_at || '时间未提供'}}</text>
+        </view>
+        <button class="pick-button" data-id="{{item.media_id}}" data-type="{{item.media_type}}" bindtap="requestRemoteAccess">
+          {{item.media_type === 'image' ? '查看大图' : '播放视频'}}
+        </button>
+      </view>
+    </view>
+    <view wx:if="{{remoteVideoUrl}}" class="media-slot">
+      <video id="remoteSceneVideo" class="media-video" src="{{remoteVideoUrl}}" controls="{{true}}" show-fullscreen-btn="{{true}}" object-fit="contain" />
+      <button class="fullscreen-button" bindtap="expandRemoteVideo">全屏播放</button>
+      <view class="local-label">临时签名地址会过期，无法播放时请重新获取。</view>
+    </view>
+  </block>
+
+  <block wx:else>
+  <view class="media-notice">Mock 模式未伪造云端影像，以下仅支持本机文件预览。</view>
   <view class="media-slot">
     <view class="slot-heading"><text>现场图片</text><button class="pick-button" data-kind="image" bindtap="choosePreview" disabled="{{choosing}}">{{imagePath ? '更换图片' : '本机预览'}}</button></view>
     <image wx:if="{{imagePath}}" class="media-image" src="{{imagePath}}" mode="aspectFit" bindtap="previewImage" data-kind="image" binderror="handleMediaError" />
@@ -15,4 +40,5 @@
   </view>
   <view wx:if="{{imagePath || videoPath}}" class="local-label">仅本机预览 · 未上传 · 未关联告警</view>
   <button wx:if="{{imagePath || videoPath}}" class="clear-button" bindtap="clearPreview">清除本机预览</button>
+  </block>
 </view>

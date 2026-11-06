@@ -10,6 +10,12 @@ const CONTRACT_ERRORS = {
   INTERNAL_ERROR: { httpStatus: 500, message: '服务端异常', retryable: true }
 };
 
+// v0.2.0 媒体接口新增状态；与 v0.1.0 核心错误表分开，避免改变旧契约。
+const USER_API_ERRORS = {
+  CONFLICT: { httpStatus: 409, message: '资源状态冲突', retryable: false },
+  SERVICE_UNAVAILABLE: { httpStatus: 503, message: '服务暂不可用', retryable: true }
+};
+
 const LOCAL_ERRORS = {
   LOCAL_INVALID_PARAMETER: { message: '参数无效（本地校验未通过，未发起请求）', retryable: false },
   TOKEN_MISSING: { message: '未配置访问凭证，已拦截请求', retryable: false },
@@ -19,7 +25,7 @@ const LOCAL_ERRORS = {
 };
 
 function createAppError(kind, overrides) {
-  const base = CONTRACT_ERRORS[kind] || LOCAL_ERRORS[kind] || {
+  const base = CONTRACT_ERRORS[kind] || USER_API_ERRORS[kind] || LOCAL_ERRORS[kind] || {
     message: '未知错误',
     retryable: false
   };
@@ -35,7 +41,8 @@ function createAppError(kind, overrides) {
 }
 
 function isKnownContractCode(code) {
-  return Object.prototype.hasOwnProperty.call(CONTRACT_ERRORS, code);
+  return Object.prototype.hasOwnProperty.call(CONTRACT_ERRORS, code) ||
+    Object.prototype.hasOwnProperty.call(USER_API_ERRORS, code);
 }
 
 // HTTP 状态码与业务错误码都必须参与错误判定。
@@ -47,7 +54,7 @@ function mapHttpError(httpStatus, envelopeCode) {
       code: envelopeCode,
       // 记录状态码与业务码不一致的情况，但不改变业务码语义。
       statusMismatch:
-        CONTRACT_ERRORS[envelopeCode].httpStatus !== Number(httpStatus)
+        (CONTRACT_ERRORS[envelopeCode] || USER_API_ERRORS[envelopeCode]).httpStatus !== Number(httpStatus)
     });
   }
 
@@ -56,8 +63,10 @@ function mapHttpError(httpStatus, envelopeCode) {
     401: 'UNAUTHORIZED',
     403: 'FORBIDDEN',
     404: 'NOT_FOUND',
+    409: 'CONFLICT',
     422: 'VALIDATION_ERROR',
-    500: 'INTERNAL_ERROR'
+    500: 'INTERNAL_ERROR',
+    503: 'SERVICE_UNAVAILABLE'
   };
   const kind = byStatus[Number(httpStatus)];
   if (kind) {
@@ -96,6 +105,7 @@ function mapNetworkError(wxError) {
 
 module.exports = {
   CONTRACT_ERRORS,
+  USER_API_ERRORS,
   LOCAL_ERRORS,
   createAppError,
   isKnownContractCode,

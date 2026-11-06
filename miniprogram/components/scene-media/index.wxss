@@ -19,3 +19,10 @@
 .fullscreen-button { margin: 16rpx 0 0; padding: 12rpx 24rpx; min-height: 88rpx; line-height: 64rpx; font-size: 30rpx; font-weight: 500; color: #07566b; background: #e5f1f8; border: 1rpx solid #adc7d9; border-radius: 4rpx; }
 .fullscreen-button::after { border: none; }
 .photo-zoom-button { font-size: 30rpx; font-weight: 500; min-height: 88rpx; line-height: 64rpx; }
+.media-empty.compact { min-height: 150rpx; }
+.media-error { margin-top: 20rpx; padding: 20rpx; color: #9f241d; background: #fff0ed; border-left: 6rpx solid #b42318; font-size: 30rpx; }
+.remote-list { margin-top: 20rpx; border-top: 1rpx solid #c3ccd8; }
+.remote-row { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; padding: 22rpx 0; border-bottom: 1rpx solid #c3ccd8; }
+.remote-copy { min-width: 0; display: flex; flex-direction: column; gap: 8rpx; }
+.remote-type { font-size: 34rpx; font-weight: 700; color: #142336; }
+.remote-meta { font-size: 28rpx; color: #52647a; word-break: break-all; }
