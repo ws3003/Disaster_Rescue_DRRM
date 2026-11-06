@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import ssl
 import threading
 import time
 from datetime import datetime
@@ -116,11 +117,17 @@ class OneNetMqttPublisher:
         client = self._new_client()
         client.username_pw_set(self.cfg.product_id, self.cfg.access_token)
         if self.cfg.tls:
-            # Passing an explicit CA keeps certificate verification enabled;
-            # an empty value retains the OS trust-store fallback for brokers
-            # using public CA chains.
+            # OneNET's official MQTTS CA signs a certificate whose legacy
+            # subject does not contain the broker DNS name.  With its
+            # explicitly pinned CA we still require a valid certificate chain,
+            # but cannot use hostname matching for that known incompatibility.
+            # The ordinary no-custom-CA route retains Python's hostname check.
             if self.cfg.ca_cert_path:
-                client.tls_set(ca_certs=self.cfg.ca_cert_path)
+                context = ssl.create_default_context()
+                context.load_verify_locations(cafile=self.cfg.ca_cert_path)
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_REQUIRED
+                client.tls_set_context(context)
             else:
                 client.tls_set()
         client.connect(self.cfg.host, self.cfg.port, self.cfg.keepalive_seconds)

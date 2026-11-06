@@ -1,5 +1,6 @@
 import json
 import time
+from unittest.mock import patch
 
 from src.onenet.config import OneNetConfig
 from src.onenet.mqtt_publisher import OneNetMqttPublisher, build_property_payload
@@ -21,6 +22,9 @@ class _Client:
 
     def tls_set(self):
         self.tls = True
+
+    def tls_set_context(self, context):
+        self.tls_context = context
 
     def connect(self, host, port, keepalive):
         self.connection = (host, port, keepalive)
@@ -78,3 +82,26 @@ def test_async_publish_uses_official_property_topic_and_qos1():
     assert topic == "$sys/pid/001/thing/property/post"
     assert qos == 1 and retain is False
     assert "humidity" not in json.loads(payload)["params"]
+
+
+def test_explicit_onenet_ca_keeps_certificate_validation_without_hostname_match():
+    class _Context:
+        check_hostname = True
+        verify_mode = None
+
+        def load_verify_locations(self, *, cafile):
+            self.ca_file = cafile
+
+    context = _Context()
+    client = _Client()
+    publisher = OneNetMqttPublisher(
+        _cfg(ca_cert_path="/run/secrets/onenet-ca.pem"),
+        client_factory=lambda _: client,
+    )
+
+    with patch("src.onenet.mqtt_publisher.ssl.create_default_context", return_value=context):
+        publisher._connect()
+
+    assert context.ca_file == "/run/secrets/onenet-ca.pem"
+    assert context.check_hostname is False
+    assert client.tls_context is context
