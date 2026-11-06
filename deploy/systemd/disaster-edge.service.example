@@ -18,7 +18,8 @@ Group=pi
 # [替换项] 必须是实际项目根目录的绝对路径。
 WorkingDirectory=/home/pi/Disaster_Rescue_DRRM_V4.4_B
 # [替换项] 必须使用实际虚拟环境解释器，避免使用系统 python。
-ExecStart=/home/pi/Disaster_Rescue_DRRM_V4.4_B/venv/bin/python -B src/edge_client.py
+# -u 禁用 stdout/stderr 缓冲，确保 OneNET/E7/E8 运行状态及时进入 journal。
+ExecStart=/home/pi/Disaster_Rescue_DRRM_V4.4_B/venv/bin/python -u -B src/edge_client.py
 # 文件仅保存变量名、路径、产品 ID、设备名等；真实密钥保存在项目外的 600 文件中。
 EnvironmentFile=/home/pi/.config/disaster-rescue/edge.env
 Restart=on-failure
