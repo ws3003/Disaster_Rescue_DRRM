@@ -20,6 +20,10 @@ class OneNetConfig:
     host: str = "mqttstls.heclouds.com"
     port: int = 8883
     tls: bool = True
+    # OneNET MQTTS uses a platform CA that is not always present in the OS
+    # trust store. Keep the certificate outside the repository and provide
+    # its absolute path at deployment time.
+    ca_cert_path: str = ""
     keepalive_seconds: int = 60
     qos: int = 1
     queue_size: int = 256
@@ -61,6 +65,7 @@ def config_from_dict(data: Mapping[str, Any], env: Mapping[str, str] | None = No
         host=str(data.get("host") or "mqttstls.heclouds.com").strip(),
         port=_int(data.get("port", 8883), name="onenet.port", minimum=1, maximum=65535),
         tls=_bool(data.get("tls", True), name="onenet.tls"),
+        ca_cert_path=str(data.get("ca_cert_path") or "").strip(),
         keepalive_seconds=_int(
             data.get("keepalive_seconds", 60), name="onenet.keepalive_seconds", minimum=10
         ),

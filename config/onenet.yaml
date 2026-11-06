@@ -6,6 +6,9 @@ onenet:
   host: "mqttstls.heclouds.com"
   port: 8883
   tls: true
+  # OneNET MQTTS CA certificate absolute path.  Keep the actual .pem/.crt
+  # outside this repository, for example: /home/pi/testtest/onenet/onenet-ca.pem
+  ca_cert_path: ""
   keepalive_seconds: 60
   qos: 1
   queue_size: 256

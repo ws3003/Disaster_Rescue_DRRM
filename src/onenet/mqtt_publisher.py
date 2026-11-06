@@ -116,7 +116,13 @@ class OneNetMqttPublisher:
         client = self._new_client()
         client.username_pw_set(self.cfg.product_id, self.cfg.access_token)
         if self.cfg.tls:
-            client.tls_set()
+            # Passing an explicit CA keeps certificate verification enabled;
+            # an empty value retains the OS trust-store fallback for brokers
+            # using public CA chains.
+            if self.cfg.ca_cert_path:
+                client.tls_set(ca_certs=self.cfg.ca_cert_path)
+            else:
+                client.tls_set()
         client.connect(self.cfg.host, self.cfg.port, self.cfg.keepalive_seconds)
         client.loop_start()
         return client
