@@ -23,8 +23,21 @@ def test_enabled_uses_environment_credentials_without_serializing_secret():
 
 
 def test_enabled_fails_closed_when_token_missing():
-    with pytest.raises(OneNetConfigError, match="ONENET_ACCESS_TOKEN"):
+    with pytest.raises(OneNetConfigError, match="ONENET_ACCESS_TOKEN 或 ONENET_DEVICE_KEY_FILE"):
         config_from_dict(
             {"enabled": True, "product_id": "pid-1", "device_name": "001"},
             env={},
         )
+
+
+def test_enabled_allows_runtime_device_key_file_instead_of_static_token():
+    cfg = config_from_dict(
+        {"enabled": True},
+        env={
+            "ONENET_PRODUCT_ID": "pid-1",
+            "ONENET_DEVICE_NAME": "001",
+            "ONENET_DEVICE_KEY_FILE": "/run/secrets/onenet-device-key",
+        },
+    )
+    assert cfg.access_token == ""
+    assert cfg.device_key_file == "/run/secrets/onenet-device-key"

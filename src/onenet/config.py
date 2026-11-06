@@ -31,6 +31,8 @@ class OneNetConfig:
     product_id: str = ""
     device_name: str = ""
     access_token: str = ""
+    device_key_file: str = ""
+    token_lifetime_seconds: int = 86400
     temperature_identifier: str = "temperature"
     humidity_identifier: str = "humidity"
 
@@ -75,6 +77,13 @@ def config_from_dict(data: Mapping[str, Any], env: Mapping[str, str] | None = No
         product_id=str(env.get("ONENET_PRODUCT_ID") or data.get("product_id") or "").strip(),
         device_name=str(env.get("ONENET_DEVICE_NAME") or data.get("device_name") or "").strip(),
         access_token=str(env.get("ONENET_ACCESS_TOKEN") or "").strip(),
+        device_key_file=str(env.get("ONENET_DEVICE_KEY_FILE") or "").strip(),
+        token_lifetime_seconds=_int(
+            data.get("token_lifetime_seconds", 86400),
+            name="onenet.token_lifetime_seconds",
+            minimum=60,
+            maximum=604800,
+        ),
         temperature_identifier=str(data.get("temperature_identifier") or "temperature").strip(),
         humidity_identifier=str(data.get("humidity_identifier") or "humidity").strip(),
     )
@@ -86,10 +95,11 @@ def config_from_dict(data: Mapping[str, Any], env: Mapping[str, str] | None = No
                 ("host", cfg.host),
                 ("product_id/ONENET_PRODUCT_ID", cfg.product_id),
                 ("device_name/ONENET_DEVICE_NAME", cfg.device_name),
-                ("ONENET_ACCESS_TOKEN", cfg.access_token),
                 ("temperature_identifier", cfg.temperature_identifier),
             ) if not value
         ]
+        if not (cfg.access_token or cfg.device_key_file):
+            missing.append("ONENET_ACCESS_TOKEN 或 ONENET_DEVICE_KEY_FILE")
         if missing:
             raise OneNetConfigError("OneNET 已启用但缺少: " + ", ".join(missing))
     return cfg

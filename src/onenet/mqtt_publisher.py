@@ -6,14 +6,20 @@ in memory, but never roll back the authoritative SQLite/C4 E7 flow.
 
 from __future__ import annotations
 
+import base64
+import hmac
 import json
 import logging
+import os
 import queue
 import ssl
+import stat
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote
 
 from .config import OneNetConfig
 
@@ -27,6 +33,34 @@ def _epoch_ms(value: str | None) -> int:
         except (TypeError, ValueError):
             pass
     return int(time.time() * 1000)
+
+
+def _token_from_device_key(cfg: OneNetConfig) -> str:
+    """Create a fresh OneNET MQTTS token without persisting it to disk."""
+    path = Path(cfg.device_key_file)
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+        # Windows' chmod does not expose POSIX group/other bits reliably.
+        # The production Edge target is Linux, where this is enforced.
+        if os.name == "posix" and mode & 0o077:
+            raise RuntimeError("OneNET 设备密钥文件权限必须为 600 或更严格")
+        encoded_key = path.read_text(encoding="utf-8").strip()
+        key = base64.b64decode(encoded_key, validate=True)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"无法安全读取 OneNET 设备密钥文件: {path}") from exc
+
+    version = "2018-10-31"
+    method = "sha1"
+    resource = f"products/{cfg.product_id}/devices/{cfg.device_name}"
+    expires_at = str(int(time.time()) + cfg.token_lifetime_seconds)
+    source = f"{expires_at}\n{method}\n{resource}\n{version}"
+    signature = base64.b64encode(
+        hmac.new(key, source.encode("utf-8"), "sha1").digest()
+    ).decode("ascii")
+    return (
+        f"version={version}&res={quote(resource, safe='')}&et={expires_at}"
+        f"&method={method}&sign={quote(signature, safe='')}"
+    )
 
 
 def build_property_payload(
@@ -115,7 +149,12 @@ class OneNetMqttPublisher:
 
     def _connect(self) -> Any:
         client = self._new_client()
-        client.username_pw_set(self.cfg.product_id, self.cfg.access_token)
+        token = (
+            _token_from_device_key(self.cfg)
+            if self.cfg.device_key_file
+            else self.cfg.access_token
+        )
+        client.username_pw_set(self.cfg.product_id, token)
         if self.cfg.tls:
             # OneNET's official MQTTS CA signs a certificate whose legacy
             # subject does not contain the broker DNS name.  With its

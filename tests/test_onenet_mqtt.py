@@ -1,9 +1,10 @@
 import json
 import time
+import base64
 from unittest.mock import patch
 
 from src.onenet.config import OneNetConfig
-from src.onenet.mqtt_publisher import OneNetMqttPublisher, build_property_payload
+from src.onenet.mqtt_publisher import OneNetMqttPublisher, _token_from_device_key, build_property_payload
 
 
 class _Info:
@@ -105,3 +106,18 @@ def test_explicit_onenet_ca_keeps_certificate_validation_without_hostname_match(
     assert context.ca_file == "/run/secrets/onenet-ca.pem"
     assert context.check_hostname is False
     assert client.tls_context is context
+
+
+def test_device_key_file_generates_fresh_token_without_static_token(tmp_path):
+    key_file = tmp_path / "onenet-device-key"
+    key_file.write_text(base64.b64encode(b"test-device-key").decode(), encoding="utf-8")
+    key_file.chmod(0o600)
+
+    token = _token_from_device_key(_cfg(
+        access_token="",
+        device_key_file=str(key_file),
+        token_lifetime_seconds=3600,
+    ))
+
+    assert "res=products%2Fpid%2Fdevices%2F001" in token
+    assert "sign=" in token
