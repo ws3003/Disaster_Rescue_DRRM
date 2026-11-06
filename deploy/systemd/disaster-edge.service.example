@@ -1,0 +1,32 @@
+# Disaster Rescue Edge systemd 服务样例（Raspberry Pi）
+#
+# 此服务启动完整 EdgeClient：摄像头感知、已启用的 E7/E8、OneNET 遥测、
+# 以及配置中已启用的其他既有功能。安装前务必审核 edge.yaml 与 storage.yaml。
+#
+# 安装方式见 docs/V4.4_OneNET_MQTT接入说明.md；不要将真实设备密钥、
+# OSS 密钥、X4 Token 或其他凭据写入本文件或 Git 仓库。
+
+[Unit]
+Description=Disaster Rescue Edge Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+# [替换项] 必须是实际项目根目录的绝对路径。
+WorkingDirectory=/home/pi/Disaster_Rescue_DRRM_V4.4_B
+# [替换项] 必须使用实际虚拟环境解释器，避免使用系统 python。
+ExecStart=/home/pi/Disaster_Rescue_DRRM_V4.4_B/venv/bin/python -B src/edge_client.py
+# 文件仅保存变量名、路径、产品 ID、设备名等；真实密钥保存在项目外的 600 文件中。
+EnvironmentFile=/home/pi/.config/disaster-rescue/edge.env
+Restart=on-failure
+RestartSec=8
+TimeoutStopSec=30
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
