@@ -771,6 +771,35 @@ class Agent:
             pa.setdefault("title", f"[HIGH] Person {person_label} Alert")
             pa.setdefault("message", f"检测到高风险人员状态：{state_label}")
             new_actions.append({"tool": "communication_tool", "args": pa})
+            # 高危人员报警还必须写入本地事件库。DatabaseTool 会在同一事务中
+            # 创建 C4 Outbox 记录，随后由 C4 worker 同步到 Windows / 小程序。
+            # 已有 save_event 时不重复创建，保留规划器给出的原始事件。
+            has_person_event = any(
+                isinstance(item, dict)
+                and item.get("tool") == "database_tool"
+                and str((item.get("args") or {}).get("action") or "") == "save_event"
+                and (item.get("args") or {}).get("person_id") is not None
+                for item in actions or []
+            )
+            if not has_person_event:
+                new_actions.append({
+                    "tool": "database_tool",
+                    "args": {
+                        "action": "save_event",
+                        "type": "person_alert",
+                        "severity": "HIGH",
+                        "person_id": pa.get("person_id"),
+                        "payload": {
+                            "alert_type": "person",
+                            "state": pa.get("state"),
+                            "priority": pa.get("priority", "HIGH"),
+                            "risk_score": pa.get("risk_score"),
+                            "title": pa.get("title"),
+                            "message": pa.get("message"),
+                            "image_path": pa.get("image_path"),
+                        },
+                    },
+                })
         # 2) environment 报警(仅当检测到人员)
         if person_exists and env_sev == "HIGH":
             new_actions.append({

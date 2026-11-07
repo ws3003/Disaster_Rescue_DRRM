@@ -46,6 +46,13 @@ def _snd(actions, alert_type=None):
     return out
 
 
+def _saved_person_events(actions):
+    return [x for x in actions
+            if x.get("tool") == "database_tool"
+            and (x.get("args") or {}).get("action") == "save_event"
+            and (x.get("args") or {}).get("person_id") is not None]
+
+
 class AlarmFusionMatrixTest(unittest.TestCase):
     def _run(self, actions, env):
         a = _MyAgent()
@@ -73,6 +80,21 @@ class AlarmFusionMatrixTest(unittest.TestCase):
         r = self._run([_person("HIGH")], "LOW")
         self.assertEqual(len(_snd(r, "person")), 1)
         self.assertEqual(_snd(r, "environment"), [])
+        saved = _saved_person_events(r)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["args"]["type"], "person_alert")
+        self.assertEqual(saved[0]["args"]["severity"], "HIGH")
+
+    def test_existing_person_event_is_not_duplicated(self):
+        actions = [
+            {"tool": "database_tool", "args": {
+                "action": "save_event", "person_id": 1,
+                "type": "planner_event", "severity": "HIGH",
+            }},
+            _person("HIGH"),
+        ]
+        result = self._run(actions, "LOW")
+        self.assertEqual(len(_saved_person_events(result)), 1)
 
     def test_person_alert_keeps_title_and_message_when_other_action_is_first(self):
         actions = [
