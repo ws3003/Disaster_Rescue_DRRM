@@ -25,6 +25,7 @@ from src.edge_client import (
     extract_summary,
     load_config,
     render_overlay,
+    run_live_preview,
     run_loop,
     run_preview_only,
 )
@@ -354,6 +355,24 @@ class PreviewOnlyTest(unittest.TestCase):
                                   show=lambda f, e: False)
         self.assertEqual(frames, 0)          # 首帧即按 q 退出
         self.assertEqual(cam.captures, 1)
+
+    def test_live_preview_continues_using_cached_overlay(self):
+        cam = CountingCam()
+        cache = PreviewOverlayCache()
+        cache.update([{"person_id": 1, "bbox": [1, 2, 30, 40]}])
+        stop = __import__("threading").Event()
+        shown_events = []
+
+        def show(_frame, events):
+            shown_events.append(events)
+            if len(shown_events) >= 2:
+                stop.set()
+            return True
+
+        frames = run_live_preview(cam, cache, stop, sleep=no_sleep, show=show)
+        self.assertEqual(frames, 2)
+        self.assertEqual(cam.captures, 2)
+        self.assertTrue(all(events for events in shown_events))
 
     def test_main_preview_only_skips_uploader_and_perception(self):
         """--preview-only 主流程只建摄像头+预览, 不构造 uploader/perception, 不需 Gateway。"""

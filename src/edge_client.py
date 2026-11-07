@@ -512,6 +512,8 @@ class PreviewOverlayCache:
         self._now = now
         self._events: list[dict] = []
         self._updated_at: Optional[float] = None
+        # ``--preview`` 的显示线程和分析线程会同时访问该缓存。
+        self._lock = threading.Lock()
 
     def update(self, events: Any) -> None:
         """仅以非空的本轮识别结果刷新缓存，空帧不立即擦除框。"""
@@ -520,16 +522,19 @@ class PreviewOverlayCache:
         copied = [dict(event) for event in events if isinstance(event, dict)]
         if not copied:
             return
-        self._events = copied
-        self._updated_at = self._now()
+        with self._lock:
+            self._events = copied
+            self._updated_at = self._now()
 
     def visible_events(self) -> list[dict]:
         """返回仍在保持窗口内的结果，过期后不再显示陈旧检测框。"""
-        if self._updated_at is None:
-            return []
-        if self._now() - self._updated_at > self._hold_seconds:
-            return []
-        return self._events
+        with self._lock:
+            if self._updated_at is None:
+                return []
+            if self._now() - self._updated_at > self._hold_seconds:
+                return []
+            # 不把内部可变列表交给 OpenCV 显示线程。
+            return [dict(event) for event in self._events]
 
 
 def render_overlay(frame, person_events):
@@ -627,6 +632,40 @@ def run_preview_only(
     return frames
 
 
+def run_live_preview(
+    cam,
+    overlay_cache: PreviewOverlayCache,
+    stop_event: threading.Event,
+    sleep: Callable[[float], None] = time.sleep,
+    show: Optional[Callable[[Any, list], bool]] = None,
+) -> int:
+    """持续显示相机帧，同时叠加后台分析线程最近一次有效检测结果。
+
+    OpenCV 窗口始终由调用本函数的主线程驱动；后台 ``run_loop`` 只做
+    选帧、推理与上传。因此网络/LLM 的耗时不会冻结预览窗口。
+    """
+    show = show if show is not None else _show_preview
+    frames = 0
+    while not stop_event.is_set():
+        try:
+            frame = cam.capture()
+        except Exception as exc:
+            print(f"[LivePreview] capture failed: {exc}")
+            sleep(0.1)
+            continue
+        try:
+            if not show(frame, overlay_cache.visible_events()):
+                stop_event.set()
+                break
+        except Exception as exc:
+            print(f"[LivePreview] display failed (headless?): {exc}")
+            stop_event.set()
+            break
+        frames += 1
+        sleep(0.001)
+    return frames
+
+
 # ----------------------------------------------------------------------
 # 主循环
 # ----------------------------------------------------------------------
@@ -644,6 +683,8 @@ def run_loop(
     flush_state: Optional[Dict[str, Any]] = None,
     vision_client: Optional[Any] = None,
     probe_scheduler: Optional[Callable[[Any], Any]] = None,
+    preview_overlay_cache: Optional[PreviewOverlayCache] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> int:
     """周期性 采集→(感知)→编码→上传→打印; preview 时叠加显示相机帧。
 
@@ -669,8 +710,10 @@ def run_loop(
     flush_caller = (flush_state or {}).get("caller") if flush_state else None
 
     iterations = 0
-    preview_cache = PreviewOverlayCache() if preview else None
+    preview_cache = preview_overlay_cache or (PreviewOverlayCache() if preview else None)
     while True:
+        if stop_event is not None and stop_event.is_set():
+            break
         if max_uploads is not None and iterations >= max_uploads:
             break
         iterations += 1
@@ -721,6 +764,10 @@ def run_loop(
             print(ts)
             print("perception analyze failed")
             person_events = []
+
+        # 后台分析线程只刷新预览缓存；显示线程读取它并持续渲染最新相机帧。
+        if preview_cache is not None:
+            preview_cache.update(person_events)
 
         # ── Vision Snapshot 旁路同步 (Phase7.3): 把最新 person_events 推送 server vision API。
         #    在此处: 数据最新/未经后续处理; 独立旁路, 失败绝不影响 camera/感知/Agent/上传/云端分析。
@@ -823,8 +870,9 @@ def run_loop(
             try:
                 # 选帧云推理与本地感知不会每一帧都产生新事件；预览层保持
                 # 最近有效框最多 15 秒，使画面连续，但不改变业务数据链路。
-                preview_cache.update(person_events)
                 if not _show_preview(frame, preview_cache.visible_events()):
+                    if stop_event is not None:
+                        stop_event.set()
                     break
             except Exception:
                 preview = False
@@ -880,7 +928,11 @@ def run_loop(
             err = body.get("error") if isinstance(body, dict) else ""
             print(f"server error: {status} {err}")
 
-        sleep(interval)
+        if stop_event is not None:
+            if stop_event.wait(max(0.0, float(interval))):
+                break
+        else:
+            sleep(interval)
     return iterations
 
 
@@ -1019,26 +1071,73 @@ def main(argv: Optional[list] = None) -> int:
     if _voice_enabled():
         start_voice_thread()
 
+    loop_kwargs = {
+        "interval": interval,
+        "quality": quality,
+        "max_uploads": 1 if args.once else None,
+        "perception": perception,
+        "agent": agent,
+        "observation": {
+            "enabled": obs_enabled,
+            "status_every": status_every,
+            "flush_every": flush_every,
+        },
+        "flush_state": {
+            "flush_every": flush_every,
+            "caller": flush_caller,
+        },
+        "vision_client": _build_vision_client(cfg),
+        "probe_scheduler": probe_scheduler,
+    }
+
+    preview_cam = None
     try:
-        run_loop(
-            uploader, cam, interval=interval, quality=quality,
-            max_uploads=1 if args.once else None,
-            perception=perception,
-            preview=args.preview,
-            agent=agent,
-            observation={
-                "enabled": obs_enabled,
-                "status_every": status_every,
-                "flush_every": flush_every,
-            },
-            flush_state={
-                "flush_every": flush_every,
-                "caller": flush_caller,
-            },
-            vision_client=_build_vision_client(cfg),
-            probe_scheduler=probe_scheduler,
-        )
+        if args.preview:
+            # 仅新增一个 CameraService 订阅者，不创建第二个 Picamera2 硬件实例。
+            # 主线程持续渲染 OpenCV；后台线程按原有间隔做选帧和业务处理。
+            width, height, fps = _camera_spec(cam_cfg)
+            preview_cam = EdgeCam(service=svc, width=width, height=height, fps=fps)
+            preview_cache = PreviewOverlayCache()
+            preview_stop = threading.Event()
+            worker_errors: list[BaseException] = []
+
+            def _pipeline_worker() -> None:
+                try:
+                    run_loop(
+                        uploader, cam, preview=False,
+                        preview_overlay_cache=preview_cache,
+                        stop_event=preview_stop,
+                        **loop_kwargs,
+                    )
+                except BaseException as exc:  # 将后台异常交还主线程报告
+                    worker_errors.append(exc)
+                    preview_stop.set()
+
+            worker = threading.Thread(
+                target=_pipeline_worker,
+                name="edge-analysis-pipeline",
+                daemon=True,
+            )
+            worker.start()
+            try:
+                shown = run_live_preview(preview_cam, preview_cache, preview_stop)
+                print(f"[LivePreview] preview ended, shown {shown} frames")
+            finally:
+                preview_stop.set()
+                # 云端请求最大受配置 timeout 约束；不要因退出预览永久阻塞。
+                worker.join(timeout=max(5.0, min(float(interval) + 5.0, 30.0)))
+                if worker.is_alive():
+                    print("[LivePreview] analysis worker still stopping in background")
+            if worker_errors:
+                raise worker_errors[0]
+        else:
+            run_loop(uploader, cam, preview=False, **loop_kwargs)
     finally:
+        if preview_cam is not None:
+            try:
+                preview_cam.close()
+            except Exception:
+                print("[LivePreview] preview subscription release failed (ignored)")
         _shutdown_edge(svc, cam, e7e8)
     return 0
 
