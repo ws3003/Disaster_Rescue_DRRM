@@ -493,6 +493,45 @@ def _print_log(ts: str, w: int, h: int, status: int) -> None:
 # ----------------------------------------------------------------------
 # 预览模式 (开发/调试用; opt-in, 默认关闭)
 # ----------------------------------------------------------------------
+_PREVIEW_OVERLAY_HOLD_SECONDS = 15.0
+
+
+class PreviewOverlayCache:
+    """在云端选帧间隔内保留最近一次有效的人员叠加结果。
+
+    仅供 ``--preview`` 的视觉显示使用：不参与上传、告警、录像或 Agent
+    决策。这样不会增加云端请求，且不会把旧事件重新写入业务链路。
+    """
+
+    def __init__(
+        self,
+        hold_seconds: float = _PREVIEW_OVERLAY_HOLD_SECONDS,
+        now: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._hold_seconds = float(hold_seconds)
+        self._now = now
+        self._events: list[dict] = []
+        self._updated_at: Optional[float] = None
+
+    def update(self, events: Any) -> None:
+        """仅以非空的本轮识别结果刷新缓存，空帧不立即擦除框。"""
+        if not isinstance(events, list) or not events:
+            return
+        copied = [dict(event) for event in events if isinstance(event, dict)]
+        if not copied:
+            return
+        self._events = copied
+        self._updated_at = self._now()
+
+    def visible_events(self) -> list[dict]:
+        """返回仍在保持窗口内的结果，过期后不再显示陈旧检测框。"""
+        if self._updated_at is None:
+            return []
+        if self._now() - self._updated_at > self._hold_seconds:
+            return []
+        return self._events
+
+
 def render_overlay(frame, person_events):
     """在帧上叠加 person_events 的检测框与状态文字。
 
@@ -630,6 +669,7 @@ def run_loop(
     flush_caller = (flush_state or {}).get("caller") if flush_state else None
 
     iterations = 0
+    preview_cache = PreviewOverlayCache() if preview else None
     while True:
         if max_uploads is not None and iterations >= max_uploads:
             break
@@ -781,7 +821,10 @@ def run_loop(
         # (headless/无显示环境抛错时自动关闭预览, 不影响后续上传)
         if preview:
             try:
-                if not _show_preview(frame, person_events):
+                # 选帧云推理与本地感知不会每一帧都产生新事件；预览层保持
+                # 最近有效框最多 15 秒，使画面连续，但不改变业务数据链路。
+                preview_cache.update(person_events)
+                if not _show_preview(frame, preview_cache.visible_events()):
                     break
             except Exception:
                 preview = False

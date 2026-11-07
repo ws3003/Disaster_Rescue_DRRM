@@ -20,6 +20,7 @@ from src.edge_client import (
     EdgeCam,
     EdgeEncodeError,
     EdgeUploader,
+    PreviewOverlayCache,
     encode_jpeg,
     extract_summary,
     load_config,
@@ -260,6 +261,18 @@ class RenderOverlayTest(unittest.TestCase):
         self.assertTrue(np.any(out != frame))
         # HIGH 事件使用红色检测框；左上角在 rectangle 边线上。
         self.assertTrue(np.array_equal(out[50, 40], np.array([0, 0, 255])))
+
+    def test_preview_cache_holds_latest_events_between_empty_frames(self):
+        clock = [100.0]
+        cache = PreviewOverlayCache(hold_seconds=15.0, now=lambda: clock[0])
+        event = {"person_id": 1, "bbox": [1, 2, 30, 40]}
+
+        cache.update([event])
+        cache.update([])
+        self.assertEqual(cache.visible_events(), [event])
+
+        clock[0] += 15.1
+        self.assertEqual(cache.visible_events(), [])
 
 
 class FakeCameraFrameReader:
