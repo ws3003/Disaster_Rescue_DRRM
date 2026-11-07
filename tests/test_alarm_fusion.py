@@ -76,6 +76,15 @@ class AlarmFusionMatrixTest(unittest.TestCase):
         r = self._run([_person("LOW")], "HIGH")
         self.assertEqual(len(_snd(r, "environment")), 1)
         self.assertEqual(_snd(r, "person"), [])
+        env_events = [x for x in r
+                      if x.get("tool") == "database_tool"
+                      and (x.get("args") or {}).get("type") == "environment_alert"]
+        self.assertEqual(len(env_events), 1)
+        payload = env_events[0]["args"]["payload"]
+        _hash, reasons = canonical.classify(
+            "person_event", {"person_id": None, "payload": payload}, version="v1"
+        )
+        self.assertEqual(reasons, set())
 
     def test_person_high_env_low_person_only(self):
         r = self._run([_person("HIGH")], "LOW")

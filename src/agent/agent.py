@@ -806,6 +806,13 @@ class Agent:
                 })
         # 2) environment 报警(仅当检测到人员)
         if person_exists and env_sev == "HIGH":
+            has_environment_event = any(
+                isinstance(item, dict)
+                and item.get("tool") == "database_tool"
+                and str((item.get("args") or {}).get("action") or "") == "save_event"
+                and str((item.get("args") or {}).get("type") or "") == "environment_alert"
+                for item in actions or []
+            )
             new_actions.append({
                 "tool": "communication_tool",
                 "args": {
@@ -817,6 +824,24 @@ class Agent:
                     "message": "检测到高危险灾害环境，请关注现场情况",
                 },
             })
+            # 环境高风险已发出通知时，也同步写入 C4，确保小程序能展示。
+            if not has_environment_event:
+                new_actions.append({
+                    "tool": "database_tool",
+                    "args": {
+                        "action": "save_event",
+                        "type": "environment_alert",
+                        "severity": "HIGH",
+                        "person_id": None,
+                        "payload": {
+                            "state": "environment",
+                            "priority": "HIGH",
+                            "timestamp": datetime.now().astimezone().isoformat(),
+                            "title": "环境高风险报警",
+                            "message": "检测到高危险灾害环境，请关注现场情况",
+                        },
+                    },
+                })
 
         # 3) 保留非通信(非 send_alert)既有动作; 通信 send_alert 已由上面规整取代
         for act in actions or []:
