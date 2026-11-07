@@ -31,6 +31,8 @@ router = APIRouter(prefix="/api/v1")
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 20
 PERSON_EVENT_TYPE = "high_risk_alert"
+# 兼容 V4.3 既有告警和 Edge/C4 新同步的标准人员告警；两者都应展示给小程序。
+PERSON_EVENT_TYPES = (PERSON_EVENT_TYPE, "person_alert")
 
 _CODES = {
     "INVALID_PARAMETER": "参数非法",
@@ -199,7 +201,7 @@ def _person_page(
     return [
         _person_item(e)
         for e in db.query_person_alerts(
-            PERSON_EVENT_TYPE, limit=limit, offset=offset
+            PERSON_EVENT_TYPES, limit=limit, offset=offset
         )
     ]
 
@@ -234,7 +236,7 @@ def query_alerts(
     """告警列表查询（person / sensor_environment / 合并 + 分页）。"""
     _validate_category(category)
     page, page_size = _paging(page, page_size)
-    person_total = db.count_person_alerts(PERSON_EVENT_TYPE)
+    person_total = db.count_person_alerts(PERSON_EVENT_TYPES)
     sensor_total = db.count_sensor_alerts()
 
     if category == "person":

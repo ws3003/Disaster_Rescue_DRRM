@@ -59,6 +59,15 @@ class TestSharedFunctions:
         assert all(item.get("category") == "person" for item in data)
         assert meta["total"] == 1
 
+    def test_query_alerts_includes_c4_person_alert(self, db):
+        d_id = db.save_event(
+            type="person_alert", severity="HIGH", person_id=2,
+            payload={"state": "Help-Waving", "priority": "HIGH", "risk_score": 0.8},
+        )
+        data, meta = s4.query_alerts(db, "person", None, None)
+        assert meta["total"] == 2
+        assert {item["alert_key"] for item in data} >= {f"person:{d_id}"}
+
     def test_query_alerts_category_sensor(self, db):
         data, meta = s4.query_alerts(db, "sensor_environment", None, None)
         assert all(item.get("category") == "sensor_environment" for item in data)

@@ -1333,21 +1333,24 @@ class Database:
 
     def query_person_alerts(
         self,
-        type_: str,
+        type_: str | tuple[str, ...] | list[str],
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict]:
         """
-        Query person alert events filtered by event type (contract:
-        person alerts 仅筛选 events.type == high_risk_alert)。
+        Query person alert events filtered by one or more event types.
 
         SELECT 字段与 save_event/get_recent_events 一致;
         排序 events.ts DESC, event_id DESC (契约 S4-02 人员组)。
         """
 
+        types = (type_,) if isinstance(type_, str) else tuple(type_)
+        if not types:
+            return []
+        placeholders = ", ".join("?" for _ in types)
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT
                     event_id,
                     ts,
@@ -1356,15 +1359,11 @@ class Database:
                     person_id,
                     payload
                 FROM events
-                WHERE type = ?
+                WHERE type IN ({placeholders})
                 ORDER BY ts DESC, event_id DESC
                 LIMIT ? OFFSET ?
                 """,
-                (
-                    type_,
-                    int(limit),
-                    int(offset),
-                ),
+                (*types, int(limit), int(offset)),
             ).fetchall()
 
         return [
@@ -1404,21 +1403,25 @@ class Database:
 
     def count_person_alerts(
         self,
-        type_: str,
+        type_: str | tuple[str, ...] | list[str],
     ) -> int:
         """
-        Count person alert events by event type.
-        过滤条件与 query_person_alerts 一致(仅 type)。
+        Count person alert events by one or more event types.
+        过滤条件与 query_person_alerts 一致。
         """
 
+        types = (type_,) if isinstance(type_, str) else tuple(type_)
+        if not types:
+            return 0
+        placeholders = ", ".join("?" for _ in types)
         with self._connect() as conn:
             row = conn.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS n
                 FROM events
-                WHERE type = ?
+                WHERE type IN ({placeholders})
                 """,
-                (type_,),
+                types,
             ).fetchone()
 
         return int(row["n"])
