@@ -247,6 +247,20 @@ class RenderOverlayTest(unittest.TestCase):
         out = render_overlay(frame, [{"person_id": 3}])  # 缺 state/risk/priority
         self.assertEqual(out.shape, frame.shape)
 
+    def test_overlay_draws_bbox_for_detected_person(self):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        out = render_overlay(frame, [{
+            "person_id": 1,
+            "state": "Help-Waving",
+            "risk_score": 0.8,
+            "priority": "HIGH",
+            "bbox": [40, 50, 200, 180],
+        }])
+        self.assertEqual(out.shape, frame.shape)
+        self.assertTrue(np.any(out != frame))
+        # HIGH 事件使用红色检测框；左上角在 rectangle 边线上。
+        self.assertTrue(np.array_equal(out[50, 40], np.array([0, 0, 255])))
+
 
 class FakeCameraFrameReader:
     """模拟 src/camera.py 的 CameraFrameReader 接口 (iter_frames/stop/width/height)。"""

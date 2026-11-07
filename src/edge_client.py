@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -493,23 +494,51 @@ def _print_log(ts: str, w: int, h: int, status: int) -> None:
 # 预览模式 (开发/调试用; opt-in, 默认关闭)
 # ----------------------------------------------------------------------
 def render_overlay(frame, person_events):
-    """在帧上叠加 person_events 文字信息 (仅文本, 不画 bbox)。
+    """在帧上叠加 person_events 的检测框与状态文字。
 
+    ``bbox`` 为 ``[x1, y1, x2, y2]`` 时，在对应人员周围绘制框；缺失或
+    非法 bbox 仍保留左上角的文字回退，保证旧事件结构也能预览。
     供 --preview 调试; 不改变 perception 输出 schema。
     """
     out = frame.copy()
     y = 24
-    for i, ev in enumerate(person_events, start=1):
-        _ = i  # person_id 优先取自事件
-        lines = [
-            f"Person {ev.get('person_id', '-')}",
-            f"State: {ev.get('state', '-')}",
-            f"Risk: {ev.get('risk_score', 0):.2f}",
-            f"Priority: {ev.get('priority', '-')}",
-        ]
-        for line in lines:
+    height, width = out.shape[:2]
+    for ev in person_events:
+        priority = str(ev.get("priority", "-")).upper()
+        color = (0, 0, 255) if priority == "HIGH" else (0, 255, 0)
+        try:
+            risk = float(ev.get("risk_score", 0))
+        except (TypeError, ValueError):
+            risk = 0.0
+        label = (
+            f"Person {ev.get('person_id', '-')} | "
+            f"{ev.get('state', '-')} | {priority} | {risk:.2f}"
+        )
+
+        bbox = ev.get("bbox")
+        valid_bbox = (
+            isinstance(bbox, (list, tuple))
+            and len(bbox) == 4
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                    and math.isfinite(float(v)) for v in bbox)
+        )
+        if valid_bbox:
+            x1, y1, x2, y2 = (int(round(float(v))) for v in bbox)
+            x1, x2 = sorted((max(0, min(width - 1, x1)),
+                             max(0, min(width - 1, x2))))
+            y1, y2 = sorted((max(0, min(height - 1, y1)),
+                             max(0, min(height - 1, y2))))
+            if x2 > x1 and y2 > y1:
+                cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(out, label, (x1, max(20, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2,
+                            cv2.LINE_AA)
+                continue
+
+        # 老事件或不完整事件没有 bbox：保留原有文字回退。
+        for line in (label,):
             cv2.putText(out, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                        0.6, color, 2, cv2.LINE_AA)
             y += 24
         y += 10
     return out
