@@ -74,6 +74,23 @@ class AlarmFusionMatrixTest(unittest.TestCase):
         self.assertEqual(len(_snd(r, "person")), 1)
         self.assertEqual(_snd(r, "environment"), [])
 
+    def test_person_alert_keeps_title_and_message_when_other_action_is_first(self):
+        actions = [
+            {"tool": "database_tool", "args": {
+                "action": "save_event", "person_id": 1,
+                "priority": "HIGH", "state": "Fall",
+            }},
+            {"tool": "communication_tool", "args": {
+                "action": "send_alert", "person_id": 1,
+                "priority": "HIGH", "state": "Fall",
+                "title": "人员跌倒报警", "message": "检测到人员跌倒",
+            }},
+        ]
+        result = _snd(self._run(actions, "LOW"), "person")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["args"]["title"], "人员跌倒报警")
+        self.assertEqual(result[0]["args"]["message"], "检测到人员跌倒")
+
     def test_person_high_env_high_both(self):
         r = self._run([_person("HIGH")], "HIGH")
         self.assertEqual(len(_snd(r, "person")), 1)

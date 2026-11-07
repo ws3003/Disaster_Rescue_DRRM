@@ -740,10 +740,15 @@ class Agent:
         person_exists = False
         person_high = False
         first_person = None       # 首个带人员信息的 args(供 person alert)
+        first_person_alert = None # 首个原始 send_alert args（保留标题/正文）
         for act in actions or []:
             if not isinstance(act, dict):
                 continue
             args = act.get("args") or {}
+            if (act.get("tool") == "communication_tool"
+                    and str(args.get("action") or "") == "send_alert"
+                    and first_person_alert is None):
+                first_person_alert = dict(args)
             if (args.get("person_id") is not None
                     or args.get("priority") is not None
                     or args.get("state") not in (None, "")):
@@ -756,9 +761,15 @@ class Agent:
         new_actions: list = []
         # 1) person 报警(仅人员风险)
         if person_exists and person_high:
-            pa = dict(first_person or {})
+            # 以原 communication action 为基底，避免前序 database/rescue
+            # action 的 person 字段意外丢失 send_alert 所需的 title/message。
+            pa = dict(first_person_alert or first_person or {})
             pa["action"] = "send_alert"
             pa["alert_type"] = "person"
+            person_label = pa.get("person_id")
+            state_label = pa.get("state") or "HIGH"
+            pa.setdefault("title", f"[HIGH] Person {person_label} Alert")
+            pa.setdefault("message", f"检测到高风险人员状态：{state_label}")
             new_actions.append({"tool": "communication_tool", "args": pa})
         # 2) environment 报警(仅当检测到人员)
         if person_exists and env_sev == "HIGH":
