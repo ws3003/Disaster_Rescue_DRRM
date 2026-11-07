@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import hmac
+import math
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -139,6 +140,17 @@ def _parse_alert_key(alert_key: str) -> Tuple[str, str]:
 # DTO 组装（字段与契约 dto_rules 一致）
 # ----------------------------------------------------------------------
 
+def _optional_finite_number(value: Any) -> Optional[float]:
+    """将 SQLite/C4 可能保存成文本的数值恢复为 API 契约中的 number。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _person_item(ev: Dict[str, Any]) -> Dict[str, Any]:
     payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
     return {
@@ -152,7 +164,7 @@ def _person_item(ev: Dict[str, Any]) -> Dict[str, Any]:
         "title": payload.get("title"),
         "state": payload.get("state"),
         "priority": payload.get("priority"),
-        "risk_score": payload.get("risk_score"),
+        "risk_score": _optional_finite_number(payload.get("risk_score")),
     }
 
 

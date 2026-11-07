@@ -68,6 +68,16 @@ class TestSharedFunctions:
         assert meta["total"] == 2
         assert {item["alert_key"] for item in data} >= {f"person:{d_id}"}
 
+    def test_person_risk_score_text_is_normalized_to_number(self, db):
+        event_id = db.save_event(
+            type="person_alert", severity="HIGH", person_id=2,
+            payload={"state": "Help-Waving", "priority": "HIGH", "risk_score": "0.8"},
+        )
+        data, _ = s4.query_alerts(db, "person", None, None)
+        item = next(row for row in data if row["alert_key"] == f"person:{event_id}")
+        assert item["risk_score"] == 0.8
+        assert isinstance(item["risk_score"], float)
+
     def test_query_alerts_category_sensor(self, db):
         data, meta = s4.query_alerts(db, "sensor_environment", None, None)
         assert all(item.get("category") == "sensor_environment" for item in data)
