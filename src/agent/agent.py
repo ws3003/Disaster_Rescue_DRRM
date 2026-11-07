@@ -782,6 +782,11 @@ class Agent:
                 for item in actions or []
             )
             if not has_person_event:
+                risk_score = pa.get("risk_score")
+                # C4 canonical 只接受精确十进制的风险分，避免二进制 float
+                # 造成不可解析而转入 c4_verify。
+                if isinstance(risk_score, float):
+                    risk_score = repr(risk_score)
                 new_actions.append({
                     "tool": "database_tool",
                     "args": {
@@ -790,13 +795,12 @@ class Agent:
                         "severity": "HIGH",
                         "person_id": pa.get("person_id"),
                         "payload": {
-                            "alert_type": "person",
                             "state": pa.get("state"),
                             "priority": pa.get("priority", "HIGH"),
-                            "risk_score": pa.get("risk_score"),
+                            "risk_score": risk_score,
+                            "timestamp": datetime.now().astimezone().isoformat(),
                             "title": pa.get("title"),
                             "message": pa.get("message"),
-                            "image_path": pa.get("image_path"),
                         },
                     },
                 })

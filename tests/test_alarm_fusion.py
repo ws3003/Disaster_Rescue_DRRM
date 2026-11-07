@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.agent.agent import Agent  # noqa: E402
+from src.database import canonical  # noqa: E402
 
 
 def _person(priority="LOW", person_id=1, state="Fall"):
@@ -84,6 +85,13 @@ class AlarmFusionMatrixTest(unittest.TestCase):
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0]["args"]["type"], "person_alert")
         self.assertEqual(saved[0]["args"]["severity"], "HIGH")
+        payload = saved[0]["args"]["payload"]
+        self.assertIn("timestamp", payload)
+        self.assertNotIn("image_path", payload)
+        _hash, reasons = canonical.classify(
+            "person_event", {"person_id": 1, "payload": payload}, version="v1"
+        )
+        self.assertEqual(reasons, set())
 
     def test_existing_person_event_is_not_duplicated(self):
         actions = [
