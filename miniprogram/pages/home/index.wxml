@@ -76,7 +76,15 @@ module.exports.pad = function (n) {
 
   <monitor-charts category-chart="{{categoryChart}}" temperature-chart="{{temperatureChart}}" mock-mode="{{mockMode}}" bindcategorytap="onChartCategoryTap" />
 
-  <scene-media />
+  <scene-media
+    context-key="{{sceneAlertKey}}"
+    mock-mode="{{mockMode}}"
+    media-supported="{{sceneMediaSupported}}"
+    media-items="{{sceneMediaItems}}"
+    media-loading="{{sceneMediaLoading}}"
+    media-error="{{sceneMediaError}}"
+    bind:requestaccess="onRequestMediaAccess"
+  />
 
   <!-- 系统运行状态 S4-01 -->
   <view class="block system-block">

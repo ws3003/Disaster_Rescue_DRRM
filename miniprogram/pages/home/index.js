@@ -22,7 +22,12 @@ Page({
     sensor: { loading: false, error: null, items: [], views: [], total: null },
     summary: { personText: '—', sensorText: '—' },
     categoryChart: buildCategoryChart({}, {}),
-    temperatureChart: buildTemperatureChart({ loading: true })
+    temperatureChart: buildTemperatureChart({ loading: true }),
+    sceneAlertKey: '',
+    sceneMediaSupported: false,
+    sceneMediaItems: [],
+    sceneMediaLoading: false,
+    sceneMediaError: null
   },
 
   toggleAlerts() {
@@ -46,6 +51,7 @@ Page({
     });
 
     const service = createDefaultService();
+    this._service = service;
     this._controller = createHomeController({
       fetchStatus: function () {
         return service.getSystemStatus();
@@ -83,6 +89,59 @@ Page({
       },
       () => this.animateSummary(state.summary)
     );
+    this.loadLatestPersonImage(state.person.items);
+  },
+
+  // 首页只展示最新人员告警已核实的现场图片；不把本机预览伪装为云端证据。
+  loadLatestPersonImage(items) {
+    const latest = Array.isArray(items) ? items[0] : null;
+    const alertKey = latest && latest.alert_key ? latest.alert_key : '';
+    if (!alertKey || !this._service || this._service.useMock) {
+      this.setData({
+        sceneAlertKey: alertKey,
+        sceneMediaSupported: false,
+        sceneMediaItems: [],
+        sceneMediaLoading: false,
+        sceneMediaError: null
+      });
+      return;
+    }
+    if (alertKey === this._sceneLoadedAlertKey) return;
+    this._sceneLoadedAlertKey = alertKey;
+    const requestId = (this._sceneRequestId || 0) + 1;
+    this._sceneRequestId = requestId;
+    this.setData({
+      sceneAlertKey: alertKey,
+      sceneMediaSupported: true,
+      sceneMediaItems: [],
+      sceneMediaLoading: true,
+      sceneMediaError: null
+    });
+    this._service.listAlertMedia(alertKey, { page: 1, page_size: 20 }).then((result) => {
+      if (requestId !== this._sceneRequestId) return;
+      const images = (result.items || []).filter((item) => item && item.media_type === 'image');
+      this.setData({ sceneMediaItems: images, sceneMediaLoading: false, sceneMediaError: null });
+    }).catch((error) => {
+      if (requestId !== this._sceneRequestId) return;
+      this.setData({
+        sceneMediaItems: [],
+        sceneMediaLoading: false,
+        sceneMediaError: { message: error && error.message ? error.message : '现场图片暂不可用' }
+      });
+    });
+  },
+
+  onRequestMediaAccess(event) {
+    const detail = event && event.detail ? event.detail : {};
+    if (!this._service || !detail.mediaId) return;
+    wx.showLoading({ title: '获取图片中' });
+    this._service.getMediaAccess(detail.mediaId).then((access) => {
+      wx.previewImage({ current: access.access_url, urls: [access.access_url] });
+    }).catch(function (error) {
+      wx.showToast({ title: error && error.message ? error.message : '图片暂不可用', icon: 'none' });
+    }).then(function () {
+      wx.hideLoading();
+    });
   },
 
   // 纯展示动效：数字从当前值缓动到新值，不改变任何数据来源。
@@ -148,6 +207,7 @@ Page({
 
   refreshAll() {
     if (this._controller) {
+      this._sceneLoadedAlertKey = '';
       this._controller.load();
     }
   },
@@ -157,6 +217,7 @@ Page({
       wx.stopPullDownRefresh();
       return;
     }
+    this._sceneLoadedAlertKey = '';
     this._controller.load().then(function () {
       wx.stopPullDownRefresh();
     });
