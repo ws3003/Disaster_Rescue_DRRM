@@ -60,7 +60,7 @@ def test_onejson_payload_contains_real_values_and_millisecond_time():
     ))
     assert payload["version"] == "1.0"
     assert len(payload["id"]) <= 13
-    assert payload["params"]["temperature"]["value"] == 26.125
+    assert payload["params"]["temperature"]["value"] == 26.1
     assert payload["params"]["humidity"]["value"] == 52.5
     assert isinstance(payload["params"]["temperature"]["time"], int)
 

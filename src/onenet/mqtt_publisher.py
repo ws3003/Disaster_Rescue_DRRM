@@ -72,8 +72,14 @@ def build_property_payload(
     message_id: str,
 ) -> str:
     ts = _epoch_ms(captured_at)
+    # The selected OneNET "current temperature" standard property accepts
+    # increments of 0.1 °C.  DS18B20 readings arrive in 0.0625 °C steps, so
+    # publishing their raw value (for example 27.1875) is rejected by OneNET
+    # with code 2254 ("float not conform step").  Keep local readings at their
+    # original precision; only normalise this cloud telemetry representation.
+    temperature_value = round(float(temperature), 1)
     params: dict[str, Any] = {
-        cfg.temperature_identifier: {"value": float(temperature), "time": ts}
+        cfg.temperature_identifier: {"value": temperature_value, "time": ts}
     }
     if humidity is not None and cfg.humidity_identifier:
         params[cfg.humidity_identifier] = {"value": float(humidity), "time": ts}
