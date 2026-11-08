@@ -95,8 +95,8 @@ ON sensor_alerts(status, occurred_at);
 -- ============================================================
 CREATE TABLE IF NOT EXISTS media_evidence (
     media_id       TEXT PRIMARY KEY,            -- M-<YYYYMMDD>-<uuid8>
-    source         TEXT NOT NULL CHECK (source IN ('sensor')),
-    ref_id         TEXT NOT NULL,               -- 归属告警 (sensor_alerts.alert_id)
+    source         TEXT NOT NULL CHECK (source IN ('sensor', 'person')),
+    ref_id         TEXT NOT NULL,               -- 归属告警 (sensor_alerts.alert_id / events.event_id)
     media_type     TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
     local_path     TEXT NOT NULL,
     status         TEXT NOT NULL DEFAULT 'pending'

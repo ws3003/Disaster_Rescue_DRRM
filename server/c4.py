@@ -168,8 +168,8 @@ def _media_validate(business: Any, sid: str) -> None:
         raise HTTPException(400, "media business 必须为对象")
     if business.get("media_id") != sid:
         raise HTTPException(400, "media business.media_id 与 source_record_id 不一致")
-    if business.get("source") != "sensor":
-        raise HTTPException(400, "media source 必须为 sensor")
+    if business.get("source") not in ("sensor", "person"):
+        raise HTTPException(400, "media source 必须为 sensor/person")
     if business.get("media_type") not in ("image", "video"):
         raise HTTPException(400, "media media_type 必须为 image/video")
     st = business.get("status")
@@ -290,7 +290,7 @@ def _write_business_copy(tx, rt: str, sid: str, business: Dict[str, Any], recv_i
                object_key, captured_at, created_at, uploaded_at, local_path)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (sid, business.get("ref_id"), "sensor", business.get("media_type"),
+            (sid, business.get("ref_id"), business.get("source"), business.get("media_type"),
              business.get("status"), business.get("upload_status"),
              business.get("object_key"), business.get("captured_at"),
              recv_iso, business.get("uploaded_at"), ""),

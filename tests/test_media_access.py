@@ -79,7 +79,7 @@ def _make_sensor_alert(db) -> str:
 
 
 def _make_person_event(db) -> str:
-    return db.save_event(type="high_risk_alert", severity="HIGH", person_id=1, payload={"state": "Fall"})
+    return db.save_event(type="person_alert", severity="HIGH", person_id=1, payload={"state": "Fall"})
 
 
 def _make_media(db, alert_id, *, status="success", upload_status="success",
@@ -88,6 +88,15 @@ def _make_media(db, alert_id, *, status="success", upload_status="success",
         source="sensor", ref_id=alert_id, media_type="video", local_path="/tmp/m-1.mp4",
         captured_at="2026-10-24T12:00:00+08:00", status=status,
         upload_status=upload_status, object_key=object_key,
+        uploaded_at="2026-10-24T12:02:00+08:00",
+    )
+
+
+def _make_person_media(db, event_id):
+    return db.save_media_evidence(
+        source="person", ref_id=event_id, media_type="image", local_path="/tmp/person-1.jpg",
+        captured_at="2026-10-24T12:00:00+08:00", status="success",
+        upload_status="success", object_key="evidence/person-1.jpg",
         uploaded_at="2026-10-24T12:02:00+08:00",
     )
 
@@ -125,6 +134,15 @@ class TestAlertMediaList:
         assert r.status_code == 200
         body = r.json()
         assert body["code"] == "OK" and body["data"] == [] and body["meta"]["total"] == 0
+
+    def test_person_alert_returns_linked_image(self, client, db):
+        event_id = _make_person_event(db)
+        media_id = _make_person_media(db, event_id)
+        response = client.get(f"/api/v1/alerts/person:{event_id}/media")
+        assert response.status_code == 200
+        assert response.json()["meta"]["total"] == 1
+        assert response.json()["data"][0]["media_id"] == media_id
+        assert response.json()["data"][0]["media_type"] == "image"
 
     def test_person_alert_missing_404(self, client, db):
         r = client.get("/api/v1/alerts/person:E-19990101-DEAD0001/media")

@@ -77,6 +77,67 @@ class TestSaveGet:
         with pytest.raises(ValueError):
             _save(db, ref_id="E-20261024-FFFFFFFF")
 
+    def test_person_alert_can_own_image_evidence(self, db):
+        event_id = db.save_event(
+            type="person_alert", severity="HIGH", person_id=7,
+            payload={"state": "Help-Waving"},
+        )
+        media_id = db.save_media_evidence(
+            source="person", ref_id=event_id, media_type="image",
+            local_path="/media/person-7.jpg", captured_at=CAPTURED,
+            created_at=CREATED,
+        )
+        records = db.list_media_evidence_by_ref("person", event_id)
+        assert [record["media_id"] for record in records] == [media_id]
+
+
+def test_sensor_only_media_schema_is_migrated_without_losing_rows(tmp_path):
+    """现场旧库升级后，原有传感器媒体和新增人员媒体都必须可用。"""
+    path = tmp_path / "legacy-media.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE media_evidence (
+                media_id TEXT PRIMARY KEY,
+                source TEXT NOT NULL CHECK (source IN ('sensor')),
+                ref_id TEXT NOT NULL,
+                media_type TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
+                local_path TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'processing', 'success', 'failed-awaiting-retry')),
+                capture_result TEXT CHECK (capture_result IN ('ok', 'failed')),
+                upload_status TEXT CHECK (upload_status IN ('pending', 'uploading', 'success', 'failed')),
+                object_key TEXT,
+                captured_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                uploaded_at TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+                last_error TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO media_evidence (
+                media_id, source, ref_id, media_type, local_path, status,
+                captured_at, created_at, retry_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("M-legacy", "sensor", "A-legacy", "image", "/tmp/legacy.jpg",
+             "success", CAPTURED, CREATED, 0),
+        )
+
+    db = Database(db_path=str(path))
+    assert db.get_media_evidence("M-legacy")["source"] == "sensor"
+    event_id = db.save_event(
+        type="person_alert", severity="HIGH", person_id=1, payload={}
+    )
+    media_id = db.save_media_evidence(
+        source="person", ref_id=event_id, media_type="image",
+        local_path="/tmp/person.jpg", captured_at=CAPTURED, created_at=CREATED,
+    )
+    assert db.get_media_evidence(media_id)["source"] == "person"
+
 
 class TestList:
     def test_list_by_ref(self, db):
@@ -90,7 +151,7 @@ class TestList:
 
     def test_list_invalid_source(self, db):
         with pytest.raises(ValueError):
-            db.list_media_evidence_by_ref("person", "x")
+            db.list_media_evidence_by_ref("unsupported", "x")
 
 
 class TestIdempotencyConflict:

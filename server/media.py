@@ -68,7 +68,7 @@ def list_alert_media(
         if source == "person":
             if db.get_event(raw) is None:
                 return _media_fail_json(404, "NOT_FOUND")
-            records = []
+            records = db.list_media_evidence_by_ref("person", raw)
         else:
             if db.get_sensor_alert(raw) is None:
                 return _media_fail_json(404, "NOT_FOUND")

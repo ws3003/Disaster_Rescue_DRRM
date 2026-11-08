@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 # V4.4 E9-03 媒体取证 DAO 常量 (module-level, 供媒体方法引用)
-_MEDIA_SOURCES = frozenset({"sensor"})
+_MEDIA_SOURCES = frozenset({"sensor", "person"})
 _MEDIA_TYPES = frozenset({"image", "video"})
 _MEDIA_STATUS = frozenset({"pending", "processing", "success", "failed-awaiting-retry"})
 _MEDIA_CAPTURE_RESULTS = frozenset({"ok", "failed"})
@@ -194,6 +194,57 @@ class Database:
             conn.executescript(
                 schema_sql
             )
+            self._migrate_media_evidence_sources(conn)
+
+    @staticmethod
+    def _migrate_media_evidence_sources(conn: sqlite3.Connection) -> None:
+        """将旧版仅允许 sensor 的媒体表无损升级为支持 person。
+
+        SQLite 不能直接修改 CHECK 约束。只有检测到旧约束时才重建表，并原样
+        复制已有传感器证据；已升级或新建数据库不做任何写入。
+        """
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='media_evidence'"
+        ).fetchone()
+        table_sql = str(row[0] or "") if row is not None else ""
+        if "'person'" in table_sql:
+            return
+
+        conn.executescript(
+            """
+            ALTER TABLE media_evidence RENAME TO media_evidence_legacy;
+            CREATE TABLE media_evidence (
+                media_id       TEXT PRIMARY KEY,
+                source         TEXT NOT NULL CHECK (source IN ('sensor', 'person')),
+                ref_id         TEXT NOT NULL,
+                media_type     TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
+                local_path     TEXT NOT NULL,
+                status         TEXT NOT NULL DEFAULT 'pending'
+                               CHECK (status IN ('pending', 'processing', 'success', 'failed-awaiting-retry')),
+                capture_result TEXT CHECK (capture_result IN ('ok', 'failed')),
+                upload_status  TEXT CHECK (upload_status IN ('pending', 'uploading', 'success', 'failed')),
+                object_key     TEXT,
+                captured_at    TEXT NOT NULL,
+                created_at     TEXT NOT NULL,
+                uploaded_at    TEXT,
+                retry_count    INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+                last_error     TEXT
+            );
+            INSERT INTO media_evidence (
+                media_id, source, ref_id, media_type, local_path, status,
+                capture_result, upload_status, object_key, captured_at, created_at,
+                uploaded_at, retry_count, last_error
+            )
+            SELECT
+                media_id, source, ref_id, media_type, local_path, status,
+                capture_result, upload_status, object_key, captured_at, created_at,
+                uploaded_at, retry_count, last_error
+            FROM media_evidence_legacy;
+            DROP TABLE media_evidence_legacy;
+            CREATE INDEX IF NOT EXISTS idx_media_ref_status
+            ON media_evidence(ref_id, status);
+            """
+        )
 
     # ================================================================
     # Utility
@@ -1577,10 +1628,11 @@ class Database:
         - 幂等: 相同 media_id 且 source/ref_id/media_type/local_path/captured_at 一致则返回既有 id;
           关键字段冲突则抛 ValueError, 不覆盖。
         - source='sensor' 时校验 sensor_alerts.alert_id 存在。
+        - source='person' 时校验 events.event_id 存在且事件类型为 person_alert。
         """
 
         if source not in _MEDIA_SOURCES:
-            raise ValueError(f"非法 source: {source!r} (仅允许 sensor)")
+            raise ValueError(f"非法 source: {source!r} (仅允许 sensor/person)")
         if media_type not in _MEDIA_TYPES:
             raise ValueError(f"非法 media_type: {media_type!r} (仅允许 image/video)")
         if status not in _MEDIA_STATUS:
@@ -1599,9 +1651,13 @@ class Database:
         if uploaded_at is not None:
             uploaded_at = self._require_tz_iso(uploaded_at)
 
-        # 本期仅允许关联传感器告警: 校验告警存在
+        # 关联实体必须存在，避免产生不可访问的孤儿媒体记录。
         if source == "sensor" and self.get_sensor_alert(ref_id) is None:
             raise ValueError(f"关联告警不存在: {ref_id!r}")
+        if source == "person":
+            event = self.get_event(ref_id)
+            if event is None or event.get("type") != "person_alert":
+                raise ValueError(f"关联人员告警不存在: {ref_id!r}")
 
         media_id = media_id or self._media_id()
 
@@ -1670,7 +1726,7 @@ class Database:
         """按归属告警列出媒体取证记录 (稳定顺序: created_at ASC)。"""
 
         if source not in _MEDIA_SOURCES:
-            raise ValueError(f"非法 source: {source!r} (仅允许 sensor)")
+            raise ValueError(f"非法 source: {source!r} (仅允许 sensor/person)")
 
         with self._connect() as conn:
             rows = conn.execute(

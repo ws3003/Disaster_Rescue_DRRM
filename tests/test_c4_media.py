@@ -161,9 +161,14 @@ def test_media_id_mismatch_400(db):
     with pytest.raises(Exception):
         _ingest_body(db, body)
 
-def test_source_must_be_sensor(db):
+def test_source_must_be_supported(db):
     with pytest.raises(Exception):
-        _ingest_body(db, _mk(source="person"))
+        _ingest_body(db, _mk(source="unsupported"))
+
+
+def test_person_source_is_preserved(db):
+    assert _ingest_body(db, _mk(source="person")) == "synced"
+    assert _row(db, "M1")["source"] == "person"
 
 def test_bad_media_type(db):
     with pytest.raises(Exception):
