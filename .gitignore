@@ -60,3 +60,8 @@ tts_env/
 # TTS generated audio files
 *.mp3
 *.wav
+
+# local test artifacts (do not commit)
+.codex-test-temp/
+.test-tmp/
+test_x4_image.py
