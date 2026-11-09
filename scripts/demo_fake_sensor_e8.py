@@ -3,8 +3,8 @@
 
 这不是传感器驱动，也不会篡改 ``config/edge.yaml``。它只在操作者明确传入
 ``--confirm-live-demo`` 时写入一条 ``demo-fake-temperature`` 模拟读数和
-``sensor_hightemp_demo`` 告警；随后使用实际 Pi 摄像头拍摄一张照片、录制 E8
-配置指定时长的视频，并将两份媒体关联到该告警。C4 worker 会照常把元数据同步
+``sensor_hightemp_demo`` 告警；默认使用实际 Pi 摄像头拍摄一张照片并关联到该
+告警。显式传入 ``--with-video`` 才会额外录制 E8 配置指定时长的视频。C4 worker 会照常把元数据同步
 到 Windows，微信小程序可在该传感器告警详情页查看图片、播放视频。
 
 运行前必须停止 disaster-edge.service，避免两个进程争用同一摄像头。
@@ -136,6 +136,8 @@ def main() -> int:
                         help="确认创建模拟告警，并真实使用摄像头和 OSS。")
     parser.add_argument("--temperature", type=float, default=55.0,
                         help="模拟温度，默认 55.0°C（必须在 -40 到 85 之间）。")
+    parser.add_argument("--with-video", action="store_true",
+                        help="额外录制 E8 视频；默认仅拍摄一张现场图片。")
     parser.add_argument("--edge-config", default="config/edge.yaml")
     parser.add_argument("--storage-config", default="config/storage.yaml")
     parser.add_argument("--db", default=os.environ.get("DRRM_DB", "data/drrm.db"))
@@ -165,10 +167,12 @@ def main() -> int:
             "temperature": args.temperature, "threshold": 50.0,
             "occurred_at": occurred_at, "device_captured_at": occurred_at,
         }
-        video = EvidenceRecorder(
-            db, recorder=build_camera_recorder(e8), uploader=uploader,
-            record_seconds=e8.record_seconds, tmp_dir=str(work_dir),
-        ).handle_event(event)
+        video = {"ok": None, "media_id": ""}
+        if args.with_video:
+            video = EvidenceRecorder(
+                db, recorder=build_camera_recorder(e8), uploader=uploader,
+                record_seconds=e8.record_seconds, tmp_dir=str(work_dir),
+            ).handle_event(event)
         photo = _save_and_upload_photo(
             db, uploader, alert_id=alert_id, e8=e8, work_dir=work_dir,
         )
@@ -184,7 +188,7 @@ def main() -> int:
         print(f"photo_ok={photo.get('ok') is True}")
         print(f"photo_media_id={photo.get('media_id', '')}")
         print("C4 worker will sync alert and media metadata; open this sensor alert in the mini program.")
-        return 0 if video.get("ok") is True and photo.get("ok") is True else 2
+        return 0 if photo.get("ok") is True and (not args.with_video or video.get("ok") is True) else 2
     finally:
         _close_lock_fd(lock_fd)
 
