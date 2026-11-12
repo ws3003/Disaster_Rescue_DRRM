@@ -188,3 +188,11 @@ data/         小样例数据（原始数据集不入库）
 >
 > **分支说明**：`main` 为参赛提交快照（含端侧、服务端与小程序）；历史开发过程保留在
 > `feature/v4.0-*` ~ `feature/v4.5-*` 等分支，不影响复现。
+
+## 11. 许可与使用范围
+
+- 本项目整体以 **GNU Affero General Public License v3.0（AGPL-3.0）** 发布，全文见仓库根目录 `LICENSE`。
+- 说明：检测框架采用 Ultralytics YOLO（AGPL-3.0），本项目未修改其框架源码，权重与业务代码独立；按 AGPL-3.0 要求，使用该框架的衍生作品需以同等许可开放源码，故本仓库整体采用 AGPL-3.0。
+- 使用范围：允许学习、研究、复现与二次开发；若通过网络向第三方提供服务，须按 AGPL-3.0 第 13 条向使用者提供对应源码。
+- 第三方组件各自遵循其原始许可（Ultralytics AGPL-3.0、MediaPipe Apache-2.0、Picamera2 BSD-2-Clause、FastAPI MIT、OpenCV Apache-2.0、SQLite Public Domain），详见作品介绍文档表 7-1。
+- 模型权重 `models/disaster_best.pt` 由本项目成员自主训练，随参赛附件包提供，同样适用上述许可。
