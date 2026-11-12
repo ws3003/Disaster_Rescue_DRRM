@@ -1,0 +1,177 @@
+<wxs module="fmt">
+module.exports.pad = function (n) {
+  var v = n + 1;
+  return v < 10 ? '0' + v : '' + v;
+};
+</wxs>
+
+<view class="app-bg"></view>
+
+<view class="container">
+  <view class="hud-bar">
+    <text class="hud-seg">RECORD//S4-03</text>
+    <text class="hud-seg hud-seg-dim">{{mockMode ? 'MOCK DATA' : 'SERVER RECORD'}}</text>
+  </view>
+
+  <view wx:if="{{offline && !mockMode}}" class="notice notice-warn">
+    当前网络不可用，详情展示的是最近一次成功加载的数据。
+  </view>
+
+  <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
+
+  <view class="masthead">
+    <view class="masthead-art masthead-art-radar"></view>
+    <view class="radar-sweep"></view>
+    <view class="eyebrow">ALERT DETAIL · S4-03</view>
+    <view class="display-title">告警详情</view>
+    <view class="masthead-meta">
+      <text class="muted">{{detailView ? detailView.categoryLabel : '查看告警详情'}}</text>
+
+    </view>
+  </view>
+
+  <view wx:if="{{alertKey}}" class="copy-bar">
+    <text class="copy-key mono">{{alertKey}}</text>
+    <view class="copy-btn icon-label" bindtap="copyAlertKey"><view class="ui-icon icon-copy"></view><text>复制</text></view>
+  </view>
+
+  <view wx:if="{{alertKey}}" class="action-row">
+    <view class="action-btn icon-label {{followed ? 'action-active' : ''}}" bindtap="toggleFollow"><view class="ui-icon icon-star"></view><text>{{followed ? '已关注（仅本机）' : '关注（仅本机）'}}</text></view>
+    <view wx:if="{{nav.inContext}}" class="nav-inline">
+      <text class="nav-btn {{nav.hasPrev ? '' : 'nav-disabled'}}" bindtap="goPrev">上一条</text>
+      <text class="nav-pos">{{nav.position}} / {{nav.total}}</text>
+      <text class="nav-btn {{nav.hasNext ? '' : 'nav-disabled'}}" bindtap="goNext">下一条</text>
+    </view>
+  </view>
+
+  <block wx:if="{{loading && !detailView}}">
+    <view class="sk sk-line" style="width: 62%; height: 40rpx;"></view>
+    <view class="sk sk-line"></view>
+    <view class="sk sk-line"></view>
+    <view class="sk sk-line sk-line-sm"></view>
+  </block>
+
+  <view wx:if="{{error}}" class="notice notice-error">
+    {{error.message}}
+    <view wx:if="{{canRetry}}" class="btn btn-ghost" bindtap="retry">重试</view>
+  </view>
+
+  <block wx:if="{{detailView}}">
+    <!-- 标题区 -->
+    <view class="detail-head">
+      <view class="detail-cross"></view>
+      <view class="detail-headline">{{detailView.headline}}</view>
+      <view class="detail-tags">
+        <text class="tag {{detailView.categoryClass}}">{{detailView.categoryLabel}}</text>
+        <text
+          wx:if="{{detailView.severityText !== '—'}}"
+          class="sev-badge {{detailView.severityClass}}"
+        >严重程度 {{detailView.severityText}}</text>
+        <text wx:if="{{detailView.statusText}}" class="tag {{detailView.statusClass}}">{{detailView.statusText}}</text>
+      </view>
+      <view class="detail-time">
+        {{detailView.timeLabel}} {{detailView.timeText}}
+        <text wx:if="{{detailView.relativeText}}" class="relative">{{detailView.relativeText}}</text>
+      </view>
+    </view>
+
+    <scene-media
+      context-key="{{alertKey}}"
+      mock-mode="{{mockMode}}"
+      media-supported="{{mediaSupported}}"
+      media-items="{{mediaItems}}"
+      media-loading="{{mediaLoading}}"
+      media-error="{{mediaError}}"
+      remote-video-url="{{remoteVideoUrl}}"
+      bind:requestaccess="onRequestMediaAccess"
+    />
+
+    <!-- 触发快照对比（仅传感器） -->
+    <block wx:if="{{detailView.metrics.length}}">
+      <view class="group-title">TRIGGER SNAPSHOT · 触发快照</view>
+      <view
+        class="metric"
+        wx:for="{{detailView.metrics}}"
+        wx:for-item="metric"
+        wx:key="label"
+      >
+        <view class="metric-head">
+          <text class="metric-label">{{metric.label}}</text>
+          <text class="metric-value {{metric.over ? 'metric-over-text' : ''}}">{{metric.valueText}}</text>
+        </view>
+        <view class="metric-track">
+          <view
+            class="metric-fill {{metric.over ? 'metric-over' : ''}}"
+            style="width: {{metric.fillPct}}%;"
+          ></view>
+          <view
+            wx:if="{{metric.thresholdPct !== null}}"
+            class="metric-threshold"
+            style="left: {{metric.thresholdPct}}%;"
+          ></view>
+        </view>
+        <view wx:if="{{metric.over !== null}}" class="metric-note {{metric.over ? 'metric-over-text' : ''}}">
+          {{metric.over ? '高于阈值' : '低于阈值'}} · 阈值 {{metric.thresholdText}}
+        </view>
+      </view>
+    </block>
+
+    <!-- 字段分组 -->
+    <block
+      wx:for="{{detailView.fieldGroups}}"
+      wx:for-item="group"
+      wx:for-index="gidx"
+      wx:key="title"
+    >
+      <view class="group-title"><text class="group-no">{{fmt.pad(gidx)}}</text>{{group.title}}</view>
+      <view
+        class="def-row"
+        wx:for="{{group.fields}}"
+        wx:for-item="field"
+        wx:key="label"
+      >
+        <text class="def-label">{{field.label}}</text>
+        <text class="def-value {{field.mono ? 'mono' : ''}}">{{field.value}}</text>
+      </view>
+    </block>
+
+    <!-- 关联数据 S4-04 -->
+    <view class="group-title">RELATED · 关联数据</view>
+    <view class="note">仅显示与当前告警关联的环境读数</view>
+
+    <view wx:if="{{relatedLoading}}" class="state-block">
+      <text class="spinner"></text>加载关联数据
+    </view>
+
+    <view wx:if="{{relatedError}}" class="notice notice-error">
+      {{relatedError.message}}
+      <view class="btn btn-ghost" bindtap="retryRelated">重试</view>
+    </view>
+
+    <block wx:if="{{relatedView}}">
+      <view wx:if="{{!relatedView.hasReadings}}" class="state-block">
+        {{relatedView.readingsEmptyText}}
+      </view>
+
+      <view
+        wx:for="{{relatedView.readings}}"
+        wx:for-item="reading"
+        wx:key="readingId"
+        class="reading-card"
+      >
+        <view
+          class="def-row"
+          wx:for="{{reading.fields}}"
+          wx:for-item="field"
+          wx:key="label"
+        >
+          <text class="def-label">{{field.label}}</text>
+          <text class="def-value {{field.mono ? 'mono' : ''}}">{{field.value}}</text>
+        </view>
+      </view>
+
+      <view class="group-title">MEDIA · 媒体</view>
+      <view class="note">{{relatedView.mediaText}}</view>
+    </block>
+  </block>
+</view>

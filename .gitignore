@@ -65,3 +65,6 @@ tts_env/
 .codex-test-temp/
 .test-tmp/
 test_x4_image.py
+
+# WeChat devtools private config (per-machine)
+miniprogram/project.private.config.json

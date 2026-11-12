@@ -1,0 +1,9 @@
+{
+  "desc": "V4.4 A-line miniprogram sitemap",
+  "rules": [
+    {
+      "action": "allow",
+      "page": "*"
+    }
+  ]
+}

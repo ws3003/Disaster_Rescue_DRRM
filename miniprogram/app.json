@@ -1,0 +1,16 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/alerts/index",
+    "pages/detail/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "灾害现场智能监测",
+    "navigationBarBackgroundColor": "#EEF2F6",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#EEF2F6",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

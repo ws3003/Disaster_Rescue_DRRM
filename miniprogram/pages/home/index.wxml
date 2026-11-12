@@ -1,0 +1,140 @@
+<import src="../../templates/alert-item.wxml" />
+<wxs module="fmt">
+module.exports.pad = function (n) {
+  var v = n + 1;
+  return v < 10 ? '0' + v : '' + v;
+};
+</wxs>
+
+<view class="app-bg"></view>
+
+<view class="container">
+  <view class="hud-bar">
+    <text class="hud-seg">SYS//V4.4</text>
+    <text class="hud-seg hud-seg-dim">{{mockMode ? 'MOCK DATA' : 'LIVE LINK'}}</text>
+  </view>
+
+  <view wx:if="{{offline && !mockMode}}" class="notice notice-warn">
+    当前网络不可用，页面展示的是最近一次成功加载的数据。
+  </view>
+
+  <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
+
+  <!-- 刊头 -->
+  <view class="masthead">
+    <view class="masthead-art"></view>
+    <view class="masthead-scan"></view>
+    <view class="eyebrow">DISASTER RESPONSE · V4.4</view>
+    <view class="display-title">现场态势</view>
+    <view class="masthead-meta">
+      <view class="meta-left">
+        <view wx:if="{{!mockMode}}" class="live-dot"></view>
+        <text class="muted">{{updatedAt ? '更新于 ' + updatedAt : '正在加载…'}}</text>
+      </view>
+      <view class="text-link icon-label" bindtap="refreshAll"><view class="ui-icon icon-refresh"></view><text>刷新</text></view>
+    </view>
+  </view>
+
+  <!-- 大数字：两组告警计数（S4-02 meta.total） -->
+  <view class="stat-pair">
+    <view class="stat-col stat-col-alert">
+      <view class="stat-num">{{summary.personText}}</view>
+      <view class="stat-cap"><view class="ui-icon icon-people"></view>人员告警</view>
+    </view>
+    <view class="stat-col stat-col-sensor">
+      <view class="stat-num">{{summary.sensorText}}</view>
+      <view class="stat-cap"><view class="ui-icon icon-sensor"></view>传感器告警</view>
+    </view>
+  </view>
+  <view class="note">按类别统计告警总数</view>
+
+  <view class="block focus-block">
+    <view class="block-head">
+      <view class="block-head-left"><view class="ui-icon icon-filter"></view><text class="block-title">重点告警</text></view>
+      <text class="text-link" bindtap="goAlerts">全部告警</text>
+    </view>
+    <view class="note">已加载的分组最近告警中，优先展示严重程度较高的两条</view>
+    <view wx:if="{{person.error || sensor.error}}" class="notice notice-error">
+      部分告警获取失败，当前展示可能不完整。
+      <view class="btn btn-ghost" bindtap="retryRecent">重试</view>
+    </view>
+    <view wx:if="{{loading && !focusAlerts.length}}" class="sk sk-block"></view>
+    <view wx:if="{{!loading && !focusAlerts.length && !person.error && !sensor.error}}" class="state-block">暂无告警</view>
+    <block wx:for="{{focusAlerts}}" wx:for-item="alert" wx:key="alertKey">
+      <template is="alertItem" data="{{item: alert}}" />
+    </block>
+    <block wx:if="{{expandedAlerts}}">
+      <view class="additional-heading">其余最近告警</view>
+      <block wx:for="{{remainingAlerts}}" wx:for-item="alert" wx:key="alertKey">
+        <template is="alertItem" data="{{item: alert}}" />
+      </block>
+    </block>
+    <view wx:if="{{remainingAlerts.length}}" class="expand-alerts" bindtap="toggleAlerts" aria-role="button" aria-expanded="{{expandedAlerts}}">
+      {{expandedAlerts ? '收起其余告警' : '展开其余 ' + remainingAlerts.length + ' 条最近告警'}}
+    </view>
+  </view>
+
+  <monitor-charts category-chart="{{categoryChart}}" temperature-chart="{{temperatureChart}}" mock-mode="{{mockMode}}" bindcategorytap="onChartCategoryTap" />
+
+  <scene-media
+    context-key="{{sceneAlertKey}}"
+    mock-mode="{{mockMode}}"
+    media-supported="{{sceneMediaSupported}}"
+    media-items="{{sceneMediaItems}}"
+    media-loading="{{sceneMediaLoading}}"
+    media-error="{{sceneMediaError}}"
+    bind:requestaccess="onRequestMediaAccess"
+  />
+
+  <!-- 系统运行状态 S4-01 -->
+  <view class="block system-block">
+    <view class="block-head">
+      <view class="block-head-left">
+        <view class="ui-icon icon-system"></view>
+        <text class="block-title">系统运行状态</text>
+      </view>
+      <text class="block-tag">S4-01</text>
+    </view>
+
+    <view class="system-summary" bindtap="toggleSystemDetails" aria-role="button" aria-expanded="{{showSystemDetails}}">
+      <text>{{status.error ? '状态获取失败' : status.loading ? '正在查询状态' : status.view ? (status.view.deviceStatus === 'unknown' ? '设备状态未知' : status.view.deviceStatusText) : '暂无状态数据'}}</text>
+      <view class="system-toggle {{showSystemDetails ? 'system-toggle-open' : ''}}"><text>{{showSystemDetails ? '收起' : '展开详情'}}</text><view class="ui-icon icon-chevron"></view></view>
+    </view>
+    <block wx:if="{{showSystemDetails}}">
+    <block wx:if="{{status.loading && !status.view}}">
+      <view class="sk sk-line"></view>
+      <view class="sk sk-line sk-line-sm"></view>
+    </block>
+
+    <view wx:if="{{status.error}}" class="notice notice-error">
+      {{status.error.message}}
+      <view class="btn btn-ghost" bindtap="retryStatus">重试</view>
+    </view>
+
+    <block wx:if="{{status.view}}">
+      <view class="row">
+        <text class="row-label">设备状态</text>
+        <text class="row-value {{status.view.deviceStatusClass}}">{{status.view.deviceStatusText}}</text>
+      </view>
+      <view class="row">
+        <text class="row-label">模块状态</text>
+        <text class="row-value">{{status.view.modulesEmpty ? '暂无数据（modules 为空对象）' : ''}}</text>
+      </view>
+      <view class="row" wx:for="{{status.view.modules}}" wx:for-item="module" wx:key="name">
+        <text class="row-label">{{module.name}}</text>
+        <text class="row-value mono">{{module.value}}</text>
+      </view>
+      <view class="note">{{status.view.modulesNote}}</view>
+    </block>
+    </block>
+  </view>
+
+  <!-- 现场链路线稿 -->
+
+
+  <!-- 通栏入口 -->
+  <view class="cta" bindtap="goAlerts">
+    <text>进入告警列表</text>
+    <text class="cta-arrow">→</text>
+  </view>
+</view>

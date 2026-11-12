@@ -1,0 +1,173 @@
+<import src="../../templates/alert-item.wxml" />
+<wxs module="fmt">
+module.exports.pad = function (n) {
+  var v = n + 1;
+  return v < 10 ? '0' + v : '' + v;
+};
+</wxs>
+
+<view class="app-bg"></view>
+
+<view class="container">
+  <view class="hud-bar">
+    <text class="hud-seg">FEED//S4-02</text>
+    <text class="hud-seg hud-seg-dim">{{mockMode ? 'MOCK DATA' : 'SERVER STREAM'}}</text>
+  </view>
+
+  <view wx:if="{{offline && !mockMode}}" class="notice notice-warn">
+    当前网络不可用，列表展示的是最近一次成功加载的数据。
+  </view>
+
+  <view wx:if="{{mockMode}}" class="notice notice-mock">{{mockNotice}}</view>
+
+  <view class="masthead">
+    <view class="masthead-art masthead-art-terrain"></view>
+    <view class="masthead-scan"></view>
+    <view class="eyebrow">ALERT FEED</view>
+    <view class="display-title">告警</view>
+    <view class="masthead-meta">
+      <text class="muted">浏览告警，查看详情</text>
+      <text class="text-link" bindtap="onResetFilters">重置筛选</text>
+    </view>
+  </view>
+
+  <view class="text-tabs">
+    <view
+      wx:for="{{tabs}}"
+      wx:for-item="tab"
+      wx:key="value"
+      class="text-tab {{tab.value == category ? 'text-tab-active' : ''}}"
+      data-value="{{tab.value}}"
+      bindtap="onTabTap"
+    >{{tab.label}}</view>
+  </view>
+
+  <view class="search-line">
+    <view class="ui-icon icon-search"></view>
+    <input
+      class="search-input"
+      placeholder="筛选已加载告警（key / 标题 / 设备）"
+      placeholder-class="search-placeholder"
+      value="{{keyword}}"
+      confirm-type="search"
+      bindinput="onKeywordInput"
+      bindconfirm="onKeywordConfirm"
+    />
+    <text wx:if="{{keyword}}" class="search-clear" bindtap="onClearKeyword">清除</text>
+  </view>
+
+  <scroll-view wx:if="{{showAdvancedFilters && keywords.length}}" class="chip-scroll" scroll-x="true">
+    <view class="chip-line">
+      <text class="filter-label">历史</text>
+      <view
+        wx:for="{{keywords}}"
+        wx:for-item="word"
+        wx:key="*this"
+        class="hchip"
+        data-value="{{word}}"
+        bindtap="onKeywordTap"
+      >{{word}}</view>
+      <text class="search-clear" bindtap="onClearHistory">清除</text>
+    </view>
+  </scroll-view>
+
+  <view class="filter-toolbar">
+    <view class="filter-trigger" bindtap="toggleAdvancedFilters" aria-role="button" aria-expanded="{{showAdvancedFilters}}">
+      <view class="ui-icon icon-filter"></view><text>{{showAdvancedFilters ? '收起筛选' : '筛选条件'}}</text><view wx:if="{{filtering}}" class="filter-indicator"></view>
+    </view>
+    <text class="muted">仅筛选已加载告警</text>
+  </view>
+  <block wx:if="{{showAdvancedFilters}}">
+  <scroll-view class="chip-scroll" scroll-x="true">
+    <view class="chip-line">
+      <text class="filter-label">严重</text>
+      <view
+        wx:for="{{severityOptions}}"
+        wx:for-item="option"
+        wx:key="value"
+        class="fchip {{option.value == severityFilter ? 'fchip-active' : ''}}"
+        data-value="{{option.value}}"
+        bindtap="onSeverityTap"
+      >{{option.label}}</view>
+
+      <text class="filter-label">关注</text>
+      <view
+        class="fchip {{followedOnly ? 'fchip-active' : ''}}"
+        bindtap="onToggleFollowFilter"
+      >仅看本地关注</view>
+    </view>
+  </scroll-view>
+
+  <scroll-view wx:if="{{showStatusFilter}}" class="chip-scroll" scroll-x="true">
+    <view class="chip-line">
+      <text class="filter-label">状态</text>
+      <view
+        wx:for="{{statusOptions}}"
+        wx:for-item="option"
+        wx:key="value"
+        class="fchip {{option.value == statusFilter ? 'fchip-active' : ''}}"
+        data-value="{{option.value}}"
+        bindtap="onStatusTap"
+      >{{option.label}}</view>
+    </view>
+  </scroll-view>
+
+  </block>
+  <view class="search-hint">
+    <block wx:if="{{filtering}}">
+      本地筛选已加载 {{loadedCount}} 条，命中 {{filteredCount}} 条（非服务端搜索）
+    </block>
+    <block wx:else>
+      向上滑动加载更多告警
+    </block>
+  </view>
+
+  <view wx:if="{{loadedCount}}" class="ledger">
+    <view class="ledger-item"><text class="ledger-num">{{loadedCount}}</text>已加载</view>
+    <view class="ledger-item ledger-high"><text class="ledger-num">{{highCount}}</text>高严重</view>
+    <view class="ledger-item"><text class="ledger-num">{{total}}</text>服务端总数</view>
+  </view>
+
+  <view wx:if="{{error}}" class="notice notice-error">
+    {{error.message}}
+    <view class="btn btn-ghost" bindtap="retry">重试</view>
+  </view>
+
+  <block wx:if="{{loading && !views.length && !initialized}}">
+    <view class="sk sk-block"></view>
+    <view class="sk sk-block"></view>
+    <view class="sk sk-block"></view>
+  </block>
+
+  <view wx:if="{{initialized && isEmpty}}" class="state-block">
+    <view class="empty-art"></view>
+    当前分类暂无告警数据
+  </view>
+
+  <view wx:if="{{filtering && filterEmpty}}" class="state-block">
+    <view class="empty-art"></view>
+    没有匹配的告警。本地筛选只作用于已加载的 {{loadedCount}} 条数据
+  </view>
+
+  <view wx:if="{{views.length}}">
+    <block
+      wx:for="{{views}}"
+      wx:for-item="alert"
+      wx:for-index="idx"
+      wx:key="alertKey"
+    >
+      <view wx:if="{{alert.categoryHeader}}" class="category-sep">{{alert.categoryHeader}}</view>
+      <view wx:if="{{alert.dateHeader}}" class="date-sep">{{alert.dateHeader}}</view>
+      <template is="alertItem" data="{{item: alert, index: fmt.pad(idx)}}" />
+    </block>
+  </view>
+
+  <view wx:if="{{loading}}" class="footer-state">
+    <text class="spinner"></text>加载中
+  </view>
+  <view wx:elif="{{initialized && error && !views.length}}" class="footer-state">加载失败，请重试</view>
+  <view wx:elif="{{views.length && hasMore}}" class="footer-state">上拉加载更多</view>
+  <view wx:elif="{{views.length && !hasMore}}" class="footer-state">已加载全部</view>
+</view>
+
+<view wx:if="{{showBackTop}}" class="fab" bindtap="backToTop">↑</view>

@@ -1,0 +1,4 @@
+/* 首页样式复用 app.wxss 的通用组件，这里只放首页专属微调。 */
+.stat-grid {
+  margin-top: 8rpx;
+}

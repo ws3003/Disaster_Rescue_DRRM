@@ -1,0 +1,48 @@
+<view class="charts-section">
+  <view class="section-heading">
+    <view class="heading-icon"><view></view><view></view><view></view></view>
+    <text class="section-title">数据图表</text>
+    <text class="source-badge">{{mockMode ? 'Mock 演示' : '接口数据'}}</text>
+  </view>
+
+  <view class="chart-card">
+    <view class="card-top"><text class="chart-title">告警分类</text><text class="chart-unit">单位：条</text></view>
+    <view class="chart-caption">按类别统计全部告警，含已恢复记录</view>
+    <view wx:if="{{categoryChart.hasValues}}" class="bar-chart" aria-role="img" aria-label="人员与传感器告警总数对比">
+      <view class="bar-axis"><text wx:for="{{categoryChart.ticks}}" wx:key="*this">{{item}}</text></view>
+      <view class="bar-plot">
+        <view class="bar-grid bar-grid-top"></view><view class="bar-grid bar-grid-middle"></view><view class="bar-grid bar-grid-bottom"></view>
+        <view class="bar-columns">
+          <view class="bar-slot" wx:for="{{categoryChart.bars}}" wx:key="category">
+            <view class="bar-column bar-{{item.color}} {{item.missing ? 'bar-missing' : ''}}" style="height: {{item.heightPct}}%;">
+              <text class="bar-value">{{item.valueText}}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+    <view wx:else class="chart-empty">{{categoryChart.loading ? '正在加载分类统计…' : '分类统计暂不可用，请重试最近告警。'}}</view>
+    <view class="bar-labels" wx:if="{{categoryChart.hasValues}}">
+      <view wx:for="{{categoryChart.bars}}" wx:key="category" class="category-link" data-category="{{item.category}}" bindtap="openCategory" aria-role="button" aria-label="查看{{item.label}}列表，共{{item.valueText}}条">
+        <view class="legend-dot dot-{{item.color}}"></view><text>{{item.label}}</text><text class="link-arrow">›</text>
+      </view>
+    </view>
+    <view wx:if="{{categoryChart.partial && categoryChart.hasValues}}" class="chart-footnote">部分统计未取得，以“—”表示。</view>
+    <view wx:if="{{categoryChart.loading && categoryChart.hasValues}}" class="chart-footnote">正在刷新，当前保留上次成功取得的统计。</view>
+  </view>
+
+  <view class="chart-card trend-card">
+    <view class="card-top"><text class="chart-title">告警触发温度</text><text class="chart-unit">最近 {{temperatureChart.sampleCount || 0}} 条</text></view>
+    <view class="chart-caption">传感器告警快照 · 非连续监测曲线</view>
+    <canvas wx:if="{{temperatureChart.hasValues && !canvasUnavailable}}" type="2d" id="temperatureCanvas" class="trend-canvas" aria-role="img" aria-label="最近传感器告警触发温度，详细数值见下方"></canvas>
+    <view wx:if="{{!temperatureChart.hasValues}}" class="chart-empty">{{temperatureChart.message}}</view>
+    <view wx:if="{{canvasUnavailable}}" class="chart-footnote">当前设备暂不能绘图，温度和时间仍列在下方。</view>
+    <view class="sample-list" wx:if="{{temperatureChart.points.length}}">
+      <view class="sample-row {{item.latest ? 'sample-latest' : ''}}" wx:for="{{temperatureChart.points}}" wx:key="key">
+        <view class="sample-index">{{item.ordinal}}</view>
+        <view class="sample-body"><view class="sample-value">{{item.valueText}}<text wx:if="{{item.latest}}" class="latest-chip">最新</text></view><view class="sample-time">{{item.timeText}}</view></view>
+      </view>
+    </view>
+    <view wx:if="{{temperatureChart.hasValues}}" class="chart-footnote">{{temperatureChart.message}}</view>
+  </view>
+</view>

@@ -1,4 +1,4 @@
-# Disaster_Rescue_DRRM V4.3
+# Disaster_Rescue_DRRM V4.4
 
 灾害场景智能救援排序系统（Disaster Rescue Dynamic Risk Ranking Model, DRRM）
 
@@ -166,3 +166,25 @@ DingTalk 报警 + SQLite 落库
 - 当前定位**不是 GPS 系统**（坐标/地址为 mock 或占位）。
 - 当前按钮**不是实体硬件接入**（Demo 用模拟按钮）。
 - 真机 ASR/TTS、map/weather 等在线能力依赖对应 API key 与网络。
+
+## 10. 仓库结构
+
+```
+src/          端侧感知与业务（检测、姿态、状态识别、DRRM 风险评分与救援排序）
+server/       Gateway 与推理服务（FastAPI、VLM/LLM、Agent、告警下发、OSS）
+miniprogram/  微信小程序（态势展示与告警查看）
+config/       引脚与阈值配置、环境变量模板
+docs/         接口、部署与验收记录
+deploy/       systemd 部署单元
+scripts/      联调与演示脚本
+tools/        验收与测试工具
+schemas/      出入参契约
+tests/        单元与联调测试
+data/         小样例数据（原始数据集不入库）
+```
+
+> **模型权重**：`models/disaster_best.pt` 因 `.gitignore` 排除 `*.pt` 与 `models/`，不在仓库内，
+> 随参赛 ZIP 的 `models/` 目录一同提交。
+>
+> **分支说明**：`main` 为参赛提交快照（含端侧、服务端与小程序）；历史开发过程保留在
+> `feature/v4.0-*` ~ `feature/v4.5-*` 等分支，不影响复现。

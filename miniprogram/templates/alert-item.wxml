@@ -1,0 +1,26 @@
+<template name="alertItem">
+  <view
+    class="entry {{item.latestLabel ? 'entry-latest' : ''}}"
+    hover-class="entry-hover"
+    bindtap="onItemTap"
+    data-key="{{item.alertKey}}"
+  >
+    <view class="ui-icon entry-category {{item.category === 'person' ? 'icon-people' : 'icon-sensor'}}"></view>
+
+    <view class="entry-body">
+      <view wx:if="{{item.latestLabel}}" class="latest-badge">{{item.latestLabel}}</view>
+      <view class="entry-title">{{item.title}}</view>
+      <view class="entry-meta">
+        <text class="tag {{item.categoryClass}}">{{item.categoryLabel}}</text>
+        <text
+          wx:if="{{item.severityText !== '—'}}"
+          class="sev-badge {{item.severityClass}}"
+        >{{item.severityText}}</text>
+        <text class="entry-time">{{item.timeText}}</text>
+        <text wx:if="{{item.relativeText}}" class="entry-rel">{{item.relativeText}}</text>
+      </view>
+    </view>
+
+    <view class="ui-icon icon-chevron entry-chevron"></view>
+  </view>
+</template>

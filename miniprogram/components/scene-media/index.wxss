@@ -1,0 +1,28 @@
+.scene-media { margin: 32rpx 0; padding: 28rpx 0; border-top: 2rpx solid #b9cbd8; border-bottom: 1rpx solid #c3ccd8; color: #142336; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+.section-head, .slot-heading { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; flex-wrap: wrap; }
+.section-title { font-size: 38rpx; font-weight: 700; }
+.source-tag { font-size: 30rpx; color: #43536a; }
+.media-notice, .local-label { margin-top: 16rpx; font-size: 30rpx; line-height: 1.7; color: #43536a; }
+.media-slot { margin-top: 28rpx; }
+.slot-heading { font-size: 34rpx; font-weight: 600; margin-bottom: 16rpx; }
+.media-empty { min-height: 280rpx; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 20rpx; background: #e8eff5; border: 1rpx dashed #9fb6ca; font-size: 32rpx; color: #43536a; box-sizing: border-box; }
+.media-image, .media-video { width: 100%; height: 340rpx; display: block; background: #e8eff5; }
+.camera-icon { position: relative; width: 72rpx; height: 48rpx; border: 3rpx solid #0e7490; border-radius: 5rpx; display: flex; align-items: center; justify-content: center; }
+.camera-icon::before { content: ""; position: absolute; width: 30rpx; height: 9rpx; border: 3rpx solid #0e7490; border-bottom: 0; top: -12rpx; }
+.camera-lens { width: 24rpx; height: 24rpx; border: 3rpx solid #0e7490; border-radius: 50%; }
+.video-icon { width: 76rpx; height: 52rpx; border: 3rpx solid #0e7490; display: flex; align-items: center; justify-content: center; border-radius: 5rpx; }
+.play-icon { border-top: 13rpx solid transparent; border-bottom: 13rpx solid transparent; border-left: 20rpx solid #0e7490; margin-left: 5rpx; }
+.pick-button, .clear-button { margin: 0; min-height: 88rpx; padding: 0 20rpx; line-height: 88rpx; font-size: 30rpx; font-weight: 500; color: #07566b; background: #edf5fa; border: 1rpx solid #adc7d9; border-radius: 4rpx; }
+.pick-button::after, .clear-button::after { border: none; }
+.clear-button { margin-top: 16rpx; }
+.pick-button[disabled] { color: #65778b; background: #e4eaf0; }
+.fullscreen-button { margin: 16rpx 0 0; padding: 12rpx 24rpx; min-height: 88rpx; line-height: 64rpx; font-size: 30rpx; font-weight: 500; color: #07566b; background: #e5f1f8; border: 1rpx solid #adc7d9; border-radius: 4rpx; }
+.fullscreen-button::after { border: none; }
+.photo-zoom-button { font-size: 30rpx; font-weight: 500; min-height: 88rpx; line-height: 64rpx; }
+.media-empty.compact { min-height: 150rpx; }
+.media-error { margin-top: 20rpx; padding: 20rpx; color: #9f241d; background: #fff0ed; border-left: 6rpx solid #b42318; font-size: 30rpx; }
+.remote-list { margin-top: 20rpx; border-top: 1rpx solid #c3ccd8; }
+.remote-row { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; padding: 22rpx 0; border-bottom: 1rpx solid #c3ccd8; }
+.remote-copy { min-width: 0; display: flex; flex-direction: column; gap: 8rpx; }
+.remote-type { font-size: 34rpx; font-weight: 700; color: #142336; }
+.remote-meta { font-size: 28rpx; color: #52647a; word-break: break-all; }

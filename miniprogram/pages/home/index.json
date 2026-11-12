@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "系统总览",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark",
+  "usingComponents": {
+    "scene-media": "/components/scene-media/index",
+    "monitor-charts": "/components/monitor-charts/index"
+  }
+}
